@@ -1,0 +1,147 @@
+# Rust parity-port plan
+
+The first Rust milestone preserves the current C implementation's behavior and
+SNES-shaped architecture. Its production-runtime parity gate is now complete;
+modernization remains separate from this compatibility baseline.
+
+## Integration rule
+
+The pinned C build remains the oracle. For each input frame, the differential
+runner advances the C and Rust implementations once and compares the complete
+204,800-byte WRAM/SRAM/VRAM canonical state. Device-specific gates separately
+cover CPU, PPU/DMA-facing behavior, SPC/DSP, framebuffer-related rendering
+paths, and PCM output.
+
+The C and Rust executables are not expected to have identical machine code.
+The parity contract is byte identity of deterministic state and outputs.
+
+## Parallel ownership
+
+The main integrator exclusively owns workspace manifests, crate roots, shared
+state interfaces, module declarations, dispatch tables, and canonical schemas.
+Translation agents own disjoint `.rs` implementation files. They do not edit
+shared manifests or module registries.
+
+The 80k-line gameplay code is one large dependency cycle around `g_ram`, asset
+indices, OAM helpers, and sprite dispatch. Work therefore proceeds in waves:
+
+1. Legacy memory, exact-width types, utilities, assets, and verifier schema.
+2. PPU/DMA, DSP/SPC/audio, replay/runtime, graphics loading/NMI/poly.
+3. Sprite foundations/overlords, tile detection/player OAM/tagalong, HUD/file
+   selection.
+4. Player, ancilla, dungeon, and overworld modules in parallel behind frozen
+   interfaces.
+5. Messaging/attract, ending/miscellaneous logic, and sprite implementations.
+6. SDL host integration and whole-game lockstep validation.
+
+`sprite_main.c` is split at its original ROM-bank boundaries into exclusive
+Rust modules so several agents can translate it without editing the same file.
+A single integrator owns the final dispatch arrays.
+
+## Required gates
+
+Every slice must pass:
+
+1. Focused translation tests.
+2. Snapshot-in/function-call/state-out vectors when an isolated boundary exists.
+3. Full raw-frame lockstep replays after integration.
+
+No gameplay mismatch is accepted as an intentional cleanup during this phase.
+Wrapping arithmetic, signed casts, ordering, and inherited quirks are preserved.
+
+The executable boundary is `oracle/stream_oracle.c`. Each input frame is a
+three-byte little-endian record (`input`, then `run_what`), and the C process
+emits the exact 204,800-byte WRAM/SRAM/VRAM image after that frame.
+`z3-verify::c_oracle` consumes this protocol without loading C into Rust's
+address space. `scripts/test-parity.sh` is the single local gate for the C
+baseline, Rust tests and lints, deterministic frame streaming, and device-level
+instruction checks.
+
+The gate also advances the concrete integrated Rust runtime beside that C
+process for 2,000 frames, including the scripted input transition at frames
+180--183, and compares the complete WRAM/SRAM/VRAM image after every frame.
+`check_integrated_frame` constructs `NativeGameServices` directly, so this is a
+real C-versus-production-Rust lockstep check rather than a verifier-specific
+service shim. The separate two-process oracle check remains useful only as a
+determinism guard for the reference itself.
+
+All 13 reference save states also match the C oracle for 2,000 consecutive
+no-input frames each across the complete WRAM/SRAM/VRAM image. This save matrix
+exercises dungeon and overworld gameplay well beyond the intro path. The final
+shared parity fixes deliberately preserve several C/SNES quirks: signed integer
+promotion during collision snapping, damage processing before player-state
+dispatch, the recoil routine's unusual do/while shift count, recoil scratch
+side effects, and word-granular NMI overworld uploads. The latter begin at the
+embedded `uvram.data` offset (after its 256-byte struct padding) and truncate
+odd byte counts exactly as the C word-copy loop does.
+
+Production VRAM writes made through gameplay callbacks use the same bridge in
+the verifier and SDL host. Before routing a frame or a re-entrant host action,
+`NativeGameServices` snapshots the live PPU VRAM into its scratch view; changed
+word spans are then committed back to the PPU before the next callback can
+observe the device. This closes the former gap where graphics callbacks could
+mutate verifier-only scratch memory without affecting canonical VRAM.
+
+The completed callback work also replaces inherited no-op/default routes with
+concrete production routing across sprite banks, player, ancilla, dungeon,
+overworld, messaging, attract, ending, HUD, and file selection. Queued host
+actions preserve callback order while supporting re-entry for text rendering,
+death handling, main-module routing, song-bank loads, ending actions, and world
+map/Mode 7 transfers. Seam-inventory tests guard these production trait
+implementations so a newly added callback cannot silently fall back to a
+default.
+
+Current device gates additionally compare every CPU and SPC opcode against the
+compiled C implementation across four seeded states each. The native SPC music
+player is compared against C using the real intro sound bank for ten frames,
+including its first music and SFX commands; the comparison covers the mirrored
+APU RAM, stereo PCM samples, and ordered DSP register writes. The Rust ROM
+loader also validates the supplied ROM's mapping, title, region, and reset
+vector in the same parity script. Gameplay-level differential gates currently
+cover a complete polyhedral-rendering frame, 11,318 player-OAM helper result
+bytes (including all 511 animation table entries), ten full `LinkOam_Main`
+control-flow scenarios compared across all 128 KiB of WRAM, and all 256 tile
+behaviors across four state scenarios. File-select SRAM validation is also run
+from an identical mixed valid/corrupt primary-and-backup image and compared
+across the full canonical WRAM/SRAM/VRAM state. Overlord coordinate, activation,
+trap, target, and Armos-coordinator helpers are compared across six full-WRAM
+scenarios, and tagalong following/message/proximity/disable helpers across six
+more. Each gameplay comparison is made against freshly compiled C and is part
+of the same parity script. A representative HUD rebuild is likewise
+compared across the complete canonical state, including every generated HUD
+tile word. The native RNG and arbitrary sound-pan calculations are checked for
+all 256 byte inputs against compiled C state hashes. The overworld map
+decompressor is checked across 256 deterministic mixed-command streams,
+covering short and extended literal, fill, alternating, incrementing, and
+overlapping back-reference commands. The same gate exhaustively checks all
+65,536 inputs to the overworld map16-to-VRAM address transform.
+All 128 small/big overworld camera-boundary configurations are compared byte
+for byte across their WRAM output block as well.
+Pit damage is checked for every health byte in both indoor/outdoor modes, and
+the bunny-reset state mutation is checked with the dash-turn feature disabled
+and enabled.
+
+## Python and assets
+
+Python's role is build-time only: it remains the pinned asset compiler that
+produces `zelda3_assets.dat`. Both runtimes load that same compiled bundle, and
+Rust validates every index, size, alignment, and payload byte. Neither the Rust
+game runtime nor the native executable embeds or invokes Python. Replacing the
+authoring pipeline is a later migration, independent of the completed runtime
+parity gate.
+
+## Native Rust executable
+
+The SDL2 host is the `z3` binary in `z3-native`. It uses the system SDL2 library
+and accepts the same default ROM name as the C host, plus explicit paths for
+repeatable validation:
+
+```sh
+cargo run --release -p z3-native --bin z3 -- \
+  --config config/parity.ini \
+  "/path/to/Legend of Zelda, The - A Link to the Past (USA).sfc"
+```
+
+`--frames N` exits after exactly N emulated frames and is intended for automated
+headless smoke tests. For example, set `SDL_VIDEODRIVER=dummy` and
+`SDL_AUDIODRIVER=dummy` while using the software-renderer parity configuration.

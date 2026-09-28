@@ -1,12 +1,14 @@
 /.vs/
 /packages/
 /.vscode/
+/.venv/
 .DS_Store
 *.dSYM
 /*.vcxproj.user
 *.aps
 /obj/
 /bin/
+/build/
 /assets/overworld/*.yaml
 /assets/dungeon/*.yaml
 /assets/img/
@@ -24,6 +26,7 @@ __pycache__
 /snes/*.o
 /msu/
 /tmp/
+/target/
 /zelda3_assets.dat
 /SDL2.dll
 /zelda3.*.ini

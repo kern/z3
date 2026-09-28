@@ -1,0 +1,19 @@
+[package]
+name = "z3-native"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+z3-core = { path = "../z3-core" }
+z3-game = { path = "../z3-game" }
+z3-sdl = { path = "../z3-sdl" }
+z3-snes = { path = "../z3-snes" }
+
+[[bin]]
+name = "z3"
+path = "src/bin/z3.rs"
+
+[lints]
+workspace = true

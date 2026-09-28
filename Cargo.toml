@@ -1,0 +1,19 @@
+[workspace]
+members = [
+  "crates/z3-core",
+  "crates/z3-game",
+  "crates/z3-opus",
+  "crates/z3-sdl",
+  "crates/z3-native",
+  "crates/z3-snes",
+    "crates/z3-verify",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.94"
+
+[workspace.lints.rust]
+unsafe_code = "deny"

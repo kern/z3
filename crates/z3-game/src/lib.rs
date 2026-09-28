@@ -1,0 +1,35 @@
+//! Native Zelda runtime translated from `src/`.
+
+pub mod ancilla;
+pub mod assets;
+pub mod attract;
+pub mod audio;
+pub mod dungeon;
+pub mod ending;
+pub mod host;
+pub mod hud;
+pub mod integration;
+pub mod load_gfx;
+pub mod messaging;
+pub mod misc;
+mod native_gameplay_services;
+pub mod native_messaging_services;
+mod native_services;
+pub mod nmi;
+pub mod oam;
+pub mod overlord;
+pub mod overworld;
+pub mod player;
+pub mod player_oam;
+pub mod poly;
+pub mod ram;
+pub mod runtime;
+pub mod select_file;
+pub mod spc_player;
+pub mod sprite;
+pub mod sprite_main_bank0;
+pub mod sprite_main_bank1;
+pub mod sprite_main_bank2a;
+pub mod sprite_main_bank2b;
+pub mod tagalong;
+pub mod tile_detect;
