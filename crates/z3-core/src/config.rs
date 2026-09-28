@@ -51,6 +51,7 @@ pub enum OutputMethod {
     SdlSoftware,
     OpenGl,
     OpenGlEs,
+    Wgpu,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -716,6 +717,8 @@ impl ConfigState {
                     OutputMethod::OpenGl
                 } else if value.eq_ignore_ascii_case("OpenGL ES") {
                     OutputMethod::OpenGlEs
+                } else if value.eq_ignore_ascii_case("WGPU") {
+                    OutputMethod::Wgpu
                 } else { OutputMethod::Sdl };
                 true
             },
@@ -1103,6 +1106,23 @@ mod tests {
             state.config.features0,
             FEATURE_EXTEND_SCREEN_64 | FEATURE_WIDESCREEN_VISUAL_FIXES | FEATURE_SWITCH_LR
         );
+    }
+
+    #[test]
+    fn parser_accepts_explicit_wgpu_output_method() {
+        let mut state = ConfigState::default();
+        let mut resolver = |_: &str| None;
+        let mut loader = |_: &Path| -> io::Result<String> {
+            Err(io::Error::new(io::ErrorKind::NotFound, "test"))
+        };
+        let warnings = state.parse_text(
+            Path::new("zelda3.ini"),
+            "[Graphics]\nOutputMethod=WGPU\n",
+            &mut resolver,
+            &mut loader,
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(state.config.output_method, OutputMethod::Wgpu);
     }
 
     #[test]

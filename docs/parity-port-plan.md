@@ -130,6 +130,29 @@ game runtime nor the native executable embeds or invokes Python. Replacing the
 authoring pipeline is a later migration, independent of the completed runtime
 parity gate.
 
+## Enhanced C-port features
+
+The Rust host carries forward the C port's optional features without changing
+the base-game parity contract. The differential feature matrix configures both
+runtimes with every gameplay feature bit individually, all supported extended
+aspect ratios (including 240-line `extend_y` variants), the new renderer, and
+the no-sprite-limit renderer. It compares the complete canonical state and the
+rendered ARGB framebuffer after every scenario.
+
+The native host also supports custom ZSPR Link graphics, autosave, MSU/Deluxe
+music in PCM or OPUZ form (including resume state), the performance display,
+and high-resolution Mode 7. A saved-game oracle case enters the real world-map
+flow and compares the 4x Mode 7 framebuffer against C rather than relying on a
+synthetic rendering-only fixture.
+
+GPU presentation uses `wgpu`; the legacy `OpenGL` and `OpenGL ES` configuration
+values remain aliases so existing configuration files continue to work. New
+configurations may use `OutputMethod = WGPU` directly. Custom shaders are WGSL,
+and `.wgslp` presets retain the C renderer's multi-pass scaling/filtering,
+parameters, PNG LUTs, mipmaps, frame/pass history, frame counters, and
+float/sRGB target controls. The bundled `shaders/crt.wgsl` and preset are
+source examples, not ROM-derived assets.
+
 ## Native Rust executable
 
 The SDL2 host is the `z3` binary in `z3-native`. It uses the system SDL2 library

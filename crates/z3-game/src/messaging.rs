@@ -437,6 +437,7 @@ pub struct MessagingAssets<'a> {
     pub dungeon_map_info: &'a [u8],
 }
 pub trait MessagingRuntime {
+    fn enable_force_blank(&mut self, _ram: &mut Ram<'_>) {}
     fn reset_hud_palettes_4_and_5(&mut self, _ram: &mut Ram<'_>) {}
     fn decompress_story_gfx(&mut self, _ram: &mut Ram<'_>) {}
     fn palette_filter_history(&mut self, _ram: &mut Ram<'_>) {}
@@ -1893,6 +1894,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             return;
         }
         self.ram.write_u8(MAPBAK_HDMAEN, self.ram.read_u8(HDMAEN));
+        self.runtime.enable_force_blank(self.ram);
         self.ram.write_u8(MOSAIC, 3);
         self.ram.write_u8(OW_MAP_STATE, 1);
         self.ram.write_u16(MAPBAK_TM, self.ram.read_u16(TM_COPY));
@@ -1906,6 +1908,16 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         }
         for address in [BG1_HOFS2, 0xe2, 0xe4, BG1_VOFS2, BG2_VOFS2, 0xea] {
             self.ram.write_u16(address, 0)
+        }
+        self.ram.write_u16(MAPBAK_CGWSEL, self.ram.read_u16(0x99));
+        self.ram.write_u16(0x100, 0x1fc);
+        if self.ram.read_u8(0x8a) < 0x80 {
+            self.ram.write_u16(0xc108, self.ram.read_u16(0x20));
+            self.ram.write_u16(0xc10a, self.ram.read_u16(0x22));
+        }
+        if self.ram.read_u8(0xf3c5) < 2 {
+            self.ram.write_u8(0x99, 0x80);
+            self.ram.write_u8(0x9a, 0x61);
         }
         self.ram.write_u8(SOUND2, 16);
         self.ram.write_u8(SOUND1 - 1, 5);
@@ -1921,7 +1933,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         }
     }
     pub fn did_press_button_for_map(&self) -> bool {
-        if self.ram.read_u8(0x202) != 0 {
+        if self.ram.read_u8(0x656) != 0 {
             self.ram.read_u8(0xf4) & 0x20 != 0
         } else {
             self.ram.read_u8(0xf6) & 0x40 != 0
@@ -2170,13 +2182,13 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         let x = self.ram.read_u16(0x11a);
         let y = self.ram.read_u16(0x11c);
         self.ram
-            .write_u16(0xdc, self.ram.read_u16(0xe2).wrapping_add(x));
+            .write_u16(0x11e, self.ram.read_u16(0xe2).wrapping_add(x));
         self.ram
-            .write_u16(0xde, self.ram.read_u16(BG2_VOFS2).wrapping_add(y));
+            .write_u16(0x122, self.ram.read_u16(BG2_VOFS2).wrapping_add(y));
         self.ram
-            .write_u16(0xd8, self.ram.read_u16(BG1_HOFS2).wrapping_add(x));
+            .write_u16(0x120, self.ram.read_u16(BG1_HOFS2).wrapping_add(x));
         self.ram
-            .write_u16(0xda, self.ram.read_u16(BG1_VOFS2).wrapping_add(y));
+            .write_u16(0x124, self.ram.read_u16(BG1_VOFS2).wrapping_add(y));
     }
     pub fn module_messaging_0(&self) {
         panic!("Module_Messaging_0 is an unreachable C assertion")

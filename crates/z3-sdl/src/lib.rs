@@ -3,6 +3,9 @@
 //! The game and deterministic host logic remain safe Rust. Raw pointers are
 //! confined to this crate and wrapped in owning RAII types.
 
+mod wgpu_renderer;
+pub use wgpu_renderer::WgpuRenderer;
+
 use std::error::Error as StdError;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::fmt;
@@ -19,11 +22,13 @@ pub const WINDOW_RESIZABLE: u32 = 0x20;
 pub const WINDOW_MINIMIZED: u32 = 0x40;
 pub const WINDOW_MAXIMIZED: u32 = 0x80;
 pub const WINDOW_FULLSCREEN_DESKTOP: u32 = WINDOW_FULLSCREEN | 0x1000;
+pub const WINDOW_METAL: u32 = 0x2000_0000;
 pub const WINDOWPOS_UNDEFINED: i32 = 0x1fff_0000;
 pub const WINDOWPOS_CENTERED: i32 = 0x2fff_0000;
 pub const RENDERER_SOFTWARE: u32 = 0x1;
 pub const RENDERER_ACCELERATED: u32 = 0x2;
 pub const RENDERER_PRESENT_VSYNC: u32 = 0x4;
+pub const BLENDMODE_BLEND: i32 = 1;
 pub const PIXELFORMAT_ARGB8888: u32 = 0x1636_2004;
 pub const TEXTUREACCESS_STREAMING: i32 = 1;
 pub const AUDIO_S16: u16 = 0x8010;
@@ -55,6 +60,10 @@ impl Error {
         // SAFETY: SDL_GetError returns a process-owned NUL-terminated string.
         let text = unsafe { CStr::from_ptr(SDL_GetError()) };
         Self(text.to_string_lossy().into_owned())
+    }
+
+    fn message(message: impl Into<String>) -> Self {
+        Self(message.into())
     }
 }
 
@@ -331,6 +340,14 @@ impl Window {
         unsafe { SDL_SetWindowTitle(self.0.as_ptr(), title.as_ptr()) };
         Ok(())
     }
+
+    #[cfg(target_os = "macos")]
+    fn metal_drawable_size(&self) -> (i32, i32) {
+        let (mut width, mut height) = (0, 0);
+        // SAFETY: outputs and the live SDL window are valid.
+        unsafe { SDL_Metal_GetDrawableSize(self.0.as_ptr(), &mut width, &mut height) };
+        (width, height)
+    }
 }
 
 impl Drop for Window {
@@ -366,6 +383,7 @@ unsafe extern "C" fn hit_test_callback(
 pub struct Renderer {
     raw: NonNull<c_void>,
     texture: NonNull<c_void>,
+    last_rect: Option<Rect>,
 }
 
 impl Renderer {
@@ -411,7 +429,11 @@ impl Renderer {
             unsafe { SDL_DestroyRenderer(raw.as_ptr()) };
             return Err(Error::last());
         };
-        Ok(Self { raw, texture })
+        Ok(Self {
+            raw,
+            texture,
+            last_rect: None,
+        })
     }
 
     pub fn begin_draw(&mut self, width: i32, height: i32) -> Result<TextureLock<'_>, Error> {
@@ -457,6 +479,35 @@ impl Renderer {
             return Err(Error::last());
         }
         // SAFETY: renderer is live.
+        unsafe { SDL_RenderPresent(self.raw.as_ptr()) };
+        self.last_rect = Some(*rect);
+        Ok(())
+    }
+
+    /// Re-presents the last game frame beneath the same translucent black
+    /// overlay used by the C host's `PauseDimmed` command.
+    pub fn present_dimmed(&mut self) -> Result<(), Error> {
+        // Back-buffer contents after SDL_RenderPresent are unspecified, so
+        // reconstruct the last frame from the streaming texture first.
+        unsafe { SDL_RenderClear(self.raw.as_ptr()) };
+        if let Some(rect) = self.last_rect
+            && unsafe {
+                SDL_RenderCopy(
+                    self.raw.as_ptr(),
+                    self.texture.as_ptr(),
+                    &rect,
+                    std::ptr::null(),
+                )
+            } != 0
+        {
+            return Err(Error::last());
+        }
+        if unsafe { SDL_SetRenderDrawBlendMode(self.raw.as_ptr(), BLENDMODE_BLEND) } != 0
+            || unsafe { SDL_SetRenderDrawColor(self.raw.as_ptr(), 0, 0, 0, 159) } != 0
+            || unsafe { SDL_RenderFillRect(self.raw.as_ptr(), std::ptr::null()) } != 0
+        {
+            return Err(Error::last());
+        }
         unsafe { SDL_RenderPresent(self.raw.as_ptr()) };
         Ok(())
     }
@@ -856,6 +907,14 @@ unsafe extern "C" {
     fn SDL_SetWindowFullscreen(window: *mut c_void, flags: u32) -> c_int;
     fn SDL_SetWindowBordered(window: *mut c_void, bordered: c_int);
     fn SDL_SetWindowTitle(window: *mut c_void, title: *const c_char);
+    #[cfg(target_os = "macos")]
+    fn SDL_Metal_CreateView(window: *mut c_void) -> *mut c_void;
+    #[cfg(target_os = "macos")]
+    fn SDL_Metal_DestroyView(view: *mut c_void);
+    #[cfg(target_os = "macos")]
+    fn SDL_Metal_GetLayer(view: *mut c_void) -> *mut c_void;
+    #[cfg(target_os = "macos")]
+    fn SDL_Metal_GetDrawableSize(window: *mut c_void, width: *mut c_int, height: *mut c_int);
     fn SDL_GetModState() -> u16;
     fn SDL_ShowCursor(toggle: c_int) -> c_int;
     fn SDL_CreateRenderer(window: *mut c_void, index: c_int, flags: u32) -> *mut c_void;
@@ -885,6 +944,15 @@ unsafe extern "C" {
         destination: *const Rect,
     ) -> c_int;
     fn SDL_RenderPresent(renderer: *mut c_void);
+    fn SDL_SetRenderDrawBlendMode(renderer: *mut c_void, blend_mode: c_int) -> c_int;
+    fn SDL_SetRenderDrawColor(
+        renderer: *mut c_void,
+        red: u8,
+        green: u8,
+        blue: u8,
+        alpha: u8,
+    ) -> c_int;
+    fn SDL_RenderFillRect(renderer: *mut c_void, rect: *const Rect) -> c_int;
     fn SDL_OpenAudioDevice(
         device: *const c_char,
         capture: c_int,

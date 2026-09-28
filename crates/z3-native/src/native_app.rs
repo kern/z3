@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use z3_core::config::{ConfigState, OutputMethod, parse_config_file};
+use z3_core::config::{ConfigState, FEATURE_DIM_FLASHES, OutputMethod, parse_config_file};
 use z3_game::assets::RuntimeAssets;
 use z3_game::host::{HostAction, InputState, SaveLoadKind, normalize_host_config};
 use z3_game::integration::{NativeGameServices, NativeRuntimeIntegratedExt};
@@ -12,7 +12,8 @@ use z3_game::runtime::NativeRuntime;
 use z3_sdl::{Event, Renderer, Sdl, Window};
 
 use crate::{
-    AudioCallbackBuffer, WINDOW_TITLE, apply_runtime_command, change_window_scale, draw_ppu_frame,
+    AudioCallbackBuffer, RenderPerformance, WINDOW_TITLE, apply_runtime_command,
+    change_window_scale, draw_ppu_frame_wgpu_with_perf, draw_ppu_frame_with_perf,
     handle_gamepad_axis_input, handle_gamepad_input, handle_input, open_one_gamepad,
     save_load_slot, sdl_renderer_init, zelda_apu_lock, zelda_apu_unlock,
 };
@@ -69,12 +70,22 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
 #[derive(Debug)]
 struct UiState {
     paused: bool,
+    dim_pause_pending: bool,
     replay_turbo: bool,
     cursor: bool,
     borderless: bool,
     display_perf: bool,
     render_flags: u8,
     window_scale: u8,
+}
+
+impl UiState {
+    fn toggle_pause(&mut self, dimmed: bool) {
+        self.paused = !self.paused;
+        // Only the transition into PauseDimmed presents the overlay. Leaving
+        // pause, or using ordinary Pause, must not leave a stale pending draw.
+        self.dim_pause_pending = self.paused && dimmed;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -101,7 +112,8 @@ fn execute_action(
                 state.cursor = !state.cursor;
                 window.show_cursor(state.cursor);
             }
-            COMMAND_PAUSE | COMMAND_PAUSE_DIMMED => state.paused = !state.paused,
+            COMMAND_PAUSE => state.toggle_pause(false),
+            COMMAND_PAUSE_DIMMED => state.toggle_pause(true),
             COMMAND_REPLAY_TURBO => state.replay_turbo = !state.replay_turbo,
             COMMAND_WINDOW_BIGGER => {
                 change_window_scale(window, &mut state.window_scale, 1, snes_width, snes_height)
@@ -137,6 +149,30 @@ fn load_pcm(prefix: &Path, track: u8) -> Option<z3_game::audio::PcmTrack> {
     z3_game::audio::PcmTrack::open(z3_game::audio::msu_track_path(prefix, track, false)).ok()
 }
 
+fn asset_range(
+    bytes: &[u8],
+    index: usize,
+) -> Result<std::ops::Range<usize>, Box<dyn std::error::Error>> {
+    let file = z3_core::assets::AssetFile::parse(bytes)?;
+    let asset = file
+        .get(index)
+        .ok_or("runtime asset index is out of range")?;
+    let start = asset.as_ptr() as usize - bytes.as_ptr() as usize;
+    Ok(start..start + asset.len())
+}
+
+fn patch_dim_flashes_palette(palette: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
+    const PATCHES: [(usize, u16); 3] = [(0x484, 0x70), (0x485, 0x95), (0x486, 0x57)];
+    for (word, value) in PATCHES {
+        let offset = word * 2;
+        let destination = palette
+            .get_mut(offset..offset + 2)
+            .ok_or("dungeon background palette asset is too short")?;
+        destination.copy_from_slice(&value.to_le_bytes());
+    }
+    Ok(())
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let options = options()?;
     if options.config.is_none()
@@ -158,14 +194,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let window_scale = normalize_host_config(&mut config_state.config);
     let config = &config_state.config;
-    if matches!(
+    let use_wgpu = matches!(
         config.output_method,
-        OutputMethod::OpenGl | OutputMethod::OpenGlEs
-    ) {
-        return Err("this Rust native binary currently provides the SDL renderer backend".into());
-    }
-    if config.shader.is_some() {
-        eprintln!("Warning: Shaders are supported only with the OpenGL backend");
+        OutputMethod::OpenGl | OutputMethod::OpenGlEs | OutputMethod::Wgpu
+    );
+    if config.shader.is_some() && !use_wgpu {
+        eprintln!("Warning: Shaders are supported only with the wgpu backend");
     }
 
     let mut asset_bytes = z3_game::host::load_asset_bundle(
@@ -173,19 +207,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Path::new("zelda3_assets.bps"),
         &options.rom,
     )?;
+    if config.features0 & FEATURE_DIM_FLASHES != 0 {
+        let palette_range = asset_range(&asset_bytes, 79)?;
+        patch_dim_flashes_palette(&mut asset_bytes[palette_range])?;
+    }
     let mut gloves_color = z3_game::load_gfx::GLOVES_COLOR;
     if let Some(link_graphics) = config.link_graphics.as_deref() {
         eprintln!("Loading Link Graphics: {link_graphics}");
-        let (graphics_range, palette_range) = {
-            let file = z3_core::assets::AssetFile::parse(&asset_bytes)?;
-            let base = asset_bytes.as_ptr() as usize;
-            let range = |index| {
-                let asset = file.get(index).expect("validated runtime asset index");
-                let start = asset.as_ptr() as usize - base;
-                start..start + asset.len()
-            };
-            (range(57), range(81))
-        };
+        let graphics_range = asset_range(&asset_bytes, 57)?;
+        let palette_range = asset_range(&asset_bytes, 81)?;
         let zspr = std::fs::read(link_graphics)?;
         let mut graphics = asset_bytes[graphics_range.clone()].to_vec();
         let mut palette = asset_bytes[palette_range.clone()].to_vec();
@@ -221,6 +251,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         i32::from(window_scale) * snes_height
     };
     let mut window_flags = z3_sdl::WINDOW_RESIZABLE;
+    if use_wgpu && cfg!(target_os = "macos") {
+        window_flags |= z3_sdl::WINDOW_METAL;
+    }
     window_flags |= match config.fullscreen {
         1 => z3_sdl::WINDOW_FULLSCREEN_DESKTOP,
         2 => z3_sdl::WINDOW_FULLSCREEN,
@@ -232,15 +265,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // deliberately ignores SDL_SetWindowHitTest's return value.
     let _ = window.install_hit_test();
     let texture_scale = if config.enhanced_mode7 { 4 } else { 1 };
-    let mut renderer: Renderer = sdl_renderer_init(
-        &window,
-        snes_width,
-        snes_height,
-        config.output_method == OutputMethod::SdlSoftware,
-        !config.ignore_aspect_ratio,
-        config.linear_filtering,
-        texture_scale,
-    )?;
+    enum NativeRenderer<'window> {
+        Sdl(Renderer),
+        Wgpu(Box<z3_sdl::WgpuRenderer<'window>>),
+    }
+    let mut renderer = if use_wgpu {
+        NativeRenderer::Wgpu(Box::new(z3_sdl::WgpuRenderer::new(
+            &window,
+            !config.ignore_aspect_ratio,
+            config.linear_filtering,
+            config.shader.as_deref().map(Path::new),
+        )?))
+    } else {
+        NativeRenderer::Sdl(sdl_renderer_init(
+            &window,
+            snes_width,
+            snes_height,
+            config.output_method == OutputMethod::SdlSoftware,
+            !config.ignore_aspect_ratio,
+            config.linear_filtering,
+            texture_scale,
+        )?)
+    };
 
     let render_flags = (u8::from(config.new_renderer) * z3_snes::ppu::RENDER_NEW)
         | (u8::from(config.enhanced_mode7) * z3_snes::ppu::RENDER_MODE7_4X)
@@ -256,6 +302,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         config.msu_volume,
         u32::from(config.audio_freq),
     );
+    if config.enable_msu & z3_core::config::MSU_ENABLED_OPUZ != 0 && config.audio_freq != 48_000 {
+        eprintln!("Warning: MSU OPUZ requires AudioFreq = 48000");
+    } else if config.enable_msu != 0 && config.audio_freq != 44_100 {
+        eprintln!("Warning: MSU PCM requires AudioFreq = 44100");
+    }
+    let msu_prefix = PathBuf::from(config.msu_path.as_deref().unwrap_or(""));
+    native
+        .audio
+        .configure_msu_files(msu_prefix.clone(), config.resume_msu);
     std::fs::create_dir_all("saves")?;
     z3_game::host::read_sram(Path::new("saves/sram.dat"), &mut native.sram)?;
     let runtime = Arc::new(Mutex::new(native));
@@ -305,6 +360,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = InputState::default();
     let mut ui = UiState {
         paused: false,
+        dim_pause_pending: false,
         replay_turbo: true,
         cursor: true,
         borderless: false,
@@ -312,11 +368,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         render_flags,
         window_scale,
     };
-    let msu_prefix = PathBuf::from(config.msu_path.as_deref().unwrap_or(""));
     let mut running = true;
     let mut audio_paused = true;
     let mut last_tick = sdl.ticks();
     let mut frame_counter = 0_u32;
+    let mut render_performance = RenderPerformance::default();
     if config.autosave {
         execute_action(
             HostAction::SaveLoad {
@@ -404,6 +460,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 device.pause(audio_paused);
             }
         }
+        if ui.dim_pause_pending {
+            match &mut renderer {
+                NativeRenderer::Sdl(renderer) => renderer.present_dimmed()?,
+                NativeRenderer::Wgpu(renderer) => renderer.present_dimmed(&window)?,
+            }
+            ui.dim_pause_pending = false;
+        }
         if ui.paused {
             sdl.delay(16);
             continue;
@@ -437,14 +500,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         {
             let mut native = zelda_apu_lock(&runtime);
-            draw_ppu_frame(
-                &mut native,
-                &mut renderer,
-                snes_width,
-                snes_height,
-                ui.render_flags,
-            )?;
+            match &mut renderer {
+                NativeRenderer::Sdl(renderer) => draw_ppu_frame_with_perf(
+                    &mut native,
+                    renderer,
+                    snes_width,
+                    snes_height,
+                    ui.render_flags,
+                    (ui.display_perf || config.display_perf_title)
+                        .then_some(&mut render_performance),
+                    ui.display_perf,
+                )?,
+                NativeRenderer::Wgpu(renderer) => draw_ppu_frame_wgpu_with_perf(
+                    &mut native,
+                    renderer,
+                    &window,
+                    snes_width,
+                    snes_height,
+                    ui.render_flags,
+                    (ui.display_perf || config.display_perf_title)
+                        .then_some(&mut render_performance),
+                    ui.display_perf,
+                )?,
+            }
             zelda_apu_unlock(native);
+        }
+        if config.display_perf_title {
+            window.set_title(&format!(
+                "{WINDOW_TITLE} | FPS: {}",
+                render_performance.frames_per_second
+            ))?;
         }
         if !config.disable_frame_delay {
             const DELAYS: [u32; 3] = [17, 17, 16];
@@ -477,5 +562,53 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 pub fn main_entry() {
     if let Err(error) = run() {
         crate::die(&error.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ui_state() -> UiState {
+        UiState {
+            paused: false,
+            dim_pause_pending: false,
+            replay_turbo: true,
+            cursor: true,
+            borderless: false,
+            display_perf: false,
+            render_flags: 0,
+            window_scale: 2,
+        }
+    }
+
+    #[test]
+    fn pause_dimmed_requests_exactly_one_overlay_when_entering_pause() {
+        let mut state = ui_state();
+        state.toggle_pause(true);
+        assert!(state.paused);
+        assert!(state.dim_pause_pending);
+
+        state.dim_pause_pending = false;
+        state.toggle_pause(true);
+        assert!(!state.paused);
+        assert!(!state.dim_pause_pending);
+    }
+
+    #[test]
+    fn ordinary_pause_never_requests_the_dim_overlay() {
+        let mut state = ui_state();
+        state.toggle_pause(false);
+        assert!(state.paused);
+        assert!(!state.dim_pause_pending);
+    }
+
+    #[test]
+    fn dim_flashes_palette_patch_matches_the_c_host_words() {
+        let mut palette = vec![0xff; (0x487 + 1) * 2];
+        patch_dim_flashes_palette(&mut palette).unwrap();
+        assert_eq!(&palette[0x484 * 2..0x487 * 2], &[0x70, 0, 0x95, 0, 0x57, 0]);
+        assert_eq!(palette[0x483 * 2], 0xff);
+        assert_eq!(palette[0x487 * 2], 0xff);
     }
 }

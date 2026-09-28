@@ -76,6 +76,8 @@ EQUIVALENT_NAMES = {
   "MsuPlayer_Open" => "open",
   "ZeldaPopApuState" => "pop_into",
   "ZeldaResetApuQueue" => "reset",
+  # Oracle-only wrapper around the already translated snapshot loader.
+  "ZeldaLoadSnapshotForTest" => "load_snes_state",
 
   # select_file.c: reviewed state wrappers and helpers consolidated into the
   # FileSelect state machine. Static stripe builders remain local Rust code.

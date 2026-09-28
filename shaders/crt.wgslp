@@ -1,0 +1,5 @@
+# Native wgpu shader preset. Shader paths are relative to this file.
+shaders = 1
+shader0 = "crt.wgsl"
+filter_linear0 = false
+wrap_mode0 = clamp_to_edge

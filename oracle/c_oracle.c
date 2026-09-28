@@ -130,6 +130,13 @@ void z3c_step_raw(uint16_t input, uint8_t run_what) {
     ZeldaRunFrameInternal(input, run_what);
 }
 
+void z3c_configure_features(uint32_t features, uint8_t extra_left_right) {
+  if (!g_initialized)
+    return;
+  g_wanted_zelda_features = features;
+  g_zenv.ppu->extraLeftRight = extra_left_right;
+}
+
 size_t z3c_core_state_size(void) {
   return Z3C_CORE_STATE_SIZE;
 }
@@ -159,6 +166,10 @@ int z3c_import_core_state(const uint8_t *source, size_t length) {
   for (size_t i = 0; i < Z3C_VRAM_SIZE / 2; i++)
     g_zenv.vram[i] = (uint16)source[i * 2] | (uint16)source[i * 2 + 1] << 8;
   return 1;
+}
+
+int z3c_import_snapshot(const uint8_t *source, size_t length) {
+  return g_initialized && source != NULL && ZeldaLoadSnapshotForTest(source, length);
 }
 
 void z3c_render(uint8_t *pixels, size_t pitch, uint32_t render_flags) {

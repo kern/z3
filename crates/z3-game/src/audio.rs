@@ -793,6 +793,8 @@ pub struct AudioRuntime {
     pub pcm: Option<PcmPlayback>,
     pub opuz: Option<OpuzPlayback<z3_opus::Decoder>>,
     pub msu_enabled: u8,
+    pub msu_path_prefix: Option<PathBuf>,
+    pub resume_msu: bool,
     transition_targets: [f32; 4],
     transition_steps: [f32; 4],
 }
@@ -807,6 +809,8 @@ impl Default for AudioRuntime {
             pcm: None,
             opuz: None,
             msu_enabled: 0,
+            msu_path_prefix: None,
+            resume_msu: false,
             transition_targets: [0.0; 4],
             transition_steps: [0.0; 4],
         }
@@ -848,6 +852,11 @@ impl AudioRuntime {
         if let Some(opuz) = &mut self.opuz {
             opuz.volume.volume = 1.0;
         }
+    }
+
+    pub fn configure_msu_files(&mut self, path_prefix: PathBuf, resume_msu: bool) {
+        self.msu_path_prefix = Some(path_prefix);
+        self.resume_msu = resume_msu;
     }
 
     fn open_file_track(
@@ -1390,9 +1399,29 @@ where
         )
     }
 
-    fn play_music_track(&mut self, track: u8) {
-        self.runtime
-            .play_music_control(track, self.area, self.entrance, &mut self.load_pcm_track);
+    fn play_music_track(&mut self, ram: &mut crate::ram::Ram<'_>, track: u8) {
+        let main_module = ram.read_u8(0x10);
+        if let Some(path_prefix) = self.runtime.msu_path_prefix.clone() {
+            let _ = self.runtime.play_music_control_from_files_with_resume_ram(
+                track,
+                self.area,
+                self.entrance,
+                main_module,
+                self.runtime.resume_msu,
+                ram.bytes_mut(),
+                path_prefix,
+            );
+        } else {
+            self.runtime.play_music_control_with_resume_ram(
+                track,
+                self.area,
+                self.entrance,
+                main_module,
+                self.runtime.resume_msu,
+                ram.bytes_mut(),
+                &mut self.load_pcm_track,
+            );
+        }
     }
 
     fn read_apu_port(&mut self, port: u8) -> u8 {
@@ -1846,6 +1875,53 @@ mod tests {
             960
         );
         assert!(output.iter().all(|&sample| sample == 0));
+        std::fs::remove_file(track_path).unwrap();
+    }
+
+    #[test]
+    fn nmi_adapter_uses_configured_production_msu_files() {
+        use crate::nmi::NmiAudio;
+
+        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let prefix = std::env::temp_dir().join(format!(
+            "z3-nmi-msu-prefix-{}-{sequence}-",
+            std::process::id()
+        ));
+        let track_path = msu_track_path(&prefix, 2, false);
+        let mut bytes = b"MSU1".to_vec();
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&[1, 0, 2, 0, 3, 0, 4, 0]);
+        std::fs::write(&track_path, bytes).unwrap();
+
+        let mut runtime = AudioRuntime::default();
+        runtime.enable_msu(MSU_ENABLED_MSU, 100, 44_100);
+        runtime.configure_msu_files(prefix, true);
+        let mut wram = [0; z3_core::WRAM_SIZE];
+        wram[0x10] = 9;
+        let mut ram = crate::ram::Ram::new(&mut wram);
+        let mut fallback_called = false;
+        let (apu_command, actual_track) = {
+            let mut adapter = NmiAudioAdapter {
+                runtime: &mut runtime,
+                area: 0,
+                entrance: 0,
+                music_unk1: 0,
+                last_music_control: 0,
+                misc_bug_fixes: false,
+                load_pcm_track: |_| {
+                    fallback_called = true;
+                    None
+                },
+            };
+            adapter.play_music_track(&mut ram, 2);
+            (
+                adapter.runtime.queue.current()[0],
+                adapter.runtime.pcm.as_ref().unwrap().resume.actual_track,
+            )
+        };
+        assert!(!fallback_called);
+        assert_eq!(apu_command, 0xf0);
+        assert_eq!(actual_track, 2);
         std::fs::remove_file(track_path).unwrap();
     }
 

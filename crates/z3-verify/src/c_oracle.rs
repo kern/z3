@@ -39,10 +39,10 @@ impl COracle {
     }
 
     pub fn step(&mut self, input: u16, run_what: u8) -> io::Result<CanonicalState> {
-        if run_what == 0xff {
+        if matches!(run_what, 0xfc..=0xff) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "0xff is reserved for canonical-state import",
+                "0xfc..=0xff are reserved for oracle control commands",
             ));
         }
         let [low, high] = input.to_le_bytes();
@@ -50,6 +50,60 @@ impl COracle {
         self.input.flush()?;
 
         self.read_state()
+    }
+
+    /// Imports the complete C-compatible device snapshot embedded in a `.sav`
+    /// file, including PPU registers/CGRAM/OAM needed for render comparison.
+    pub fn import_snapshot(&mut self, snapshot: &[u8]) -> io::Result<CanonicalState> {
+        let length = u32::try_from(snapshot.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "snapshot is too large"))?;
+        self.input.write_all(&[0, 0, 0xfc])?;
+        self.input.write_all(&length.to_le_bytes())?;
+        self.input.write_all(snapshot)?;
+        self.input.flush()?;
+        self.read_state()
+    }
+
+    /// Selects the same enhanced gameplay and widescreen settings used by the
+    /// native hosts. The oracle returns its unchanged canonical state as an
+    /// acknowledgement so protocol errors cannot go unnoticed.
+    pub fn configure_features(
+        &mut self,
+        features: u32,
+        extra_left_right: u8,
+    ) -> io::Result<CanonicalState> {
+        self.input.write_all(&[0, 0, 0xfe])?;
+        self.input.write_all(&features.to_le_bytes())?;
+        self.input.write_all(&[extra_left_right])?;
+        self.input.flush()?;
+        self.read_state()
+    }
+
+    /// Renders the current C PPU state to the same tightly packed ARGB byte
+    /// layout consumed by the SDL/OpenGL frontends.
+    pub fn render(&mut self, width: u16, height: u16, flags: u8, scale: u8) -> io::Result<Vec<u8>> {
+        if !matches!(scale, 1 | 4) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "render scale must be one or four",
+            ));
+        }
+        let [width_low, width_high] = width.to_le_bytes();
+        let [height_low, height_high] = height.to_le_bytes();
+        self.input.write_all(&[width_low, width_high, 0xfd])?;
+        self.input
+            .write_all(&[height_low, height_high, flags, scale])?;
+        self.input.flush()?;
+        let mut pixels = vec![
+            0;
+            usize::from(width)
+                * usize::from(height)
+                * usize::from(scale)
+                * usize::from(scale)
+                * 4
+        ];
+        self.output.read_exact(&mut pixels)?;
+        Ok(pixels)
     }
 
     /// Replaces the oracle's pointer-free game state without restarting it.

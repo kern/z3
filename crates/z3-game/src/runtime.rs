@@ -312,6 +312,16 @@ impl NativeRuntime {
             HDMA_TABLE_NEW,
         );
         self.audio.restore_music_after_load(false);
+        if let Some(path_prefix) = self.audio.msu_path_prefix.clone() {
+            let area = self.wram[0x40a];
+            let entrance = u16::from(self.wram[0x10e]);
+            let _ = self.audio.restore_msu_from_wram_from_files(
+                self.wram.as_slice(),
+                area,
+                entrance,
+                path_prefix,
+            );
+        }
         Ok(())
     }
 

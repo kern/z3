@@ -196,6 +196,10 @@ impl LoadGfxHooks for NativeGameServices<'_> {
     }
 }
 impl MessagingRuntime for NativeGameServices<'_> {
+    fn enable_force_blank(&mut self, ram: &mut Ram<'_>) {
+        self.with_load_gfx(ram, |gfx| gfx.enable_force_blank());
+    }
+
     fn reset_hud_palettes_4_and_5(&mut self, ram: &mut Ram<'_>) {
         LoadGfx {
             wram: ram.bytes_mut(),
@@ -247,7 +251,8 @@ impl MessagingRuntime for NativeGameServices<'_> {
         ram.write_u16(0x13ee, icon[3]);
     }
 
-    fn world_map_load_light(&mut self, _ram: &mut Ram<'_>) {
+    fn world_map_load_light(&mut self, ram: &mut Ram<'_>) {
+        crate::integration::setup_world_map_registers(ram);
         self.pending_host_actions
             .push(NativeHostAction::WorldMapLoadLight);
     }
@@ -661,8 +666,8 @@ impl AttractRuntime for NativeGameServices<'_> {
         ram.write_u8(0x1d, 0);
         ram.write_u16(0xe0, 0x80);
         ram.write_u16(0xe6, 0xc8);
-        ram.write_u16(0x63c, 0x1c9);
-        ram.write_u16(0x63a, 0x100);
+        ram.write_u16(0x63a, 0x1c9);
+        ram.write_u16(0x638, 0x100);
         ram.write_u8(0x23, 0);
         ram.write_u8(0x24, 0);
         ram.write_u8(0x25, 0);
@@ -683,7 +688,7 @@ impl AttractRuntime for NativeGameServices<'_> {
         }
         .load_actual_gear_palettes();
         ram.write_u8(0x15, ram.read_u8(0x15).wrapping_add(1));
-        ram.write_u8(0x14, 7);
+        ram.write_u8(0x17, 7);
         ram.write_u8(0x13, 0);
         ram.write_u8(0x0710, ram.read_u8(0x0710).wrapping_add(1));
         ram.write_u8(0x0200, ram.read_u8(0x0200).wrapping_add(1));
@@ -1563,7 +1568,7 @@ impl DungeonHooks for NativeGameServices<'_> {
     }
 
     fn did_press_button_for_map(&self, ram: &Ram<'_>) -> bool {
-        if ram.read_u8(0x202) != 0 {
+        if ram.read_u8(0x656) != 0 {
             ram.read_u8(0xf4) & 0x20 != 0
         } else {
             ram.read_u8(0xf6) & 0x40 != 0

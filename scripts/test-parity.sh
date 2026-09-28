@@ -10,6 +10,8 @@ cargo run -q -p z3-verify --bin check_oracle -- \
   build/c-oracle/stream_oracle zelda3_assets.dat
 cargo run -q -p z3-verify --bin check_integrated_frame -- \
   build/c-oracle/stream_oracle zelda3_assets.dat 2000
+cargo run -q -p z3-verify --bin check_features -- \
+  build/c-oracle/stream_oracle zelda3_assets.dat
 cargo run -q -p z3-verify --bin check_spc -- \
   build/c-oracle/spc_oracle
 cargo run -q -p z3-verify --bin check_cpu -- \

@@ -6,3 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+bytemuck = { version = "1.24.0", features = ["derive"] }
+pollster = "0.4.0"
+png = "0.18.0"
+wgpu = "29.0.1"

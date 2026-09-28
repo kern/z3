@@ -888,3 +888,9 @@ void ZeldaWriteSram() {
     fprintf(stderr, "Unable to write saves/sram.dat\n");
   }
 }
+
+bool ZeldaLoadSnapshotForTest(const uint8 *data, size_t size) {
+  LoadFuncState state = { (uint8 *)data, (uint8 *)data + size };
+  LoadSnesState(&loadFunc, &state);
+  return state.p == state.pend;
+}

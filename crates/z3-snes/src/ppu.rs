@@ -311,7 +311,9 @@ impl Ppu {
     pub fn begin_drawing(&mut self, pitch: usize, height: usize, flags: u8) {
         self.render_flags = flags;
         self.render_pitch = pitch;
-        self.render_buffer.resize(pitch.saturating_mul(height), 0);
+        let scale = self.current_render_scale(flags);
+        self.render_buffer
+            .resize(pitch.saturating_mul(height).saturating_mul(scale), 0);
         self.update_brightness();
     }
     #[must_use]
@@ -1242,5 +1244,28 @@ mod tests {
                 assert_eq!(&p.render_buffer[offset..offset + 4], &[0, 0, 255, 0]);
             }
         }
+    }
+
+    #[test]
+    fn mode7_upsampling_allocates_and_draws_the_complete_frame() {
+        let mut p = Ppu::new();
+        p.mode = 7;
+        p.forced_blank = false;
+        p.brightness = 15;
+        p.extra_left_right = 0;
+        p.mode7_matrix[0] = 0x100;
+        p.mode7_matrix[3] = 0x100;
+        p.vram.fill(0x0201);
+        p.cgram[2] = 31;
+
+        let pitch = 256 * 4 * 4;
+        p.begin_drawing(pitch, 224, RENDER_NEW | RENDER_MODE7_4X);
+        for line in 1..=224 {
+            p.run_line(line);
+        }
+
+        assert_eq!(p.render_buffer.len(), pitch * 224 * 4);
+        let final_row = &p.render_buffer[pitch * 895..pitch * 896];
+        assert!(final_row.iter().any(|&byte| byte != 0));
     }
 }

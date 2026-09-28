@@ -21,7 +21,7 @@ pub struct NmiAssets<'a> {
 
 pub trait NmiAudio {
     fn is_bugged_music_track(&self, track: u8) -> bool;
-    fn play_music_track(&mut self, track: u8);
+    fn play_music_track(&mut self, ram: &mut Ram<'_>, track: u8);
     fn read_apu_port(&mut self, port: u8) -> u8;
     fn write_apu_port(&mut self, port: u8, value: u8);
 }
@@ -161,7 +161,7 @@ fn update_audio(ram: &mut Ram<'_>, audio: &mut impl NmiAudio) {
     let music = ram.read_u8(0x12c);
     if music != 0 && !audio.is_bugged_music_track(music) {
         ram.write_u8(0x133, music);
-        audio.play_music_track(music);
+        audio.play_music_track(ram, music);
         if music < 0xf2 {
             ram.write_u8(0x130, music);
         }

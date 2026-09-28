@@ -1229,7 +1229,7 @@ pub fn run_messaging_module<R: MessagingRuntime>(
         runtime,
     };
     match module {
-        MainModule::Interface => messaging.run_submodule(),
+        MainModule::Interface => messaging.module0e_interface(),
         MainModule::GameOver => messaging.module_game_over(),
         _ => panic!("{module:?} is not a translated messaging module"),
     }
@@ -1800,7 +1800,7 @@ where
                         }
                         .load_actual_gear_palettes();
                         ram.write_u8(0x15, ram.read_u8(0x15).wrapping_add(1));
-                        ram.write_u8(0x14, 7);
+                        ram.write_u8(0x17, 7);
                         ram.write_u8(0x13, 0);
                         ram.write_u8(0x0710, ram.read_u8(0x0710).wrapping_add(1));
                         ram.write_u8(0x0200, ram.read_u8(0x0200).wrapping_add(1));
@@ -1811,7 +1811,9 @@ where
                             *word = (*word & 0x00ff) | (u16::from(high) << 8);
                         }
                     }
-                    NativeHostAction::WorldMapSetupHdma => setup_world_map_hdma(ram, self.dma),
+                    NativeHostAction::WorldMapSetupHdma => {
+                        setup_world_map_hdma_transfer(ram, self.dma)
+                    }
                 }
                 self.drain_service_device_commands();
             }
@@ -1837,37 +1839,50 @@ where
     }
 }
 
-fn setup_world_map_hdma(ram: &mut Ram<'_>, dma: &mut z3_snes::dma::Dma) {
+pub(crate) fn setup_world_map_registers(ram: &mut Ram<'_>) {
     ram.write_u16(0xe0, 0x80);
     ram.write_u16(0xe6, 0xc8);
-    ram.write_u16(0x63c, 0x1c9);
-    ram.write_u16(0x63a, 0x100);
+    ram.write_u16(0x63a, 0x1c9);
+    ram.write_u16(0x638, 0x100);
     for address in [0x96, 0x97, 0x98, 0x1e, 0x1f] {
         ram.write_u8(address, 0);
     }
-    if ram.read_u8(0x10) == 20 {
-        crate::runtime::hdma_setup(dma, 0x0a_bddd, 0x0a_bddd, 0x42, 0x1b, 0x1e, 0);
-    } else if ram.read_u8(0x11) != 10 {
+    if ram.read_u8(0x10) != 20 && ram.read_u8(0x11) != 10 {
         ram.write_u8(0x635, 4);
         ram.write_u8(0x637, 12);
         ram.write_u8(0x636, 1);
-        let y = ((ram.read_u16(0x20) >> 4).wrapping_sub(0x48)) & !1;
+        let y = ((ram.read_u16(0xc108) >> 4).wrapping_sub(0x48)) & !1;
         ram.write_u16(0xe6, y);
         ram.write_u16(0x63a, y.wrapping_add(0x100));
-        let x = (ram.read_u16(0x22) >> 4).wrapping_sub(0x80) as i16;
+        let x = (ram.read_u16(0xc10a) >> 4).wrapping_sub(0x80) as i16;
         let scaled = ((5 * x.unsigned_abs()) >> 1) as i16;
         ram.write_u16(
             0xe0,
             (if x < 0 { -scaled } else { scaled } as u16).wrapping_add(0x80) & !1,
         );
-        crate::runtime::hdma_setup(dma, 0x0a_bdd6, 0x0a_bdd6, 0x42, 0x1b, 0x1e, 10);
-    } else {
+    } else if ram.read_u8(0x10) != 20 {
         ram.write_u8(0x635, 4);
         ram.write_u8(0x637, 33);
         ram.write_u8(0x636, 0);
-        crate::runtime::hdma_setup(dma, 0x0a_bdcf, 0x0a_bdcf, 0x42, 0x1b, 0x1e, 10);
     }
     ram.write_u8(0x9b, 0xc0);
+}
+
+fn setup_world_map_hdma_transfer(ram: &Ram<'_>, dma: &mut z3_snes::dma::Dma) {
+    let address = if ram.read_u8(0x10) == 20 {
+        0x0a_bddd
+    } else if ram.read_u8(0x11) == 10 || ram.read_u8(0x636) == 0 {
+        0x0a_bdcf
+    } else {
+        0x0a_bdd6
+    };
+    let flags = if ram.read_u8(0x10) == 20 { 0 } else { 10 };
+    crate::runtime::hdma_setup(dma, address, address, 0x42, 0x1b, 0x1e, flags);
+}
+
+fn setup_world_map_hdma(ram: &mut Ram<'_>, dma: &mut z3_snes::dma::Dma) {
+    setup_world_map_registers(ram);
+    setup_world_map_hdma_transfer(ram, dma);
 }
 
 /// Host-facing native frame entry with the concrete game router installed.
@@ -2271,6 +2286,7 @@ mod tests {
     struct Services {
         initialized: usize,
         seen_starting_points: Vec<u8>,
+        interface_steps: Vec<bool>,
     }
 
     impl FrameResourceHooks for Services {
@@ -2343,7 +2359,11 @@ mod tests {
 
     impl crate::load_gfx::LoadGfxHooks for Services {}
     impl DungeonHooks for Services {}
-    impl MessagingRuntime for Services {}
+    impl MessagingRuntime for Services {
+        fn interface_gameplay_step(&mut self, _ram: &mut Ram<'_>, run_world: bool) {
+            self.interface_steps.push(run_world);
+        }
+    }
     impl AttractRuntime for Services {}
     impl EndingRuntime for Services {}
     impl crate::sprite_main_bank0::SpriteMainBank0Runtime for Services {}
@@ -2611,6 +2631,49 @@ mod tests {
         assert_eq!(ram.read_u8(0x11), 3);
         assert_eq!(ram.read_u8(0x17), 10);
         assert_eq!(ram.read_u8(0x710), 10);
+    }
+
+    #[test]
+    fn interface_wrapper_runs_gameplay_before_the_selected_submodule() {
+        let mut bytes = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        ram.write_u8(0x11, 7);
+        ram.write_u8(0x13, 5);
+        ram.write_u16(0xe0, 0x1000);
+        ram.write_u16(0xe2, 0x2000);
+        ram.write_u16(0xe6, 0x3000);
+        ram.write_u16(0xe8, 0x4000);
+        ram.write_u16(0x11a, 0x12);
+        ram.write_u16(0x11c, 0x34);
+        let dictionary: [&[u8]; 0] = [];
+        let messages: [&[u8]; 0] = [];
+        let assets = MessagingAssets {
+            dialogue_flags: 0,
+            dictionary: &dictionary,
+            messages: &messages,
+            font_tiles: &[],
+            font_widths: &[],
+            light_overworld_tilemap: &[],
+            dungeon_map_floor_layout: &[],
+            dungeon_map_info: &[],
+        };
+        let mut sram = [0; SRAM_SIZE];
+        let mut services = Services::default();
+
+        run_messaging_module(
+            &mut ram,
+            &mut sram,
+            &assets,
+            &mut services,
+            MainModule::Interface,
+        );
+
+        assert_eq!(services.interface_steps, [true]);
+        assert_eq!(ram.read_u8(0x13), 4);
+        assert_eq!(ram.read_u16(0x11e), 0x2012);
+        assert_eq!(ram.read_u16(0x120), 0x1012);
+        assert_eq!(ram.read_u16(0x122), 0x4034);
+        assert_eq!(ram.read_u16(0x124), 0x3034);
     }
 
     #[test]

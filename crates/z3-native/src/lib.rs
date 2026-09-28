@@ -2,10 +2,11 @@
 
 pub mod native_app;
 
+use std::time::{Duration, Instant};
 use z3_core::config::{ConfigState, GamepadButton, SdlKeyConstants, find_command_for_sdl_key};
-use z3_game::host::{HostAction, InputState};
+use z3_game::host::{HostAction, InputState, render_number};
 use z3_game::runtime::{NativeRuntime, StateRecorder, apply_patch_command};
-use z3_sdl::{GameController, Rect, Renderer, Sdl, TextureLock, Window};
+use z3_sdl::{GameController, Rect, Renderer, Sdl, TextureLock, WgpuRenderer, Window};
 
 pub const WINDOW_TITLE: &str = "The Legend of Zelda: A Link to the Past";
 
@@ -73,13 +74,108 @@ pub fn draw_ppu_frame(
     snes_height: i32,
     render_flags: u8,
 ) -> Result<(), z3_sdl::Error> {
+    draw_ppu_frame_with_perf(
+        runtime,
+        renderer,
+        snes_width,
+        snes_height,
+        render_flags,
+        None,
+        false,
+    )
+}
+
+#[derive(Debug)]
+pub struct RenderPerformance {
+    history: [f64; 64],
+    average: f64,
+    position: usize,
+    pub frames_per_second: i32,
+}
+
+impl Default for RenderPerformance {
+    fn default() -> Self {
+        Self {
+            history: [0.0; 64],
+            average: 0.0,
+            position: 0,
+            frames_per_second: 0,
+        }
+    }
+}
+
+impl RenderPerformance {
+    fn record(&mut self, elapsed: Duration) {
+        let sample = 1.0 / elapsed.as_secs_f64().max(f64::EPSILON);
+        self.average += sample - self.history[self.position];
+        self.history[self.position] = sample;
+        self.position = (self.position + 1) & 63;
+        self.frames_per_second = (self.average * (1.0 / 64.0)) as i32;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn draw_ppu_frame_with_perf(
+    runtime: &mut NativeRuntime,
+    renderer: &mut Renderer,
+    snes_width: i32,
+    snes_height: i32,
+    render_flags: u8,
+    mut performance: Option<&mut RenderPerformance>,
+    overlay: bool,
+) -> Result<(), z3_sdl::Error> {
     let scale = runtime.ppu.current_render_scale(render_flags) as i32;
     let mut texture = sdl_renderer_begin_draw(renderer, snes_width * scale, snes_height * scale)?;
+    let before = Instant::now();
     runtime.draw(texture.pitch(), render_flags, |_| {});
+    if let Some(performance) = performance.as_mut() {
+        performance.record(before.elapsed());
+        if overlay {
+            let pitch = texture.pitch();
+            let offset = pitch * scale as usize;
+            render_number(
+                &mut runtime.ppu.pixels_mut()[offset..],
+                pitch,
+                performance.frames_per_second,
+                scale == 4,
+            );
+        }
+    }
     let source = runtime.ppu.pixels();
     let destination = texture.pixels_mut();
     destination[..source.len()].copy_from_slice(source);
     sdl_renderer_end_draw(texture)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn draw_ppu_frame_wgpu_with_perf(
+    runtime: &mut NativeRuntime,
+    renderer: &mut WgpuRenderer<'_>,
+    window: &Window,
+    snes_width: i32,
+    snes_height: i32,
+    render_flags: u8,
+    mut performance: Option<&mut RenderPerformance>,
+    overlay: bool,
+) -> Result<(), z3_sdl::Error> {
+    let scale = runtime.ppu.current_render_scale(render_flags) as i32;
+    let pitch = renderer.begin_draw((snes_width * scale) as u32, (snes_height * scale) as u32);
+    let before = Instant::now();
+    runtime.draw(pitch, render_flags, |_| {});
+    if let Some(performance) = performance.as_mut() {
+        performance.record(before.elapsed());
+        if overlay {
+            let offset = pitch * scale as usize;
+            render_number(
+                &mut runtime.ppu.pixels_mut()[offset..],
+                pitch,
+                performance.frames_per_second,
+                scale == 4,
+            );
+        }
+    }
+    renderer.pixels_mut().copy_from_slice(runtime.ppu.pixels());
+    renderer.present(window)
 }
 
 pub const SDL_KEY_CONSTANTS: SdlKeyConstants = SdlKeyConstants {
