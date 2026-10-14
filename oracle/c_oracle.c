@@ -5,9 +5,11 @@
 #include <string.h>
 
 #include "src/assets.h"
+#include "src/audio.h"
 #include "src/config.h"
 #include "src/types.h"
 #include "src/zelda_rtl.h"
+#include "src/spc_player.h"
 #include "snes/snes.h"
 
 const uint8 *g_asset_ptrs[kNumberOfAssets];
@@ -130,6 +132,14 @@ void z3c_step_raw(uint16_t input, uint8_t run_what) {
     ZeldaRunFrameInternal(input, run_what);
 }
 
+int z3c_load_reference_replay(int chapter) {
+  return g_initialized && ZeldaLoadReferenceReplayForTest(chapter);
+}
+
+int z3c_step_replay(void) {
+  return g_initialized && ZeldaRunFrame(0);
+}
+
 void z3c_configure_features(uint32_t features, uint8_t extra_left_right) {
   if (!g_initialized)
     return;
@@ -175,4 +185,31 @@ int z3c_import_snapshot(const uint8_t *source, size_t length) {
 void z3c_render(uint8_t *pixels, size_t pitch, uint32_t render_flags) {
   if (g_initialized && pixels != NULL)
     ZeldaDrawPpuFrame(pixels, pitch, render_flags);
+}
+
+void z3c_export_cgram(uint8_t *destination) {
+  for (int i = 0; i < 256; i++) {
+    destination[i * 2] = (uint8_t)g_zenv.ppu->cgram[i];
+    destination[i * 2 + 1] = (uint8_t)(g_zenv.ppu->cgram[i] >> 8);
+  }
+}
+
+void z3c_render_audio(int16_t *samples) {
+  if (g_initialized && samples != NULL)
+    ZeldaRenderAudio(samples, 534, 2);
+}
+
+void z3c_export_audio_state(uint8_t *destination) {
+  if (!g_initialized || destination == NULL)
+    return;
+  _Static_assert(sizeof(Dsp) - offsetof(Dsp, ram) == 3024,
+                 "C DSP snapshot layout changed");
+  SpcPlayer_CopyVariablesToRam(g_zenv.player);
+  memcpy(destination, g_zenv.player->ram, 65536);
+  memcpy(destination + 65536, g_zenv.player->dsp->ram, 3024);
+}
+
+void z3c_export_audio_queue(uint8_t *destination) {
+  if (g_initialized && destination != NULL)
+    ZeldaExportApuQueueForTest(destination);
 }

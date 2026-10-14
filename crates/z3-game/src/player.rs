@@ -1746,7 +1746,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         let phase = self.inc8(0x30d);
         self.ram.write_u8(0x3d, 3);
-        self.ram.write_u8(0x300, TIMERS[base + usize::from(phase)]);
+        // C reads one byte past kBugNetTimers for the final facing/phase,
+        // then immediately clears this timer below; that transient read is unobservable.
+        if phase != 10 {
+            self.ram.write_u8(0x300, TIMERS[base + usize::from(phase)]);
+        }
         if phase == 10 {
             self.ram.write_u8(0x30d, 0);
             self.ram.write_u8(0x300, 0);
@@ -2263,7 +2267,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return;
         }
         self.ram.write_u8(0x3b, 0);
-        let tile = self.ram.read_u8(0x368);
+        let tile = self.ram.read_u8(0x76);
         let Some((mut item, chest_position)) = self.runtime.open_chest(self.ram, tile) else {
             self.ram.write_u8(0x2e9, 0);
             return;
@@ -2513,57 +2517,59 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if timer == 0 {
                 self.ram.write_u8(0x46, 1);
                 let z = (self.ram.read_u8(0x24) & 0xfe) as i8;
-                if z <= 0 && (self.ram.read_u8(0x29) as i8) < 0 && self.ram.read_u8(0x4d) != 0 {
-                    self.ram.write_u8(0x37b, 0);
-                    let previous = self.ram.read_u8(0x5d);
-                    self.ram.write_u16(0x72, u16::from(previous));
-                    if previous != 6 {
-                        for a in [0x3c, 0x3a, 0x3d, 0x79] {
-                            self.ram.write_u8(a, 0);
-                        }
-                    }
-                    self.link_splash_upon_landing();
-                    if self.ram.read_u8(0x2e0) == 0 || self.ram.read_u8(0x345) == 0 {
-                        if self.ram.read_u8(0x2f8) != 0 {
-                            self.ram.write_u8(0x2f8, 0);
-                            self.runtime.ancilla_sfx2_near(self.ram, 33);
-                        } else if previous != 2 && self.ram.read_u8(0x5d) != 4 {
-                            self.runtime.ancilla_sfx2_near(self.ram, 33);
-                        }
-                        if self.ram.read_u8(0x5d) == 4 {
-                            self.link_force_unequip_cape_quietly();
-                            if self.ram.read_u8(0x1b) != 0
-                                && previous != 2
-                                && self.ram.read_u8(0xf356) != 0
-                            {
-                                self.ram.write_u8(0xee, 1);
+                if z <= 0 && (self.ram.read_u8(0x29) as i8) < 0 {
+                    if self.ram.read_u8(0x4d) != 0 {
+                        self.ram.write_u8(0x37b, 0);
+                        let previous = self.ram.read_u8(0x5d);
+                        self.ram.write_u16(0x72, u16::from(previous));
+                        if previous != 6 {
+                            for a in [0x3c, 0x3a, 0x3d, 0x79] {
+                                self.ram.write_u8(a, 0);
                             }
-                            self.runtime.ancilla_add_splash(self.ram, 21, 0);
                         }
-                        self.tile_detect_main_handler(0);
-                        if self.ram.read_u16(0x357) & 1 != 0 {
-                            self.runtime.ancilla_sfx2_near(self.ram, 26);
+                        self.link_splash_upon_landing();
+                        if self.ram.read_u8(0x2e0) == 0 || self.ram.read_u8(0x345) == 0 {
+                            if self.ram.read_u8(0x2f8) != 0 {
+                                self.ram.write_u8(0x2f8, 0);
+                                self.runtime.ancilla_sfx2_near(self.ram, 33);
+                            } else if previous != 2 && self.ram.read_u8(0x5d) != 4 {
+                                self.runtime.ancilla_sfx2_near(self.ram, 33);
+                            }
+                            if self.ram.read_u8(0x5d) == 4 {
+                                self.link_force_unequip_cape_quietly();
+                                if self.ram.read_u8(0x1b) != 0
+                                    && previous != 2
+                                    && self.ram.read_u8(0xf356) != 0
+                                {
+                                    self.ram.write_u8(0xee, 1);
+                                }
+                                self.runtime.ancilla_add_splash(self.ram, 21, 0);
+                            }
+                            self.tile_detect_main_handler(0);
+                            if self.ram.read_u16(0x357) & 1 != 0 {
+                                self.runtime.ancilla_sfx2_near(self.ram, 26);
+                            }
+                            if self.ram.read_u16(0x359) & 1 != 0 && self.ram.read_u8(0x12e) != 36 {
+                                self.runtime.ancilla_sfx2_near(self.ram, 28);
+                            }
+                            if self.ram.read_u16(0x341) & 1 != 0 {
+                                self.ram.write_u8(0x5d, 4);
+                                self.link_set_to_deep_water();
+                                self.link_reset_sword_and_item_usage();
+                                self.runtime.ancilla_add_splash(self.ram, 21, 0);
+                            }
                         }
-                        if self.ram.read_u16(0x359) & 1 != 0 && self.ram.read_u8(0x12e) != 36 {
-                            self.runtime.ancilla_sfx2_near(self.ram, 28);
+                        if self.ram.read_u8(0xee) == 2 {
+                            self.ram.write_u8(0xee, 0);
                         }
-                        if self.ram.read_u16(0x341) & 1 != 0 {
-                            self.ram.write_u8(0x5d, 4);
-                            self.link_set_to_deep_water();
-                            self.link_reset_sword_and_item_usage();
-                            self.runtime.ancilla_add_splash(self.ram, 21, 0);
+                        if self.ram.read_u8(0x47a) != 0 {
+                            self.dungeon_handle_layer_change();
                         }
+                        finish_landing = true;
                     }
-                    if self.ram.read_u8(0xee) == 2 {
-                        self.ram.write_u8(0xee, 0);
-                    }
-                    if self.ram.read_u8(0x47a) != 0 {
-                        self.dungeon_handle_layer_change();
-                    }
-                    finish_landing = true;
+                    self.ram.write_u8(0x2e, 0);
+                    self.ram.write_u8(0x46, 0);
                 }
-                self.ram.write_u8(0x2e, 0);
-                self.ram.write_u8(0x46, 0);
             }
         } else {
             if self.ram.read_u8(0xee) == 2 {
@@ -2572,6 +2578,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if self.ram.read_u8(0x47a) != 0 {
                 self.dungeon_handle_layer_change();
             }
+            self.ram.write_u8(0x2e, 0);
+            self.ram.write_u8(0x46, 0);
         }
         if finish_landing {
             self.ram.write_u16(0x24, 0);
@@ -2668,6 +2676,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         self.link_handle_cape_passive_lift_check();
         if self.ram.read_u8(0x46) != 0 {
+            self.ram.write_u8(0x6b, 0);
             for address in [0x2e9, 0x30d, 0x30e, 0x30a, 0x3b, 0x309, 0x308, 0x376] {
                 self.ram.write_u8(address, 0);
             }
@@ -2700,7 +2709,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if direction == 0 && self.ram.read_u8(0x376) & 2 == 0 {
                 direction = self.ram.read_u8(0xf0) & 0xf;
                 if direction == 0 {
-                    for address in [0x28, 0x27, 0x67, 0x26, 0x2e] {
+                    for address in [0x31, 0x30, 0x67, 0x26, 0x2e] {
                         self.ram.write_u8(address, 0);
                     }
                     self.ram.write_u8(0x48, self.ram.read_u8(0x48) & !0xf);
@@ -2712,6 +2721,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x67, direction);
                 if direction != self.ram.read_u8(0x26) {
                     self.ram.write_u8(0x26, direction);
+                    self.ram.write_u8(0x6b, 0);
                     for address in [0x2b, 0x2a, 0x2e9, 0x48] {
                         self.ram.write_u8(address, 0);
                     }
@@ -2738,6 +2748,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         ] {
             self.ram.write_u8(address, 0);
         }
+        self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x40);
         self.link_reset_swimming_state();
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
         self.ram.write_u16(0x24, self.ram.read_u16(0x24) & 0xff);
@@ -2755,7 +2766,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x5d, PlayerState::Electrocution as u8);
             self.link_state_zapped();
         } else {
-            self.ram.write_u8(0x2e9, 0);
+            self.ram.write_u8(0x6b, 0);
             self.ram.write_u8(0x5d, PlayerState::RecoilWall as u8);
             self.link_state_recoil();
         }
@@ -3001,6 +3012,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 if self.ram.read_u8(0xf0) & 4 != 0 {
                     self.ram.write_u8(0x3a, 4);
                     self.runtime.ancilla_sfx2_near(self.ram, 0x22);
+                } else {
+                    self.link_move_position();
+                    self.link_handle_cardinal_collision();
+                    self.handle_indoor_camera_and_doors();
+                    return;
                 }
             }
             if self.ram.read_u8(0x3a) != 0 {
@@ -3031,7 +3047,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                         self.ram.write_u8(0x30a, 0);
                         self.ram.write_u8(0x308, 1);
                         self.ram.write_u8(0x309, 0);
+                    } else {
+                        self.link_move_position();
+                        self.link_handle_cardinal_collision();
+                        self.handle_indoor_camera_and_doors();
+                        return;
                     }
+                } else {
+                    self.link_move_position();
+                    self.link_handle_cardinal_collision();
+                    self.handle_indoor_camera_and_doors();
+                    return;
                 }
             }
         }
@@ -3118,7 +3144,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
         }
         self.ram.write_u8(
-            0x27,
+            0x30,
             self.ram.read_u8(0x364).wrapping_sub(self.ram.read_u8(0x24)),
         );
         self.ram.write_u8(0x362, self.ram.read_u8(0x29));
@@ -3446,8 +3472,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 return;
             }
             self.runtime.ancilla_add_dash_dust(self.ram, true, 30, 0);
-            self.ram.write_u8(0x27, 0);
-            self.ram.write_u8(0x28, 0);
+            self.ram.write_u8(0x30, 0);
+            self.ram.write_u8(0x31, 0);
             self.ram.write_u8(0x2f1, 64);
             self.ram.write_u8(0x5e, 16);
             let mut d = self.ram.read_u8(0xf0) & 0xf;
@@ -3457,6 +3483,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x340, d);
             self.ram.write_u8(0x67, d);
             self.ram.write_u8(0x26, d);
+            self.ram.write_u8(0x6b, 0);
             self.ram.write_u8(0x2e9, 0);
             self.link_handle_moving_animation_full_long_entry();
             let ox = self.ram.read_u16(0x22);
@@ -3468,16 +3495,16 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.link_handle_velocity_and_sand_drag(ox, oy);
             }
             self.ram.write_u8(
-                0x27,
+                0x30,
                 self.ram
                     .read_u16(0x20)
-                    .wrapping_sub(self.ram.read_u16(0x3e)) as u8,
+                    .wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8,
             );
             self.ram.write_u8(
-                0x28,
+                0x31,
                 self.ram
                     .read_u16(0x22)
-                    .wrapping_sub(self.ram.read_u16(0x40)) as u8,
+                    .wrapping_sub(u16::from(self.ram.read_u8(0x3f))) as u8,
             );
             self.link_handle_cardinal_collision();
             self.handle_indoor_camera_and_doors();
@@ -3990,7 +4017,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if self.ram.read_u8(0x24) == 0 {
                 return;
             }
-            if (self.ram.read_u16(0x24) as i16) < 0 {
+            if (self.ram.read_u8(0x24) as i8) < 0 {
                 self.ram.write_u16(0x24, 0xffff);
                 self.ram.write_u8(0x29, 0xff);
                 return;
@@ -5645,7 +5672,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if vel == 0 {
             return;
         }
-        let direction = if (vel as i8) < 0 { 2 } else { 3 };
+        let direction = if self.ram.read_u8(0x6c) == 2 {
+            if self.ram.read_u8(0x22) < 0x80 { 2 } else { 3 }
+        } else if (vel as i8) < 0 {
+            2
+        } else {
+            3
+        };
         self.ram.write_u8(0x66, direction);
         self.runtime.tile_detect_movement_x(self.ram, direction);
         if self.ram.read_u8(0x1b) != 0 {
@@ -5722,6 +5755,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
         }
         if self.ram.read_u8(0x315) & 2 == 0 {
+            self.ram.write_u8(0x6c, 0);
             self.clear_door_axis_state()
         }
         self.finish_indoor_collision_y()
@@ -6598,7 +6632,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     return;
                 }
             }
-        } else if self.ram.read_u8(0xee) == 0 {
+        } else {
+            if self.ram.read_u8(0xee) != 0 {
+                return;
+            }
             self.ram.write_u8(0x48, self.ram.read_u8(0x48) & !9)
         }
         self.reset_push_timer_and_drag()
@@ -6664,7 +6701,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     return;
                 }
             }
-        } else if self.ram.read_u8(0xee) == 0 {
+        } else {
+            if self.ram.read_u8(0xee) != 0 {
+                return;
+            }
             self.ram.write_u8(0x48, self.ram.read_u8(0x48) & !9)
         }
         self.reset_push_timer_and_drag()
@@ -6836,14 +6876,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return;
         }
         let high_half = self.ram.read_u8(0x22) >= 0x80;
-        let vel = self.ram.read_u8(0x30);
-        let delta = if high_half {
-            if (vel as i8) >= 0 { -1 } else { 1 }
-        } else if (vel as i8) < 0 {
-            -1
-        } else {
-            1
-        };
+        let delta = if high_half { -1 } else { 1 };
         if self.ram.read_u8(0x50) & 1 == 0 {
             self.ram.write_u8(0x2f, if high_half { 4 } else { 6 })
         }
@@ -7576,7 +7609,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             {
                 if self.ram.read_u8(0x1b) != 0 {
                     self.runtime.dungeon_flag_room_data_quadrants(self.ram);
-                    self.runtime.ancilla_sfx2_near(self.ram, 33);
+                    self.runtime.ancilla_sfx2_near(self.ram, 0x33);
                     self.ram.write_u8(0x5e, 0);
                     self.ram.write_u8(0x11, 21);
                     self.ram.write_u8(0xa2, self.ram.read_u8(0xa0));
@@ -8123,7 +8156,7 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u8(0x29, 0xfe);
-        ram.write_u16(0x24, 0x8001);
+        ram.write_u16(0x24, 0x8081);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
@@ -8132,6 +8165,11 @@ mod tests {
         p.player_change_z(2);
         assert_eq!(p.ram.read_u16(0x24), 0xffff);
         assert_eq!(p.ram.read_u8(0x29), 0xff);
+        p.ram.write_u16(0x24, 0x8001);
+        p.ram.write_u8(0x29, 0xfe);
+        p.player_change_z(2);
+        assert_eq!(p.ram.read_u16(0x24), 0x8001);
+        assert_eq!(p.ram.read_u8(0x29), 0xfc);
         p.ram.write_u16(0x24, 0);
         p.ram.write_u8(0x29, 0xfe);
         p.player_change_z(2);

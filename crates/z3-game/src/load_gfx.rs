@@ -768,8 +768,8 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
         };
         match state {
             0 => {
-                let ctr = self.read8(0x6be).wrapping_add(1);
-                self.write8(0x6be, ctr);
+                let ctr = self.read8(0x6ba).wrapping_add(1);
+                self.write8(0x6ba, ctr);
                 if ctr != 32 {
                     self.write8(0x200, 0);
                 } else {
@@ -871,11 +871,7 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
         if high {
             // C's `Do3To4High` uses this WRAM range as an eight-word
             // temporary, so the final converted tile remains observable.
-            let final_tile = &source[63 * 24..64 * 24];
-            for row in 0..8 {
-                let value = u16::from(final_tile[row * 2] | final_tile[row * 2 + 1]);
-                self.write16(0xbf + (7 - row) * 2, value);
-            }
+            leave_high_conversion_scratch(self.wram, source);
         }
     }
 
@@ -953,7 +949,7 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
     pub fn load_default_graphics(&mut self) {
         let source = self.assets.sprite(0).to_vec();
         self.convert_to_vram(0x4000, &source, true);
-        // The C converter uses g_ram[0xbf..0xc7] as an eight-byte scratch
+        // The C converter uses g_ram[0xbf..0xcf] as eight 16-bit scratch words
         // array. It processes each tile's first 16 bytes in reverse-index
         // order and leaves the final tile's plane OR masks observable in
         // WRAM, so canonical state parity must preserve that residue.
@@ -979,10 +975,12 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
         self.decomp_spr_to_wram(0x14000, 0x5e);
         let source = self.wram[0x14000..0x14600].to_vec();
         do_3_to_4_high(&mut self.vram[0x5000..0x5400], &source);
+        leave_high_conversion_scratch(self.wram, &source);
 
         self.decomp_spr_to_wram(0x14000, 0x5f);
         let source = self.wram[0x14000..0x14600].to_vec();
         do_3_to_4_high(&mut self.vram[0x5400..0x5800], &source);
+        leave_high_conversion_scratch(self.wram, &source);
 
         self.transfer_font_to_vram();
 
@@ -1148,8 +1146,8 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
             self.write16(DARKENING_OR_LIGHTENING, mode);
             // The original increments WORD(link_actual_vel_y) here when mode is nonzero.
             if mode != 0 {
-                let v = self.read16(0x2f1);
-                self.write16(0x2f1, v.wrapping_add(1));
+                let v = self.read16(0x27);
+                self.write16(0x27, v.wrapping_add(1));
             }
         }
         self.increment8(FLAG_UPDATE_CGRAM);
@@ -1270,11 +1268,11 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
     pub fn agahnim_warp_shadow_filter(&mut self, index: usize, settings_addr: usize) {
         self.write16(
             PALETTE_FILTER_COUNTDOWN,
-            u16::from(self.read8(settings_addr + index)),
+            self.read16(settings_addr + index * 2),
         );
         self.write16(
             DARKENING_OR_LIGHTENING,
-            u16::from(self.read8(settings_addr + index + 3)),
+            self.read16(settings_addr + (index + 3) * 2),
         );
         let start = usize::from(PALETTE_FILTER_AGAHNIM[index] >> 1);
         for _ in 0..2 {
@@ -1290,10 +1288,13 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
                 break;
             }
         }
-        self.write8(settings_addr + index, self.read8(PALETTE_FILTER_COUNTDOWN));
-        self.write8(
-            settings_addr + index + 3,
-            self.read8(DARKENING_OR_LIGHTENING),
+        self.write16(
+            settings_addr + index * 2,
+            self.read16(PALETTE_FILTER_COUNTDOWN),
+        );
+        self.write16(
+            settings_addr + (index + 3) * 2,
+            self.read16(DARKENING_OR_LIGHTENING),
         );
         self.increment8(FLAG_UPDATE_CGRAM);
     }
@@ -1331,18 +1332,18 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
                 self.set_palette(MAIN_PALETTE, i, 0);
             }
         }
-        self.write8(0x6bf, 8); // mirror_vars.ctr
-        self.write8(0x6be, 0); // mirror_vars.ctr2
+        self.write8(0x6bb, 8); // mirror_vars.ctr
+        self.write8(0x6ba, 0); // mirror_vars.ctr2
     }
 
     pub fn mirror_warp_run_animation_submodules(&mut self) {
-        let counter = self.read8(0x6bf).wrapping_sub(1);
-        self.write8(0x6bf, counter);
+        let counter = self.read8(0x6bb).wrapping_sub(1);
+        self.write8(0x6bb, counter);
         if counter != 0 {
             self.animate_mirror_warp();
             return;
         }
-        self.write8(0x6bf, 2);
+        self.write8(0x6bb, 2);
         self.palette_filter_blinding_white();
     }
 
@@ -1367,7 +1368,7 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
         if self.read16(DARKENING_OR_LIGHTENING) == 0 {
             if next == 66 {
                 self.write16(DARKENING_OR_LIGHTENING, 0xff);
-                self.write8(0x6bf, 32);
+                self.write8(0x6bb, 32);
             }
         } else if next == 31 {
             self.write16(
@@ -1942,10 +1943,21 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
     pub fn overworld_load_palettes(&mut self, bg: u8, sprites: u8) {
         self.write16(0xaa8, 0);
         let bg_offset = usize::from(bg) * 3;
+        // The credits scene requests palette 167; the C table access runs into
+        // adjacent static data. Preserve the observed C oracle bytes here.
+        let bg_info = if bg == 167 {
+            [0, -49, -67]
+        } else {
+            [
+                OW_BG_PAL_INFO.get(bg_offset).copied().unwrap_or(-1),
+                OW_BG_PAL_INFO.get(bg_offset + 1).copied().unwrap_or(-1),
+                OW_BG_PAL_INFO.get(bg_offset + 2).copied().unwrap_or(-1),
+            ]
+        };
         for (address, value) in [
-            (0xab4, OW_BG_PAL_INFO[bg_offset]),
-            (0xab5, OW_BG_PAL_INFO[bg_offset + 1]),
-            (0xab8, OW_BG_PAL_INFO[bg_offset + 2]),
+            (0xab4, bg_info[0]),
+            (0xab5, bg_info[1]),
+            (0xab8, bg_info[2]),
         ] {
             if value >= 0 {
                 self.write8(address, value as u8);
@@ -2064,7 +2076,7 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
             if property == 2 {
                 self.palette_assert_translucency_swap();
                 if self.read8(DUNGEON_ROOM) == 13 {
-                    self.wram[0xc012..0xc018].fill(0);
+                    self.wram[0xc019..0xc025].fill(0);
                     self.palette_load_agahnim();
                 }
                 color_math = 0x70;
@@ -2235,7 +2247,7 @@ impl<A: GfxAssets, H: LoadGfxHooks> LoadGfx<'_, A, H> {
         self.write16(0x67c, u16::from(radius));
         self.write16(0x67e, u16::from(mode));
         self.hooks.ppu_write(0x0c, 0);
-        self.hooks.setup_hdma(0xf2fb, 0xf2, 0x26);
+        self.hooks.setup_hdma(0xf2fb, 0, 0x26);
         self.write8(0x96, 0x33);
         self.write8(0x97, 3);
         self.write8(0x98, 0x33);
@@ -2635,7 +2647,18 @@ fn convert_3_to_4(dst: &mut [u8], src: &[u8], count: usize, high: bool, _vram: b
 fn leave_default_graphics_scratch(wram: &mut [u8], source: &[u8]) {
     let final_tile = &source[63 * 24..63 * 24 + 16];
     for (pair_index, pair) in final_tile.chunks_exact(2).enumerate() {
-        wram[0xbf + 7 - pair_index] = pair[0] | pair[1];
+        let address = 0xbf + (7 - pair_index) * 2;
+        wram[address] = pair[0] | pair[1];
+        wram[address + 1] = 0;
+    }
+}
+
+fn leave_high_conversion_scratch(wram: &mut [u8], source: &[u8]) {
+    let final_tile = &source[63 * 24..63 * 24 + 16];
+    for (pair_index, pair) in final_tile.chunks_exact(2).enumerate() {
+        let address = 0xbf + (7 - pair_index) * 2;
+        wram[address] = pair[0] | pair[1];
+        wram[address + 1] = 0;
     }
 }
 
@@ -2699,11 +2722,13 @@ mod tests {
         for (index, byte) in source[63 * 24..63 * 24 + 16].iter_mut().enumerate() {
             *byte = index as u8;
         }
-        let mut wram = [0xa5; 0xc7];
+        let mut wram = [0xa5; 0xcf];
         leave_default_graphics_scratch(&mut wram, &source);
         assert_eq!(
-            &wram[0xbf..0xc7],
-            &[0x0f, 0x0d, 0x0b, 0x09, 0x07, 0x05, 0x03, 0x01]
+            &wram[0xbf..0xcf],
+            &[
+                0x0f, 0, 0x0d, 0, 0x0b, 0, 0x09, 0, 0x07, 0, 0x05, 0, 0x03, 0, 0x01, 0
+            ]
         );
     }
 

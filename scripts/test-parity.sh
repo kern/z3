@@ -39,7 +39,7 @@ cargo run -q -p z3-verify --bin check_misc -- \
 cargo run -q -p z3-verify --bin check_overworld_decompress -- \
   build/c-oracle/overworld_decompress_oracle
 cargo run -q -p z3-verify --bin inspect_rom -- zelda3.sfc
-scripts/test-save-parity.sh 2000
+scripts/test-full-replay.sh
 cargo build -q -p z3-native --bin z3
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
   target/debug/z3 --config config/parity.ini --frames 600 zelda3.sfc

@@ -20,6 +20,7 @@ pub fn read(ram: &Ram<'_>, index: usize) -> OamEnt {
     }
 }
 
+#[track_caller]
 pub fn write(ram: &mut Ram<'_>, index: usize, entry: OamEnt) {
     assert!(index < OAM_ENTRY_COUNT);
     let address = OAM_BUFFER + index * 4;
@@ -29,6 +30,7 @@ pub fn write(ram: &mut Ram<'_>, index: usize, entry: OamEnt) {
     ram.write_u8(address + 3, entry.flags);
 }
 
+#[track_caller]
 pub fn set_helper0(
     ram: &mut Ram<'_>,
     index: usize,
@@ -78,6 +80,7 @@ pub fn set_helper1(
     ram.write_u8(BYTEWISE_EXTENDED_OAM + index, big | ((x >> 8) as u8 & 1));
 }
 
+#[track_caller]
 pub fn set_plain(ram: &mut Ram<'_>, index: usize, x: u8, y: u8, charnum: u8, flags: u8, big: u8) {
     write(
         ram,

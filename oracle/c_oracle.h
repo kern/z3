@@ -20,6 +20,8 @@ int z3c_initialize(const uint8_t *assets, size_t assets_len);
 
 void z3c_reset(int preserve_sram);
 void z3c_step_raw(uint16_t input, uint8_t run_what);
+int z3c_load_reference_replay(int chapter);
+int z3c_step_replay(void);
 void z3c_configure_features(uint32_t features, uint8_t extra_left_right);
 
 size_t z3c_core_state_size(void);
@@ -29,6 +31,12 @@ int z3c_import_snapshot(const uint8_t *source, size_t length);
 
 // Renders the current PPU state into a caller-owned ARGB buffer.
 void z3c_render(uint8_t *pixels, size_t pitch, uint32_t render_flags);
+void z3c_export_cgram(uint8_t *destination);
+// Advance the C APU by one 534-sample stereo game frame.
+void z3c_render_audio(int16_t *samples);
+// Diagnostic copies of the current SPC RAM and serialized DSP state.
+void z3c_export_audio_state(uint8_t *destination);
+void z3c_export_audio_queue(uint8_t *destination);
 
 #ifdef __cplusplus
 }

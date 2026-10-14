@@ -5181,7 +5181,7 @@ handle_62:
       if (dungeon_room_index == 0x65)
         dung_savegame_state_bits |= 0x1000;
       Point16U pt;
-      printf("Wtf is R6\n");
+      fprintf(stderr, "Wtf is R6\n");
       ThievesAttic_DrawLightenedHole(0, 0, &pt);
       sound_effect_2 = 0x1b;
       return;

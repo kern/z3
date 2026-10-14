@@ -49,7 +49,7 @@ PAIRS = {
     crates/z3-game/src/runtime.rs
     crates/z3-snes/src/cpu.rs
   ],
-  "src/zelda_rtl.c" => %w[crates/z3-game/src/runtime.rs crates/z3-game/src/host.rs crates/z3-game/src/assets.rs crates/z3-snes/src/ppu.rs],
+  "src/zelda_rtl.c" => %w[crates/z3-game/src/runtime.rs crates/z3-game/src/host.rs crates/z3-game/src/assets.rs crates/z3-snes/src/ppu.rs crates/z3-verify/src/c_oracle.rs],
   "snes/apu.c" => %w[crates/z3-snes/src/apu.rs],
   "snes/cart.c" => %w[crates/z3-snes/src/cart.rs],
   "snes/cpu.c" => %w[crates/z3-snes/src/cpu.rs],
@@ -78,6 +78,8 @@ EQUIVALENT_NAMES = {
   "ZeldaResetApuQueue" => "reset",
   # Oracle-only wrapper around the already translated snapshot loader.
   "ZeldaLoadSnapshotForTest" => "load_snes_state",
+  # Oracle-only reference replay loader, paired with the Rust oracle client.
+  "ZeldaLoadReferenceReplayForTest" => "load_reference_replay",
 
   # select_file.c: reviewed state wrappers and helpers consolidated into the
   # FileSelect state machine. Static stripe builders remain local Rust code.

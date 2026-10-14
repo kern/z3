@@ -47,6 +47,15 @@ pub trait DungeonHooks {
     fn dungeon_movable_block(&self, _index: usize) -> (u16, u16) {
         (0xffff, 0)
     }
+    fn dungeon_movable_init_data(&self) -> &[u8] {
+        &[]
+    }
+    fn dungeon_torch_init_data(&self) -> &[u8] {
+        &[]
+    }
+    fn dungeon_torch_junk_data(&self) -> &[u8] {
+        &[]
+    }
     fn dungeon_torch_data(&self, _index: usize) -> u16 {
         0xffff
     }
@@ -164,6 +173,7 @@ pub trait DungeonHooks {
     fn update_pegs_step2(&mut self, _ram: &mut Ram<'_>) {}
     fn recover_peg_gfx_from_mapping(&mut self, _ram: &mut Ram<'_>) {}
     fn dungeon_reset_sprites(&mut self, _ram: &mut Ram<'_>) {}
+    fn sprite_reset_all(&mut self, _ram: &mut Ram<'_>) {}
     fn load_new_sprite_gfx_set(&mut self, _ram: &mut Ram<'_>) {}
     fn palette_assert_translucency_swap(&mut self, _ram: &mut Ram<'_>) {}
     fn room_draw_adjust_torch_lighting_change(
@@ -1382,7 +1392,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             0x1e => self.room_draw_rightwards_2x2(&source, destination),
             0x1f => {
                 let count = self.r16(0x432);
-                let layer = if self.r16(0xbf) == 0x4000 { 0 } else { 0x1000 };
+                let layer = if self.r16(0xbf) == 0x4000 { 0x1000 } else { 0 };
                 self.w16(0x6a0 + usize::from(count), dsto | layer);
                 self.w16(0x432, count.wrapping_add(2));
                 self.room_draw_rightwards_2x2(&source, destination);
@@ -1886,7 +1896,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             0x3c => self.load_sanctuary_wall(source, destination, dsto),
             0x3e => self.room_draw_1x3_rightwards(6, source, destination),
             0x3f => {
-                let layer = if self.r16(0xbf) == 0x4000 { 0 } else { 0x1000 };
+                let layer = if self.r16(0xbf) == 0x4000 { 0x1000 } else { 0 };
                 let base = usize::from(dsto | layer);
                 for column in 0..8 {
                     for row in 0..7 {
@@ -1900,7 +1910,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     fn record_floor_stairs(&mut self, counter: usize, dsto: u16, dst: usize, src: usize, up: bool) {
         let old = self.r16(counter);
-        let layer = if self.r16(0xbf) == 0x4000 { 0 } else { 0x1000 };
+        let layer = if self.r16(0xbf) == 0x4000 { 0x1000 } else { 0 };
         self.w16(0x6b0 + usize::from(old), dsto | layer);
         let next = old.wrapping_add(2);
         let addresses: &[usize] = if up {
@@ -1984,7 +1994,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             _ => (0x484, 0x1190, true, &[0x484, 0x4a6, 0x4a8]),
         };
         let old = self.r16(counter);
-        let layer = if self.r16(0xbf) == 0x4000 { 0 } else { 0x1000 };
+        let layer = if self.r16(0xbf) == 0x4000 { 0x1000 } else { 0 };
         self.w16(0x6b0 + usize::from(old), dsto.wrapping_sub(0x40) | layer);
         for &a in prop {
             self.w16(a, old.wrapping_add(2));
@@ -2046,7 +2056,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     pub fn room_draw_some_big_decors(&mut self, width: usize, src: &[u16], destination: usize) {
         assert!(src.len() >= width * 8);
-        let destination = destination + if self.r16(0xbf) == 0x4000 { 0x1000 } else { 0 };
+        let destination = destination | if self.r16(0xbf) == 0x4000 { 0x1000 } else { 0 };
         for row in 0..8 {
             for column in 0..width {
                 self.set_bg2(destination + xy(column, row), src[row * width + column]);
@@ -2159,24 +2169,29 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     pub fn dungeon_load_room(&mut self) {
         self.dungeon_load_header();
+        self.w8(0x3f4, 0);
         self.w16(0x4b8, 0);
-        self.w8(0xc208, self.r8(0x414));
-        self.w8(0xc209, self.r8(0xae));
-        self.w8(0x0c, 0x30);
-        self.w8(0x0d, 0xff);
+        self.w8(0x428, self.r8(0xad));
+        self.w8(0x429, self.r8(0xae));
+        self.w8(0x41c, 0x30);
+        self.w8(0x41d, 0xff);
+        self.w16(0x310, 0);
+        self.w16(0x312, 0);
+        self.w16(0x68a, 0); // water_hdma_var5 is reset on every room load.
 
         // Room-construction scratch state. These are individual C globals, but
         // they form dense WRAM groups in the original memory map.
         for address in [
-            0x40a, 0x41e, 0x420, 0x422, 0x424, 0x428, 0x42a, 0x42c, 0x42e, 0x430, 0x432, 0x434,
-            0x436, 0x438, 0x43a, 0x43c, 0x43e, 0x440, 0x442, 0x444, 0x446, 0x448, 0x44a, 0x44c,
-            0x44e, 0x450, 0x452, 0x454, 0x456, 0x45c, 0x460, 0x466, 0x470, 0x474, 0x478, 0x480,
-            0x484, 0x48c, 0x492, 0x496, 0x498, 0x49a, 0x49c, 0x49e,
+            0x41a, 0x420, 0x422, 0x424, 0x42c, 0x42e, 0x430, 0x432, 0x436, 0x438, 0x43a, 0x43c,
+            0x43e, 0x440, 0x442, 0x444, 0x446, 0x448, 0x44e, 0x450, 0x452, 0x454, 0x456, 0x45c,
+            0x460, 0x478, 0x47e, 0x480, 0x482, 0x484, 0x496, 0x498, 0x49a, 0x49c, 0x49e, 0x4a2,
+            0x4a4, 0x4a6, 0x4a8, 0x4ae, 0x4b0,
         ] {
             self.w16(address, 0);
         }
-        self.w16(0x101a, 0xffff);
+        self.w16(0x436, 0xffff);
         self.ram.slice_mut(0x1980, 0x60).fill(0);
+        self.ram.slice_mut(0x19e0, 10).fill(0);
         self.ram.slice_mut(0x4f0, 16).fill(0);
         self.ram.slice_mut(0x500, 32).fill(0);
         self.ram.slice_mut(0x520, 32).fill(0);
@@ -2188,7 +2203,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.room_draw_draw_floors(&room_layout);
         let old_offset = self.r16(0xba);
         let layout = room_layout[usize::from(old_offset)];
-        self.w8(0xa5, layout);
+        self.w16(0x40e, u16::from(layout));
         let default_layout = self
             .hooks
             .default_room_layout(usize::from(layout >> 2))
@@ -2209,7 +2224,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.room_draw_draw_all_objects(&room_layout);
 
         for object_offset in (0..0x18c).step_by(4) {
-            let (object_room, tilemap) = self.hooks.dungeon_movable_block(object_offset / 4);
+            // C reads the mutable WRAM table, which changes when a block is
+            // pushed into a pit; the asset table is only its initial value.
+            let object_room = self.r16(0xf940 + object_offset);
+            let tilemap = self.r16(0xf942 + object_offset);
             if object_room == self.r16(0xa0) {
                 self.hooks.dungeon_draw_pushable_block(
                     &mut self.ram,
@@ -2218,7 +2236,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 );
             }
         }
-        self.w16(0x478, self.r16(0x480));
+        self.w16(0x42e, self.r16(0x42c));
+        self.w16(0x478, self.r16(0x42c));
         let mut offset = 0usize;
         while offset != 0x120 {
             if self.hooks.dungeon_torch_data(offset / 2) == self.r16(0xa0) {
@@ -2382,14 +2401,16 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
         let source = self.object_data::<12>(0x1c5c);
         for column_offset in 0..6 {
-            self.set_bg2(
-                destination + xy(12 + column_offset, 9),
-                source[column_offset],
-            );
-            self.set_bg2(
-                destination + xy(18 + column_offset, 10),
-                source[column_offset + 6],
-            );
+            for x in [12, 18] {
+                self.set_bg2(
+                    destination + xy(x + column_offset, 9),
+                    source[column_offset],
+                );
+                self.set_bg2(
+                    destination + xy(x + column_offset, 10),
+                    source[column_offset + 6],
+                );
+            }
         }
 
         let source = self.object_data::<12>(0x1c74);
@@ -2817,7 +2838,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         }
         self.dungeon_flag_room_data_quadrants();
         self.w8(0x12f, 14);
-        self.w8(0x14, 1);
+        self.w8(0x18, 1);
         self.w8(0xb9e, 1);
     }
 
@@ -2898,11 +2919,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let original_index = usize::from(tile.wrapping_sub(0x58));
         let mut chest_index = original_index as i32;
         let location = self.r16(0x6e0 + original_index * 2);
-        let palace = usize::from(self.r16(0x40c) >> 1);
-        let has_big_key = self.r16(0xf366) & UPPER_BITMASKS[palace] != 0;
-
         let (position, source, attribute, data) = if location & 0x8000 != 0 {
-            if !has_big_key {
+            let palace = usize::from(self.r16(0x40c) >> 1);
+            if self.r16(0xf366) & UPPER_BITMASKS.get(palace).copied().unwrap_or(0) == 0 {
                 self.w16(0x1cf0, 0x7a);
                 self.hooks.main_show_text_message(&mut self.ram);
                 return 0xff;
@@ -2929,7 +2948,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 return 0xff;
             };
             if room & 0x8000 != 0 {
-                if !has_big_key {
+                let palace = usize::from(self.r16(0x40c) >> 1);
+                if self.r16(0xf366) & UPPER_BITMASKS.get(palace).copied().unwrap_or(0) == 0 {
                     self.w16(0x1cf0, 0x7a);
                     self.hooks.main_show_text_message(&mut self.ram);
                     return 0xff;
@@ -3531,11 +3551,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 destination |= 0x1000;
                 self.room_draw_flag_doors_and_get_final_type(1, door_type, destination);
                 let source = self.object_data::<80>(0x2656);
-                self.room_draw_some_big_decors(
-                    10,
-                    &source,
-                    usize::from(destination.wrapping_sub(259)),
-                );
+                destination = destination.wrapping_sub(259);
+                self.room_draw_some_big_decors(10, &source, usize::from(destination));
                 destination = destination.wrapping_sub(0x1000).wrapping_add(448);
                 for column in 0..10 {
                     let tile = self.r16(DUNG_BG1 + (usize::from(destination) + column) * 2);
@@ -3657,7 +3674,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             .position(|&door| door == 0xffff)
             .expect("dungeon room door list terminator");
         let mut copied = [0u16; 17];
-        assert!(end < copied.len());
+        assert!(
+            end < copied.len(),
+            "adjacent room {room:#x} has {end} doors"
+        );
         copied[..=end].copy_from_slice(&doors[..=end]);
         let mut flags = (self.r16(0xf000 + room * 2) & 0xf000) | 0x0f00;
         for (index, &door) in copied[..=end].iter().enumerate() {
@@ -4255,7 +4275,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         } else {
             (2, 0x1d1d, self.r16(0x440))
         };
-        self.w16(0x44a, kind);
+        if end != 0 {
+            self.w16(0x44a, kind);
+        }
         while offset != end {
             let position = usize::from(self.r16(0x6b8 + usize::from(offset)));
             self.write_upper_inroom_stair(position, attribute);
@@ -4337,7 +4359,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             3 => self.dungeon_load_door_attribute(),
             4 => {
                 self.w8(0x200, 5);
-                if self.r8(0x4bc) != 0 {
+                if self.r16(0xc172) != 0 {
                     self.dungeon_flip_crystal_peg_attribute();
                 }
             }
@@ -4352,7 +4374,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.dungeon_load_basic_attribute_full(0x1000);
         self.dungeon_load_object_attribute();
         self.dungeon_load_door_attribute();
-        if self.r8(0x4bc) != 0 {
+        if self.r16(0xc172) != 0 {
             self.dungeon_flip_crystal_peg_attribute();
         }
         self.w8(0x200, 0);
@@ -4421,7 +4443,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         } else {
             (2, 0x3d3d, self.r16(0x49e))
         };
-        self.w16(0x44a, kind);
+        if end != 0 {
+            self.w16(0x44a, kind);
+        }
         let mut offset = 0u16;
         while offset != end {
             let position = usize::from(self.r16(0x6ec + usize::from(offset)));
@@ -4462,13 +4486,13 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     }
 
     pub fn dung_tag_routine_0x2a(&mut self, slot: usize) {
-        if self.r16(0x20) & 0x100 != 0 && self.r16(0x22) & 0x100 == 0 {
+        if self.r16(0x22) & 0x100 != 0 && self.r16(0x20) & 0x100 == 0 {
             self.room_tag_quadrant_trigger(slot);
         }
     }
 
     pub fn dung_tag_routine_0x2b(&mut self, slot: usize) {
-        if self.r16(0x20) & 0x100 == 0 && self.r16(0x22) & 0x100 != 0 {
+        if self.r16(0x22) & 0x100 == 0 && self.r16(0x20) & 0x100 != 0 {
             self.room_tag_quadrant_trigger(slot);
         }
     }
@@ -4480,25 +4504,25 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     }
 
     pub fn dung_tag_routine_0x2d(&mut self, slot: usize) {
-        if self.r16(0x20) & 0x100 == 0 {
-            self.room_tag_quadrant_trigger(slot);
-        }
-    }
-
-    pub fn dung_tag_routine_0x2e(&mut self, slot: usize) {
-        if self.r16(0x20) & 0x100 != 0 {
-            self.room_tag_quadrant_trigger(slot);
-        }
-    }
-
-    pub fn dung_tag_routine_0x2f(&mut self, slot: usize) {
         if self.r16(0x22) & 0x100 == 0 {
             self.room_tag_quadrant_trigger(slot);
         }
     }
 
-    pub fn dung_tag_routine_0x30(&mut self, slot: usize) {
+    pub fn dung_tag_routine_0x2e(&mut self, slot: usize) {
         if self.r16(0x22) & 0x100 != 0 {
+            self.room_tag_quadrant_trigger(slot);
+        }
+    }
+
+    pub fn dung_tag_routine_0x2f(&mut self, slot: usize) {
+        if self.r16(0x20) & 0x100 == 0 {
+            self.room_tag_quadrant_trigger(slot);
+        }
+    }
+
+    pub fn dung_tag_routine_0x30(&mut self, slot: usize) {
+        if self.r16(0x20) & 0x100 != 0 {
             self.room_tag_quadrant_trigger(slot);
         }
     }
@@ -4703,7 +4727,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w8(0x10c, 5);
         self.w8(0x11, 23);
         self.w8(0xb0, 32);
-        self.w16(0x22, self.r16(0x22).wrapping_add(2));
+        self.w16(0x20, self.r16(0x20).wrapping_add(2));
         let mut position = position;
         if self.r16(0x12000 + usize::from(position)) & 0xfe00 != 0x2400 {
             position = position.wrapping_add(1);
@@ -4865,10 +4889,11 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w16(0xe0, self.r16(0xe2).wrapping_add(offset));
         if velocity != 0 {
             let first = MOVING_WALL_TAB1[usize::from(self.r8(0x41e) >> 1)] as u16;
-            let second = MOVING_WALL_TAB1
-                [usize::from(self.room_tag_advance_gigantic_wall(slot) >> 1)]
-                as u16;
-            if offset < first && offset < second {
+            if offset < first
+                && offset
+                    < MOVING_WALL_TAB1[usize::from(self.room_tag_advance_gigantic_wall(slot) >> 1)]
+                        as u16
+            {
                 self.finish_moving_wall(slot);
             }
             self.w8(0x17, 5);
@@ -4892,9 +4917,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w16(0xe0, self.r16(0xe2).wrapping_add(offset));
         if velocity != 0 {
             let first = MOVING_WALL_TAB0[usize::from(self.r8(0x41e) >> 1)];
-            let second =
-                MOVING_WALL_TAB0[usize::from(self.room_tag_advance_gigantic_wall(slot) >> 1)];
-            if offset >= first && offset >= second {
+            if offset >= first
+                && offset
+                    >= MOVING_WALL_TAB0[usize::from(self.room_tag_advance_gigantic_wall(slot) >> 1)]
+            {
                 self.finish_moving_wall(slot);
             }
             self.w8(0x17, 5);
@@ -6327,6 +6353,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let object_x2 = self.r16(0x478).wrapping_add((torch as u16).wrapping_mul(2));
         let object = usize::from(object_x2 >> 1);
         let mut position = self.r16(0x540 + object * 2) & 0x7fff;
+        self.w16(0x540 + object * 2, position);
         let torch_data = usize::from((self.r16(0x520 + object * 2) & 0xff) >> 1);
         self.w16(0xfb40 + torch_data * 2, position);
         position &= 0x3fff;
@@ -6384,7 +6411,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 self.w16(0x694, (door as u16) * 2);
                 if self.r16(0x19c0 + door * 2) as usize & 3 == direction {
                     let door_type = self.r16(0x1980 + door * 2) as u8 & 0xfe;
-                    if door_type == 0x42 {
+                    if door_type == 0x28 {
                         if self.r8(0x372) != 0 && self.r8(0x2f1) < 63 {
                             self.w16(0x68e, position);
                             let debris = self.hooks.ancilla_add_door_debris(&mut self.ram);
@@ -6419,7 +6446,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                             self.w16(0x1cf0, 0x7a);
                             self.hooks.main_show_text_message(&mut self.ram);
                         }
-                    } else if (0x20..0x2c).contains(&door_type)
+                    } else if (0x1c..0x2c).contains(&door_type)
                         && door_type != 0x2a
                         && self.r8(0xf36f) != 0
                     {
@@ -6468,7 +6495,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             .wrapping_add_signed(i16::from(self.r8(0x45) as i8))
             & 0x1f8)
             >> 3;
-        let probes = [(0x41u8, 0u16), (0x40, 1), (1, 64), (0, 1)];
+        let probes = [(0x41u8, 0u16), (0x40, 1), (1, 63), (0, 1)];
         let mut found = None;
         for (marker, delta) in probes {
             position = position.wrapping_add(delta);
@@ -6483,15 +6510,17 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         };
         let address;
         if attribute == 0x6c {
-            if marker & 0x40 != 0
-                && self.r8(0x12000 + usize::from(position.wrapping_sub(64))) & 0xfc != 0x6c
-            {
-                position = position.wrapping_add(64);
+            if marker & 0x40 != 0 {
+                position = position.wrapping_sub(64);
+                if self.r8(0x12000 + usize::from(position)) & 0xfc != 0x6c {
+                    position = position.wrapping_add(64);
+                }
             }
-            if marker & 1 != 0
-                && self.r8(0x12000 + usize::from(position.wrapping_sub(1))) & 0xfc != 0x6c
-            {
-                position = position.wrapping_add(1);
+            if marker & 1 != 0 {
+                position = position.wrapping_sub(1);
+                if self.r8(0x12000 + usize::from(position)) & 0xfc != 0x6c {
+                    position = position.wrapping_add(1);
+                }
             }
             let kind = self.r8(0x12000 + usize::from(position)) & 3;
             self.write_attr2(usize::from(position), 0x202);
@@ -6506,7 +6535,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         } else {
             self.w16(0x68e, position);
             let door = usize::from(attribute & 0xf);
-            if self.r16(0x1980 + door * 2) as u8 != 0x28 {
+            if self.r16(0x1980 + door * 2) as u8 != 0x32 {
                 return;
             }
             self.w8(0x12f, 27);
@@ -6528,7 +6557,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 .hooks
                 .dungeon_calculate_sfx_pan(&self.ram, (address & 0x7f) * 2),
         );
-        self.w8(0x14, 1);
+        self.w8(0x18, 1);
     }
 
     fn open_key_door(&mut self, door: usize, position: u16) {
@@ -6562,7 +6591,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 if attribute & 0xf0 == 0xf0 {
                     let door = usize::from(attribute & 0xf);
                     let kind = self.r16(0x1980 + door * 2) as u8 & 0xfe;
-                    if !matches!(kind, 0x42 | 0x2a | 0x2e) {
+                    if !matches!(kind, 0x28 | 0x2a | 0x2e) {
                         return;
                     }
                     self.w16(0x68e, position);
@@ -6794,9 +6823,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.dungeon_load_attribute_table();
         self.w8(0xaa4, 10);
         self.hooks.initialize_tilesets(&mut self.ram);
-        self.w8(0xab8, 10);
+        self.w8(0xab1, 10);
         self.hooks.dungeon_load_palettes(&mut self.ram);
-        if self.r8(0x56) | self.r8(0x5d) != 0 {
+        if self.r8(0x56) | self.r8(0x2e0) != 0 {
             self.hooks.load_gear_palettes_bunny(&mut self.ram);
         }
         self.w16(0x62c, (self.r16(0xa0) & 0xf) << 9);
@@ -6824,7 +6853,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w8(0xc007, 0x1f);
         self.w8(0xc00b, 0);
         self.w8(0xc009, 2);
-        self.w8(0x15, 0);
+        self.w16(0xaa8, 0);
         self.w8(0x57, 0);
         self.w8(0x3a, 0);
         self.w8(0x3c, 0);
@@ -6838,9 +6867,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         }
         self.w8(0x94, 9);
         self.hooks.follower_initialize(&mut self.ram);
+        self.hooks.sprite_reset_all(&mut self.ram);
         self.hooks.dungeon_reset_sprites(&mut self.ram);
         self.w8(0x2f0, 0);
-        self.w8(0xaaa, self.r8(0xaaa).wrapping_add(1));
+        self.w8(0x4c7, self.r8(0x4c7).wrapping_add(1));
         if self.r8(0xf3c5) == 0 && self.r8(0xf3c6) & 0x10 == 0 {
             self.w8(0x9c, 0x30);
             self.w8(0x9d, 0x50);
@@ -6887,7 +6917,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             state => panic!("invalid dungeon submodule {state}"),
         }
         if !self.hooks.misc_bug_fixes_enabled() || self.r8(0x10) == 7 {
-            self.w16(0x480, 0);
+            self.w16(0x42c, 0);
             self.dungeon_push_block_handler();
             if self.r8(0x11) == 0 {
                 self.hooks.graphics_load_chr_half_slot(&mut self.ram);
@@ -6896,7 +6926,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                     self.dungeon_handle_room_tags();
                     if self.r8(0x11) == 0 {
                         self.dungeon_process_torches_and_doors();
-                        if self.r16(0x422) != 0 {
+                        if self.r16(0x454) != 0 {
                             self.dungeon_clear_away_exploding_wall();
                         }
                         if self.r8(0x6c) == 0 {
@@ -6909,16 +6939,26 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.hooks.orient_lamp_light_cone(&mut self.ram);
         let bg2x = self.r16(0xe2);
         let bg2y = self.r16(0xe8);
-        let bg1x = self.r16(0xe0);
-        let bg1y = self.r16(0xe6);
-        self.w16(0xe2, bg2x.wrapping_add(self.r16(0x11c)));
-        self.w16(0xe8, bg2y.wrapping_add(self.r16(0x11a)));
-        self.w16(0xe0, bg1x.wrapping_add(self.r16(0x11c)));
-        self.w16(0xe6, bg1y.wrapping_add(self.r16(0x11a)));
-        if self.r8(0xc208) != 0 {
-            self.w16(0xe0, self.r16(0xe2).wrapping_add(self.r16(0x310)));
-            self.w16(0xe6, self.r16(0xe8).wrapping_add(self.r16(0x312)));
+        let mut bg1x = self.r16(0xe0);
+        let mut bg1y = self.r16(0xe6);
+        let adjusted_bg2x = bg2x.wrapping_add(self.r16(0x11a));
+        let adjusted_bg2y = bg2y.wrapping_add(self.r16(0x11c));
+        let mut adjusted_bg1x = bg1x.wrapping_add(self.r16(0x11a));
+        let mut adjusted_bg1y = bg1y.wrapping_add(self.r16(0x11c));
+        self.w16(0xe2, adjusted_bg2x);
+        self.w16(0x11e, adjusted_bg2x);
+        self.w16(0xe8, adjusted_bg2y);
+        self.w16(0x122, adjusted_bg2y);
+        if self.r8(0x428) != 0 {
+            adjusted_bg1x = adjusted_bg2x.wrapping_add(self.r16(0x422));
+            adjusted_bg1y = adjusted_bg2y.wrapping_add(self.r16(0x424));
+            bg1x = adjusted_bg1x;
+            bg1y = adjusted_bg1y;
         }
+        self.w16(0xe0, adjusted_bg1x);
+        self.w16(0x120, adjusted_bg1x);
+        self.w16(0xe6, adjusted_bg1y);
+        self.w16(0x124, adjusted_bg1y);
         self.sprite_dungeon_draw_all_push_blocks();
         self.hooks.sprite_main(&mut self.ram);
         self.w16(0xe2, bg2x);
@@ -6977,7 +7017,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let submodule = self.r8(0x11);
         self.operate_shutter_doors();
         self.w8(0x11, submodule);
-        self.w8(0xc005, 31);
+        self.w8(0xc007, 31);
         self.w8(0xc00b, 0);
         self.w8(0xb0, self.r8(0xb0).wrapping_add(1));
     }
@@ -7215,6 +7255,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     pub fn module07_02_01_load_next_room(&mut self) {
         self.dungeon_load_room();
+        self.w8(0x4bc, 0);
         self.hooks.dungeon_restore_star_tile_chr(&mut self.ram);
         self.hooks.dungeon_transition_aux_gfx_sprite(&mut self.ram);
         self.w8(0xb0, self.r8(0xb0).wrapping_add(1));
@@ -7230,6 +7271,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     pub fn dungeon_initialize_room_from_special(&mut self) {
         self.dungeon_adjust_after_spiral_stairs();
         self.dungeon_load_room();
+        self.w8(0x4bc, 0);
         self.hooks.dungeon_restore_star_tile_chr(&mut self.ram);
         self.hooks.dungeon_transition_aux_gfx(&mut self.ram);
         self.dungeon_load_custom_tile_attr();
@@ -7243,6 +7285,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         if state >= 3 {
             self.dungeon_load_attribute_selectable();
         }
+        let mut skip_moving_animation = false;
         if state >= 13 {
             self.hooks.graphics_incremental_vram_upload(&mut self.ram);
             let timer = self.r8(0x464);
@@ -7254,10 +7297,16 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 self.w8(0x67, if self.r8(0x462) & 4 != 0 { 4 } else { 8 });
                 self.hooks.link_handle_velocity(&mut self.ram);
                 self.dungeon_handle_camera();
+            } else {
+                // C's `goto table` skips Link_HandleMovingAnimation once
+                // staircase_var1 reaches zero.
+                skip_moving_animation = true;
             }
         }
-        self.hooks
-            .link_handle_moving_animation_full_long_entry(&mut self.ram);
+        if !skip_moving_animation {
+            self.hooks
+                .link_handle_moving_animation_full_long_entry(&mut self.ram);
+        }
         match state {
             0 => self.reset_transition_props_and_advance_reset_interface(),
             1 => {
@@ -7341,7 +7390,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     pub fn module07_07_0f_falling_fade_in(&mut self) {
         self.hooks.apply_palette_filter_bounce(&mut self.ram);
-        if self.r8(0xc007) != 0 {
+        if self.r8(0xc009) != 0 {
             return;
         }
         let high =
@@ -7498,7 +7547,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     pub fn module07_08_00_init_stairs(&mut self) {
         self.w8(0x351, 0);
-        let (timer, sound) = if self.r8(0x2e) & 8 != 0 {
+        let (timer, sound) = if self.r8(0x67) & 8 != 0 {
             self.w8(0x476, 0);
             if self.r16(0x44a) as u8 != 2 {
                 self.w8(0xee, 0);
@@ -7517,7 +7566,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         if self.r8(0x464) != 0 {
             return;
         }
-        if self.r8(0x2e) & 4 != 0 {
+        if self.r8(0x67) & 4 != 0 {
             self.w8(0x476, 1);
             if self.r16(0x44a) as u8 != 2 {
                 self.w8(0xee, 1);
@@ -7530,7 +7579,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     }
 
     pub fn module07_10_00_init_stairs(&mut self) {
-        let (timer, sound) = if self.r8(0x2e) & 4 != 0 {
+        let (timer, sound) = if self.r8(0x67) & 4 != 0 {
             self.w8(0x476, self.r8(0x476) ^ 1);
             if self.r16(0x44a) as u8 != 2 {
                 self.w8(0xee, self.r8(0xee) ^ 1);
@@ -7549,7 +7598,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         if self.r8(0x464) != 0 {
             return;
         }
-        if self.r8(0x2e) & 8 != 0 {
+        if self.r8(0x67) & 8 != 0 {
             self.w8(0x476, self.r8(0x476) ^ 1);
             if self.r16(0x44a) as u8 != 2 {
                 self.w8(0xee, self.r8(0xee) ^ 1);
@@ -7673,7 +7722,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 self.hooks
                     .palette_filter_restore_bg_subtractive_strict(&mut self.ram);
                 self.w16(0xc500, self.r16(0xc540));
-                if self.r8(0xc007) != 0xff {
+                if self.r8(0xc009) != 0xff {
                     return;
                 }
                 for position in 0..0x1000 {
@@ -8481,7 +8530,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w16(0xe0, value);
             self.w16(0xe2, value);
             if counter >= STAIRCASE_TAB4[direction] as u8 {
-                self.w16(0x20, self.r16(0x20).wrapping_add(delta));
+                self.w16(0x22, self.r16(0x22).wrapping_add(delta));
             }
             value
         } else {
@@ -8489,7 +8538,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w16(0xe6, value);
             self.w16(0xe8, value);
             if counter >= STAIRCASE_TAB4[direction] as u8 {
-                self.w16(0x22, self.r16(0x22).wrapping_add(delta));
+                self.w16(0x20, self.r16(0x20).wrapping_add(delta));
             }
             value
         };
@@ -8518,8 +8567,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 direction += 2;
             }
             self.w16(
-                0x22,
-                self.r16(0x22)
+                0x20,
+                self.r16(0x20)
                     .wrapping_add(STAIRCASE_TAB5[direction] as u16),
             );
             self.w8(0x4b, 0);
@@ -8535,7 +8584,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let room = usize::from(self.r16(0xa0));
         self.w16(
             0xf000 + room * 2,
-            self.r16(0xf000 + room * 2) | self.r16(0x40c),
+            self.r16(0xf000 + room * 2) | self.r16(0x408),
         );
     }
 
@@ -8649,7 +8698,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     pub fn module07_11_04_filter_do_bg_and_reset_sprites(&mut self) {
         self.hooks.apply_palette_filter_bounce(&mut self.ram);
         self.dungeon_transition_trigger_bgc56_update_and_advance();
-        self.w8(0xa2, self.r8(0xa0));
+        self.w8(0x48e, self.r8(0xa0));
         self.hooks.dungeon_reset_sprites(&mut self.ram);
     }
 
@@ -8777,7 +8826,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         if state != 0 {
             return;
         }
-        self.w16(0x22, self.r16(0x22).wrapping_sub(2));
+        self.w16(0x20, self.r16(0x20).wrapping_sub(2));
         let position = self.r16(0x4b6);
         self.dungeon_update_tile_map_with_common_tile(
             (position & 0x3f) << 3,
@@ -8925,8 +8974,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
 
     pub fn push_block_handle_collision(&mut self, index: usize, x: u16, y: u16) {
         assert!(index < 2);
-        self.w8(0x40, (self.r16(0x22) >> 8) as u8);
-        self.w8(0x41, (self.r16(0x20) >> 8) as u8);
+        self.w8(0x40, (self.r16(0x20) >> 8) as u8);
+        self.w8(0x41, (self.r16(0x22) >> 8) as u8);
         let mut direction = 3usize;
         let mut mask = self.r8(0x67) & 0xf;
         while mask & 1 == 0 {
@@ -8937,16 +8986,16 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             direction -= 1;
         }
         let link_axis = if direction < 2 {
-            self.r16(0x20)
-        } else {
             self.r16(0x22)
+        } else {
+            self.r16(0x20)
         };
         let block_axis = if direction < 2 { x } else { y };
         let r0 = link_axis.wrapping_add(PUSH_BLOCK_A[direction]);
         let r2 = link_axis.wrapping_add(PUSH_BLOCK_B[direction]);
         let r4 = block_axis.wrapping_add(PUSH_BLOCK_C[direction]);
         let r6 = block_axis.wrapping_add(PUSH_BLOCK_D[direction]);
-        let coordinate_address = if direction < 2 { 0x22 } else { 0x20 };
+        let coordinate_address = if direction < 2 { 0x20 } else { 0x22 };
         let r8 = self
             .r16(coordinate_address)
             .wrapping_add(PUSH_BLOCK_E[direction]);
@@ -9179,11 +9228,12 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         ]));
         let mut index = 0usize;
         let data = loop {
-            assert!(secrets.len() >= cursor + 3);
+            assert!(secrets.len() >= cursor + 2);
             let test = u16::from_le_bytes([secrets[cursor], secrets[cursor + 1]]);
             if test == 0xffff {
                 return;
             }
+            assert!(secrets.len() >= cursor + 3);
             assert_eq!(test & 0x8000, 0);
             if test == object_position {
                 break secrets[cursor + 2];
@@ -9246,10 +9296,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             .ancilla_sfx2_near(&mut self.ram, if descending { 0x18 } else { 0x16 });
         self.w16(
             0x53,
-            self.r16(0x20)
+            self.r16(0x22)
                 .wrapping_add(if descending { 0xfff1 } else { 16 }),
         );
-        self.w16(0x51, self.r16(0x22));
+        self.w16(0x51, self.r16(0x20));
     }
 
     pub fn reposition_link_after_spiral_stairs(&mut self) {
@@ -9480,7 +9530,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             return;
         }
         self.w8(0x10, 7);
-        self.w8(0xaaa, self.r8(0xaaa).wrapping_add(1));
+        self.w8(0x4c7, self.r8(0x4c7).wrapping_add(1));
         self.dungeon_play_blip_and_cache_quadrant_visits();
         self.reset_then_cache_room_entry_properties();
         self.w8(0x12c, self.r8(0x132));
@@ -9525,13 +9575,13 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w8(0xb0, state.wrapping_add(1));
         self.w8(0xaa4, 10);
         self.hooks.initialize_tilesets(&mut self.ram);
-        self.w8(0xab8, 10);
+        self.w8(0xab1, 10);
         self.hooks.dungeon_load_palettes(&mut self.ram);
         self.hooks.hud_restore_torch_background(&mut self.ram);
         self.w8(0x3a, 0);
         self.w8(0x3c, 0);
         self.dungeon_reset_torch_background_and_player();
-        if self.r8(0x56) != 0 {
+        if self.r8(0x2e0) != 0 {
             self.hooks.load_gear_palettes_bunny(&mut self.ram);
         }
         self.w8(0x9b, 0x80);
@@ -9564,6 +9614,38 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w8(0x1b, 1);
         if self.r8(0x10a) != 0 {
             self.w8(0x10a, 0);
+        } else {
+            for (source, destination) in [
+                (0x40a, 0xc140),
+                (0x1c, 0xc142),
+                (0xe8, 0xc144),
+                (0xe2, 0xc146),
+                (0x20, 0xc148),
+                (0x22, 0xc14a),
+                (0x618, 0xc150),
+                (0x61c, 0xc152),
+                (0x8a, 0xc14c),
+                (0x84, 0xc14e),
+                (0x610, 0xc15c),
+                (0x612, 0xc15e),
+                (0x614, 0xc160),
+                (0x616, 0xc162),
+                (0x624, 0xc16a),
+                (0x626, 0xc16c),
+                (0x628, 0xc16e),
+                (0x62a, 0xc170),
+            ] {
+                self.w16(destination, self.r16(source));
+            }
+            for i in 0..8 {
+                self.w8(0xc154 + i, self.r8(0x600 + i));
+            }
+            self.w8(0xc164, self.r8(0xaa0));
+            for i in 0..3 {
+                self.w8(0xc165 + i, self.r8(0xaa1 + i));
+            }
+            self.w16(0x8a, 0);
+            self.w16(0x8c, 0);
         }
         self.w16(0x11a, 0);
         self.w16(0x11c, 0);
@@ -9645,12 +9727,29 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         }
         self.w8(0x44, 0x80);
         self.w8(0x45, 0x80);
-        self.w8(0x2c, 0xf);
-        self.w8(0x2d, 0xf);
+        self.w8(0x42, 0xf);
+        self.w8(0x43, 0xf);
         self.w8(0x24, 0xff);
         self.w8(0x29, 0xff);
-        self.ram.slice_mut(0xf940, 0x100).fill(0);
-        self.ram.slice_mut(0xfb40, 0x280).fill(0);
+        let movable = self.hooks.dungeon_movable_init_data().to_vec();
+        self.ram
+            .slice_mut(0xf940, movable.len())
+            .copy_from_slice(&movable);
+        let torches = self.hooks.dungeon_torch_init_data().to_vec();
+        if torches.len() >= 116 {
+            self.ram
+                .slice_mut(0xfacc, 116)
+                .copy_from_slice(&torches[..116]);
+        }
+        self.ram
+            .slice_mut(0xfb40, torches.len())
+            .copy_from_slice(&torches);
+        let torch_junk = self.hooks.dungeon_torch_junk_data().to_vec();
+        self.ram
+            .slice_mut(0xfc60, torch_junk.len())
+            .copy_from_slice(&torch_junk);
+        self.ram.slice_mut(0xf800, 0x100).fill(0);
+        self.ram.slice_mut(0xf580, 0x280).fill(0);
         self.w16(0xc172, 0);
         self.w8(0x4bc, 0);
     }

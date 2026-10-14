@@ -1418,8 +1418,7 @@ impl<R: HudRuntime> Hud<'_, '_, R> {
             self.ram.write_u8(BOTTLE_EXPAND_ROW, 0);
             return;
         }
-        self.draw_bottle_menu();
-        self.draw_selected_y_button_item();
+        self.draw_bottle_menu_update();
         if input & (JOY_DOWN | JOY_UP) != 0 {
             let old = self.ram.read_u8(LINK_BOTTLE_INDEX) - 1;
             let mut value = old;

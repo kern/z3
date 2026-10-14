@@ -298,6 +298,7 @@ pub enum OverworldCall {
     TriggerMapLoadStripe(overworld::MapStripeAxis, u8),
     LoadNewSpriteGfxSet,
     ReloadOverworldSprites,
+    ReloadOverworldSpritesJustLoad,
     HandleMovingAnimation,
     IncrementalVramUpload,
     InitializeSpriteSlots,
@@ -319,6 +320,11 @@ pub enum OverworldCall {
     PaletteFilterBlindingWhite,
     PaletteFilterWhirlpoolBlue,
     PaletteFilterIsolateWhirlpoolBlue,
+    FindPartnerWhirlpoolExit,
+    LoadOverlayAndMap,
+    WhirlpoolReloadPalettes,
+    WhirlpoolRestoreRedGreen,
+    WhirlpoolRestoreBlue,
 }
 
 /// Services needed by the translated main-module state machines.
@@ -414,6 +420,9 @@ pub struct NativeGameServices<'assets> {
     pub scratch_vram: Box<[u16; z3_core::VRAM_WORDS]>,
     vram_snapshot: Box<[u16; z3_core::VRAM_WORDS]>,
     pub last_sprite_oam: crate::sprite::PrepOamCoordsRet,
+    pub ending_sprite_oam: crate::sprite::PrepOamCoordsRet,
+    pub last_bank1_spawn: Option<(usize, crate::sprite::SpriteSpawnInfo)>,
+    pub last_bank2a_spawn: Option<(usize, crate::sprite::SpriteSpawnInfo)>,
     pub enhanced_features0: u32,
     pub audio_port0: u8,
     pub pending_mirror_hdma: Option<overworld::MirrorHdmaSetup>,
@@ -434,6 +443,9 @@ impl<'assets> NativeGameServices<'assets> {
             scratch_vram: Box::new([0; z3_core::VRAM_WORDS]),
             vram_snapshot: Box::new([0; z3_core::VRAM_WORDS]),
             last_sprite_oam: crate::sprite::PrepOamCoordsRet::default(),
+            ending_sprite_oam: crate::sprite::PrepOamCoordsRet::default(),
+            last_bank1_spawn: None,
+            last_bank2a_spawn: None,
             enhanced_features0: 0,
             audio_port0: 0,
             pending_mirror_hdma: None,
@@ -585,6 +597,7 @@ impl<S: GameServices> FileSelectRuntime for FileSelectAdapter<'_, '_, S> {
             hooks: self.services,
         }
         .load_file_select_graphics();
+        crate::overworld::decompress_enemy_damage_subclasses(ram, self.assets);
     }
 
     fn copy_selected_save_to_wram(&mut self, ram: &mut Ram<'_>, sram: &[u8], slot: usize) {
@@ -689,6 +702,11 @@ impl<S: GameServices> EndingRuntime for EndingAdapter<'_, '_, '_, S> {
                     "TransferFontToVRAM" => gfx.transfer_font_to_vram(),
                     _ => unreachable!(),
                 }
+                if name == "EraseTileMaps_normal" {
+                    // Dungeon loading can write a tile equal to the pre-erase
+                    // scratch value. Rebase its diff on the erased live VRAM.
+                    self.services.sync_vram(&self.ppu.vram);
+                }
             }
             "LoadOWMusicIfNeeded" => {
                 Dungeon::new(ram.bytes_mut(), self.services).load_ow_music_if_needed();
@@ -731,6 +749,11 @@ impl<S: GameServices> EndingRuntime for EndingAdapter<'_, '_, '_, S> {
             }
             .flute_menu_load_selected_screen(),
             "LoadCreditsSongs" => crate::misc::load_credits_songs(ram, self.services),
+            "LoadOverworldFromDungeon" => {
+                crate::overworld::load_overworld_from_dungeon(ram, self.assets, |ram| {
+                    crate::overworld::load_gfx_and_screen_size(ram, self.assets)
+                });
+            }
             "Overworld_EnterSpecialArea" => {
                 let ppu = std::cell::RefCell::new(&mut *self.ppu);
                 let services = std::cell::RefCell::new(&mut *self.services);
@@ -934,11 +957,10 @@ impl<S: GameServices> MiscHooks for IntegratedGame<'_, '_, S> {
         module_main_routing(ram, self);
     }
 
-    fn load_song_bank(&mut self, ram: &mut Ram<'_>, bank: u8) {
+    fn load_song_bank(&mut self, _ram: &mut Ram<'_>, bank: u8) {
         self.audio
             .load_song_bank(self.overworld_assets.bytes(usize::from(bank)))
             .expect("valid compiled song bank");
-        ram.write_u8(0x012c, 0);
     }
 
     fn predefined_tile_word(&self, word_index: usize) -> u16 {
@@ -1359,7 +1381,7 @@ pub fn run_overworld_load<S: GameServices>(
             PreOverworldSubmodule::LoadOverlays => {
                 overworld::pre_overworld_load_overlays(ram, |ram| {
                     overworld::load_overlays_inner(ram, |ram| {
-                        services.overworld_call(ram, OverworldCall::LoadEventOverlay);
+                        overworld::load_overworld_overlay(ram, assets);
                     });
                 });
             }
@@ -1426,7 +1448,7 @@ fn dispatch_overworld_submodule<S: GameServices>(
             |r| call!(r, C::LoadNewSpriteGfxSet),
         ),
         O::LoadNewSprites => overworld::module09_load_new_sprites(ram, assets, |r| {
-            call!(r, C::ReloadOverworldSprites);
+            call!(r, C::ReloadOverworldSpritesJustLoad);
         }),
         O::StartScrollTransition => overworld::start_scroll_transition(ram, assets),
         O::RunScrollTransition => overworld::run_scroll_transition(
@@ -1480,7 +1502,7 @@ fn dispatch_overworld_submodule<S: GameServices>(
             },
         ),
         O::PreOverworldLoadOverlays => overworld::pre_overworld_load_overlays(ram, |r| {
-            overworld::load_overlays_inner(r, |r| call!(r, C::LoadEventOverlay));
+            overworld::load_overlays_inner(r, |r| overworld::load_overworld_overlay(r, assets));
         }),
         O::FadeBackInFromMosaic => overworld::fade_back_in_from_mosaic(
             ram,
@@ -1511,7 +1533,11 @@ fn dispatch_overworld_submodule<S: GameServices>(
                     r,
                     |r| call!(r, C::InitializeSpriteSlots),
                     |r| call!(r, C::ReloadOverworldSprites),
-                    |r| overworld::load_overlays_inner(r, |r| call!(r, C::LoadEventOverlay)),
+                    |r| {
+                        overworld::load_overlays_inner(r, |r| {
+                            overworld::load_overworld_overlay(r, assets)
+                        })
+                    },
                 );
             },
         ),
@@ -1534,13 +1560,13 @@ fn dispatch_overworld_submodule<S: GameServices>(
             overworld::operate_camera_scroll,
         ),
         O::LoadOverlays2 => {
-            overworld::load_overlays_inner(ram, |r| call!(r, C::LoadEventOverlay));
+            overworld::overworld_load_overlays2(ram, assets);
         }
         O::LoadOverlays => overworld::load_overlays(
             ram,
             |r| call!(r, C::InitializeSpriteSlots),
             |r| call!(r, C::ReloadOverworldSprites),
-            |r| overworld::load_overlays_inner(r, |r| call!(r, C::LoadEventOverlay)),
+            |r| overworld::load_overlays_inner(r, |r| overworld::load_overworld_overlay(r, assets)),
         ),
         O::LoadAmbientOverlayFalse => {
             overworld::load_ambient_overlay_false(ram, assets, |r| {
@@ -1573,7 +1599,23 @@ fn dispatch_overworld_submodule<S: GameServices>(
                 overworld::mirror_warp_finalize_and_load_destination(
                     r,
                     assets,
-                    |r| call!(r, C::ResetHdmaAndIris),
+                    |r| {
+                        // C's MirrorWarp_FinalizeAndLoadDestination reprograms
+                        // HDMA channel 7 for the iris window before resetting
+                        // its table. The service callback handles only the
+                        // latter, so queue the hardware setup here as well.
+                        services
+                            .borrow_mut()
+                            .setup_mirror_hdma(overworld::MirrorHdmaSetup {
+                                channel6_address: 0,
+                                channel7_address: 0xf2fb,
+                                transfer_unit: 0x41,
+                                channel6_register: 0,
+                                channel7_register: 0x26,
+                                indirect_bank: 0,
+                            });
+                        call!(r, C::ResetHdmaAndIris);
+                    },
                     |r| call!(r, C::ReloadPreviouslyLoadedSheets),
                 );
             },
@@ -1601,11 +1643,84 @@ fn dispatch_overworld_submodule<S: GameServices>(
             call!(r, C::PaletteFilterBlindingWhite);
         }),
         O::WeathervaneExplosion => overworld::overworld_weathervane_explosion(),
-        O::Whirlpool => overworld::module09_whirlpool(
-            ram,
-            |r| call!(r, C::PaletteFilterWhirlpoolBlue),
-            |r| call!(r, C::PaletteFilterIsolateWhirlpoolBlue),
-        ),
+        O::Whirlpool => {
+            if ram.read_u8(0xb0) == 7 {
+                overworld::module09_load_aux_gfx(
+                    ram,
+                    |r| call!(r, C::LoadTransitionAuxGfx),
+                    |r| call!(r, C::PrepareTransitionAuxGfx),
+                );
+                ram.write_u8(0x11, ram.read_u8(0x11).wrapping_sub(1));
+                ram.write_u8(0xb0, 8);
+            } else if ram.read_u8(0xb0) == 8 {
+                overworld::finish_transition_gfx(ram);
+                ram.write_u8(0x13, 15);
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u8(0x11, ram.read_u8(0x11).wrapping_sub(1));
+                ram.write_u8(0xb0, 9);
+            } else if ram.read_u8(0xb0) == 9 {
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u16(0xaa8, 0);
+                call!(ram, C::WhirlpoolReloadPalettes);
+                call!(ram, C::LoadNewSpriteGfxSet);
+                ram.write_u8(0x9e, 0x80);
+                ram.write_u8(0x13, 15);
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u8(0xb0, 10);
+            } else if ram.read_u8(0xb0) == 10 {
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                call!(ram, C::WhirlpoolRestoreRedGreen);
+                if ram.read_u8(0xc007) != 0 {
+                    call!(ram, C::WhirlpoolRestoreRedGreen);
+                }
+            } else if ram.read_u8(0xb0) == 11 {
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                call!(ram, C::IncrementalVramUpload);
+                call!(ram, C::WhirlpoolRestoreBlue);
+            } else if ram.read_u8(0xb0) == 12 {
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u8(0x31f, 144);
+                call!(ram, C::ReloadPreviouslyLoadedSheets);
+                ram.write_u8(0x9b, 0x80);
+                ram.write_u8(
+                    0x12d,
+                    ram.read_u8(0x15b00 + usize::from(ram.read_u8(0x8a))) >> 4,
+                );
+                ram.write_u8(0x12c, if ram.read_u8(0xf3ca) != 0 { 9 } else { 2 });
+                ram.write_u8(0x11, 0);
+                ram.write_u8(0xb0, 0);
+                ram.write_u8(0x200, 0);
+                ram.write_u8(0x710, 0);
+            } else if ram.read_u8(0xb0) == 5 {
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                call!(ram, C::LoadOverlayAndMap);
+                ram.write_u8(0x17, 12);
+                ram.write_u8(0x13, 15);
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u8(0xb0, 6);
+            } else if ram.read_u8(0xb0) == 3 {
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u8(0x9e, 0x9f);
+                ram.write_u16(0xaa8, 0);
+                ram.write_u8(0xab2, 0);
+                call!(ram, C::FindPartnerWhirlpoolExit);
+                ram.write_u8(0xb2, 0);
+                overworld::overworld_load_overlays2(ram, assets);
+                ram.write_u8(0x11, ram.read_u8(0x11).wrapping_sub(1));
+                ram.write_u8(0x17, 12);
+                ram.write_u8(0x15, 0);
+                ram.write_u8(0x9e, 0x80);
+                ram.write_u8(0x13, 15);
+                ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+                ram.write_u8(0xb0, 4);
+            } else {
+                overworld::module09_whirlpool(
+                    ram,
+                    |r| call!(r, C::PaletteFilterWhirlpoolBlue),
+                    |r| call!(r, C::PaletteFilterIsolateWhirlpoolBlue),
+                );
+            }
+        }
         O::FinishPyramidHole => overworld::overworld_func2f(ram, assets),
     }
 }
@@ -1649,7 +1764,7 @@ impl<S: FrameResourceHooks, LoadTrack> IntegratedFrameHooks<'_, '_, '_, S, LoadT
         }
         for (table, table_bank, bbad) in commands.hdma_setups {
             let address = u32::from(table) | (u32::from(table_bank) << 16);
-            crate::runtime::hdma_setup(self.dma, address, address, 0x41, 0, bbad, 0);
+            crate::runtime::hdma_setup(self.dma, address, address, 0x41, bbad, bbad, 0);
         }
     }
 }
@@ -1679,7 +1794,9 @@ where
 
     fn module_main_routing(&mut self, ram: &mut Ram<'_>) {
         self.services.sync_vram(&self.ppu.vram);
-        self.services.set_audio_port0(self.audio.read_apu(0));
+        // The C gameplay code reads the recorder's APUI00 WRAM mirror, not the
+        // live APU port. During replay the mirror is patched by the recording.
+        self.services.set_audio_port0(ram.read_u8(0x648));
         let (state, enabled, actual_track) = self.audio.music_playback_state();
         self.services.set_music_playback_state(
             state,
@@ -1703,11 +1820,17 @@ where
             module_main_routing(ram, &mut game);
         }
         self.drain_service_device_commands();
+        let mut host_action_rounds = 0;
         loop {
             let actions = self.services.take_host_actions();
             if actions.is_empty() {
                 break;
             }
+            host_action_rounds += 1;
+            assert!(
+                host_action_rounds < 256,
+                "host action callback cycle: {actions:?}"
+            );
             for action in actions {
                 // Host actions may call back into production services. Rebase
                 // their scratch view on the latest live PPU, then commit every
@@ -1761,7 +1884,6 @@ where
                         self.audio
                             .load_song_bank(self.overworld_assets.bytes(usize::from(bank)))
                             .expect("valid compiled song bank");
-                        ram.write_u8(0x012c, 0);
                     }
                     NativeHostAction::EndingExternal(name) => {
                         let mut ending = EndingAdapter {
@@ -1868,7 +1990,7 @@ pub(crate) fn setup_world_map_registers(ram: &mut Ram<'_>) {
     ram.write_u8(0x9b, 0xc0);
 }
 
-fn setup_world_map_hdma_transfer(ram: &Ram<'_>, dma: &mut z3_snes::dma::Dma) {
+pub(crate) fn setup_world_map_hdma_transfer(ram: &Ram<'_>, dma: &mut z3_snes::dma::Dma) {
     let address = if ram.read_u8(0x10) == 20 {
         0x0a_bddd
     } else if ram.read_u8(0x11) == 10 || ram.read_u8(0x636) == 0 {
@@ -2720,7 +2842,7 @@ mod tests {
         let mut services = Services::default();
         services.run_ancilla_main(&mut ram);
         services.run_overlord_main(&mut ram);
-        services.run_hud_module(&mut ram);
+        UnifiedGameplayServices::run_hud_module(&mut services, &mut ram);
         services.run_link_oam_main(&mut ram);
         services.run_sprite_main(&mut ram);
     }

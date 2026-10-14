@@ -211,6 +211,22 @@ impl ApuWriteQueue {
     pub fn queued(&self) -> u8 {
         self.count
     }
+
+    /// Fixed-format mirror of C's queued APU writes and currently latched
+    /// SPC input ports, used only for differential diagnostics.
+    #[must_use]
+    pub fn oracle_snapshot(&self, input_ports: &[u8; 4]) -> [u8; 75] {
+        let mut snapshot = [0; 75];
+        snapshot[..4].copy_from_slice(&self.current);
+        for (index, entry) in self.entries.iter().enumerate() {
+            snapshot[4 + index * 4..8 + index * 4].copy_from_slice(entry);
+        }
+        snapshot[68] = self.position;
+        snapshot[69] = self.count;
+        snapshot[70] = self.total_writes;
+        snapshot[71..].copy_from_slice(input_ports);
+        snapshot
+    }
 }
 
 pub fn mix_to_buffer_with_volume(dst: &mut [i16], src: &[i16], frames: usize, volume: f32) {

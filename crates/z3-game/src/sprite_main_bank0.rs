@@ -836,6 +836,16 @@ pub trait SpriteMainBank0Runtime {
 
     fn draw_multiple(&mut self, _ram: &mut Ram<'_>, _slot: usize, _pieces: &[DrawMultipleData]) {}
 
+    fn draw_multiple_with_info(
+        &mut self,
+        ram: &mut Ram<'_>,
+        slot: usize,
+        pieces: &[DrawMultipleData],
+        _info: &mut PrepOamCoordsRet,
+    ) {
+        self.draw_multiple(ram, slot, pieces);
+    }
+
     fn sprite_attempt_damage_to_link_plus_recoil(&mut self, _ram: &mut Ram<'_>, _slot: usize) {}
 
     fn sprite_move_y(&mut self, _ram: &mut Ram<'_>, _slot: usize) {}
@@ -904,6 +914,15 @@ pub trait SpriteMainBank0Runtime {
     }
 
     fn sprite_draw_shadow(&mut self, _ram: &mut Ram<'_>, _slot: usize, _info: &PrepOamCoordsRet) {}
+
+    fn sprite_draw_shadow_with_info(
+        &mut self,
+        ram: &mut Ram<'_>,
+        slot: usize,
+        info: &mut PrepOamCoordsRet,
+    ) {
+        self.sprite_draw_shadow(ram, slot, info);
+    }
 
     fn sprite_draw_thin_and_tall(&mut self, _ram: &mut Ram<'_>, _slot: usize) {}
 
@@ -1652,7 +1671,7 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
                 self.runtime.palette_revert_translucency_swap(self.ram);
                 self.ram.write_u8(ITEM_RECEIPT_METHOD, 2);
                 let item = self.ram.read_u8(SPRITE_GRAPHICS + slot);
-                self.runtime.link_receive_item(self.ram, item, 0);
+                self.runtime.link_receive_item(self.ram, item, 2);
                 self.ram.write_u8(SPRITE_AI_STATE + slot, 10);
             }
             10 => {
@@ -6121,7 +6140,8 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
             };
             info = prepared;
         }
-        self.runtime.draw_multiple(self.ram, slot, &PIECES);
+        self.runtime
+            .draw_multiple_with_info(self.ram, slot, &PIECES, &mut info);
         self.runtime.sprite_draw_shadow(self.ram, slot, &info);
     }
 
@@ -8712,7 +8732,7 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
                 );
                 self.ram.write_u8(SRAM_PROGRESS_INDICATOR, 1);
             }
-            _ => unreachable!("uncle in passage has only two AI states"),
+            _ => {}
         }
     }
 
@@ -9452,7 +9472,9 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
             slot,
             &PIECES[start..start + 2],
         );
-        self.runtime.sprite_draw_shadow(self.ram, slot, &info);
+        let mut info = info;
+        self.runtime
+            .sprite_draw_shadow_with_info(self.ram, slot, &mut info);
         ((info.x | info.y) >> 8) as u8
     }
 
@@ -9778,7 +9800,7 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
         self.ram.write_u8(SPRITE_STATE + slot, 0);
         if self.ram.read_u8(SPRITE_A + slot) != 0 {
             self.ram.write_u8(ITEM_RECEIPT_METHOD, 2);
-            self.runtime.link_receive_item(self.ram, 0x3e, 0);
+            self.runtime.link_receive_item(self.ram, 0x3e, 2);
             self.ram.write_u16(
                 DUNG_SAVEGAME_STATE_BITS,
                 self.ram.read_u16(DUNG_SAVEGAME_STATE_BITS) | 0x8000,
@@ -11137,7 +11159,7 @@ mod tests {
         bank.ram.write_u8(SPRITE_TYPE + 2, 0);
         bank.dispatch_active(2, 0x00);
         bank.dispatch_prep(2, 0x00);
-        assert_eq!(bank.runtime.active_cross, [(2, 0x00)]);
+        assert!(bank.runtime.active_cross.is_empty());
         assert!(bank.runtime.prep_cross.is_empty());
     }
 

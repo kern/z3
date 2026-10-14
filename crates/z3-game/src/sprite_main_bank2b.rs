@@ -11,8 +11,8 @@
     clippy::if_same_then_else
 )]
 
-use crate::ram::Ram;
 use crate::sprite::SpriteHitBox;
+use crate::{oam, ram::Ram};
 
 const SPRITE_Y_LO: usize = 0xd00;
 const SPRITE_X_LO: usize = 0xd10;
@@ -42,6 +42,7 @@ const SPRITE_DELAY_AUX4: usize = 0xf10;
 const SPRITE_OAM_FLAGS: usize = 0xf50;
 const SPRITE_Z: usize = 0xf70;
 const SPRITE_Z_VEL: usize = 0xf80;
+const SPRITE_Z_SUBPOS: usize = 0xf90;
 const SPRITE_HIT_TIMER: usize = 0xef0;
 const SPRITE_Y_RECOIL: usize = 0xf30;
 const SPRITE_X_RECOIL: usize = 0xf40;
@@ -55,7 +56,7 @@ const SPRITE_BUMP_DAMAGE: usize = 0xcd2;
 const SPRITE_OBJ_PRIO: usize = 0xb89;
 const SPRITE_FLAGS: usize = 0xb6b;
 const SPRITE_FLOOR: usize = 0xf20;
-const SPRITE_G: usize = 0xf90;
+const SPRITE_G: usize = 0xed0;
 
 const FRAME_COUNTER: usize = 0x1a;
 const PLAYER_IS_INDOORS: usize = 0x1b;
@@ -263,15 +264,29 @@ pub trait SpriteMainBank2bRuntime {
         0
     }
     fn spawn_sparkle(&mut self, _ram: &mut Ram<'_>, _k: usize, _x: i8, _y: i8) {}
+    fn spawn_bee_sparkle(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
     fn spawn_sparkle_limited(&mut self, ram: &mut Ram<'_>, k: usize, x: i8, y: i8) {
         self.spawn_sparkle(ram, k, x, y)
     }
     fn prep_oam(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
+    fn firebar_prep_oam(&mut self, _ram: &mut Ram<'_>, _k: usize) -> Option<(u16, u16, u8)> {
+        None
+    }
+    fn prep_oam_coords(&mut self, _ram: &mut Ram<'_>, _k: usize) -> Option<(u16, u16, u8)> {
+        None
+    }
     fn spawn_poof_garnish(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
     fn get_tile_attribute(&mut self, _ram: &mut Ram<'_>, _x: &mut u16, _y: u16) -> u8 {
         0
     }
     fn draw_multiple(&mut self, _ram: &mut Ram<'_>, _k: usize, _pieces: &[DrawPiece]) {}
+    fn draw_multiple_player_deferred_with_shadow(
+        &mut self,
+        _ram: &mut Ram<'_>,
+        _k: usize,
+        _pieces: &[DrawPiece],
+    ) {
+    }
     fn draw_single_large(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
     fn draw_single_small(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
     fn draw_distress(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
@@ -554,7 +569,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             let jump = if self.ram.read_u8(LINK_IS_RUNNING) == 0 {
                 if b >= 0x90 {
                     true
-                } else if (b.wrapping_sub(9) as i8) < 0 {
+                } else if (b.wrapping_sub(9) as i8) >= 0 {
                     false
                 } else {
                     dir != CHECK_DIR[(self.ram.read_u8(LINK_DIRECTION_FACING) >> 1) as usize]
@@ -1571,6 +1586,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                     self.ram.write_u8(0xdf0 + k, 32);
                 } else if d == 64 {
                     self.ram.write_u8(SOUND_EFFECT_2, 0x28);
+                    self.ram.write_u8(0xfb5, 1);
                     for n in (0..2).rev() {
                         if let Some((j, x, y, z)) =
                             self.runtime.spawn_dynamic_ex(self.ram, k, 0x7a, 2)
@@ -1587,6 +1603,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                             );
                             self.ram.write_u8(0xdf0 + j, 32);
                         }
+                        self.ram
+                            .write_u8(0xfb5, self.ram.read_u8(0xfb5).wrapping_sub(1));
                     }
                 }
             }
@@ -1641,8 +1659,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                     z = z.wrapping_add(1);
                     self.ram.write_u8(SPRITE_Z_VEL + k, z);
                 }
-                let j = u16::from(self.ram.read_u8(SPRITE_G + k)) + u16::from(z);
-                self.ram.write_u8(SPRITE_G + k, j as u8);
+                let j = u16::from(self.ram.read_u8(0xf90 + k)) + u16::from(z);
+                self.ram.write_u8(0xf90 + k, j as u8);
                 if j & 0x100 != 0 {
                     let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
                     self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
@@ -1660,6 +1678,9 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         }
     }
     pub fn agahnim_draw(&mut self, k: usize) {
+        if self.runtime.sprite_is_offscreen(self.ram, k) {
+            return;
+        }
         const X0: [i8; 72] = [
             -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8,
             8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8, -8, 8,
@@ -1686,7 +1707,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         ];
         let g = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
         let mut body = [(0, 0, 0, 0); 4];
-        for (i, piece) in body.iter_mut().enumerate() {
+        for (entry, piece) in body.iter_mut().enumerate() {
+            let i = 3 - entry;
             let j = g * 4 + i;
             *piece = (
                 X0[j],
@@ -1702,6 +1724,9 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         if self.ram.read_u8(SUBMODULE_INDEX) != 0 {
             self.runtime.correct_oam_entries(self.ram, k, 3, 0xff);
         }
+        let Some((x, y, _)) = self.runtime.prep_oam_coords(self.ram, k) else {
+            return;
+        };
         if self.ram.read_u8(SPRITE_D + k) != 0 {
             self.runtime.allocate_oam_region_c(self.ram, 8);
         } else {
@@ -1734,16 +1759,19 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             2, 0, 2, 2, 2, 2, 2,
         ];
         let flags = ((((self.ram.read_u8(FRAME_COUNTER) >> 1) & 2) + 2) + 0x31) as u16;
-        let head = [
-            (X1[q * 2], Y1[q * 2], C1[q] as u16 | (flags << 8), BIG[q]),
-            (
-                X1[q * 2 + 1],
-                Y1[q * 2 + 1],
-                C1[q] as u16 | (flags << 8),
+        let first = (usize::from(self.ram.read_u16(0x90)) - oam::OAM_BUFFER) / 4;
+        for (entry, i) in (0..2).rev().enumerate() {
+            let j = q * 2 + i;
+            oam::set_plain(
+                self.ram,
+                first + entry,
+                x.wrapping_add_signed(i16::from(X1[j])) as u8,
+                y.wrapping_add_signed(i16::from(Y1[j])) as u8,
+                C1[q],
+                flags as u8,
                 BIG[q],
-            ),
-        ];
-        self.runtime.draw_multiple(self.ram, k, &head);
+            );
+        }
     }
     pub fn sprite_7b_agahnim_balls(&mut self, k: usize) {
         let seeker = self.ram.read_u8(SPRITE_B + k) != 0;
@@ -2018,10 +2046,13 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let gfx = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
         self.runtime
             .draw_multiple(self.ram, k, &BODY[gfx * 2..gfx * 2 + 2]);
-        if gfx == 14 {
-            self.runtime.draw_multiple(self.ram, k, &FEET[..2]);
-        } else if gfx == 19 {
-            self.runtime.draw_multiple(self.ram, k, &FEET[2..]);
+        if gfx == 14 || gfx == 19 {
+            self.ram
+                .write_u16(0x90, self.ram.read_u16(0x90).wrapping_add(8));
+            self.ram
+                .write_u16(0x92, self.ram.read_u16(0x92).wrapping_add(2));
+            let i = if gfx == 14 { 0 } else { 2 };
+            self.runtime.draw_multiple(self.ram, k, &FEET[i..i + 2]);
         }
         self.runtime.draw_shadow(self.ram, k);
     }
@@ -2052,7 +2083,10 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             (0, 0, 0x002a, 2),
         ];
         let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        let oam = self.ram.read_u16(0x90);
+        self.ram.write_u16(0x90, oam.wrapping_add(4));
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
+        self.ram.write_u16(0x90, oam);
         if self.ram.read_u8(0xf00 + k) == 0 {
             self.yellow_stalfos_draw_head(k);
             self.runtime.draw_shadow(self.ram, k);
@@ -2089,13 +2123,21 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         for p in &mut d[..4] {
             p.2 = p.2.wrapping_add(add);
         }
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 8 != 0 {
-            d[4].2 |= 0x4000;
-        }
         let turbulent = self.ram.read_u8(SPRITE_AI_STATE + k) == 5;
-        self.runtime
-            .draw_multiple(self.ram, k, if turbulent { &d[..4] } else { &d });
+        let oam = usize::from(self.ram.read_u16(0x90));
+        self.runtime.draw_multiple(self.ram, k, &d);
+        if turbulent {
+            self.ram.write_u8(oam + 4 * 4 + 1, 0xf0);
+        }
+        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 8 != 0 {
+            self.ram
+                .write_u8(oam + 4 * 4 + 3, self.ram.read_u8(oam + 4 * 4 + 3) | 0x40);
+        }
         if !turbulent {
+            self.ram
+                .write_u16(0x90, self.ram.read_u16(0x90).wrapping_add(4));
+            self.ram
+                .write_u16(0x92, self.ram.read_u16(0x92).wrapping_add(1));
             if self.ram.read_u8(SPRITE_Z + k) < 0xa0 {
                 let f = self.ram.read_u8(SPRITE_OAM_FLAGS + k);
                 self.ram.write_u8(SPRITE_OAM_FLAGS + k, f & !1);
@@ -2111,6 +2153,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         if self.runtime.return_if_paused(self.ram, k) {
             return;
         }
+        self.runtime.direction_to_face_link(self.ram, k);
         let dx = self
             .ram
             .read_u8(LINK_X)
@@ -2118,6 +2161,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let dy = self
             .ram
             .read_u8(LINK_Y)
+            .wrapping_add(8)
+            .wrapping_add(self.ram.read_u8(SPRITE_Z + k))
             .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k));
         if dx.wrapping_add(32) < 64 && dy.wrapping_add(32) < 64 {
             self.runtime.nullify_hookshot_drag(self.ram, k);
@@ -2204,7 +2249,15 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         ];
         self.sprite_draw_stalfos_knight_head(k);
         let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 5;
+        self.ram
+            .write_u16(0x90, self.ram.read_u16(0x90).wrapping_add(4));
+        self.ram
+            .write_u16(0x92, self.ram.read_u16(0x92).wrapping_add(1));
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 5]);
+        self.ram
+            .write_u16(0x90, self.ram.read_u16(0x90).wrapping_sub(4));
+        self.ram
+            .write_u16(0x92, self.ram.read_u16(0x92).wrapping_sub(1));
         self.runtime.draw_shadow_custom(self.ram, k, 18);
     }
 
@@ -2346,6 +2399,12 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let d = self.ram.read_u8(SPRITE_D + k) as usize;
         let f = self.ram.read_u8(SPRITE_OAM_FLAGS + k) & !0x40 | FLAGS[d];
         self.ram.write_u8(SPRITE_OAM_FLAGS + k, f);
+        // The bird reserves an OAM entry even when its separate blink sprite
+        // is not emitted, so the following large sprite lands in the next slot.
+        self.ram
+            .write_u16(0x90, self.ram.read_u16(0x90).wrapping_add(4));
+        self.ram
+            .write_u16(0x92, self.ram.read_u16(0x92).wrapping_add(1));
         self.ram.write_u8(
             SPRITE_FLAGS2 + k,
             self.ram.read_u8(SPRITE_FLAGS2 + k).wrapping_sub(1),
@@ -2447,7 +2506,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         }
         self.ram.write_u8(SPRITE_A + j, X[i]);
         self.ram.write_u8(SPRITE_X_LO + j, X[i]);
-        self.ram.write_u8(SPRITE_C + j, Y[i].wrapping_sub(1));
+        self.ram.write_u8(SPRITE_B + j, Y[i].wrapping_sub(1));
         self.ram.write_u8(SPRITE_Y_LO + j, Y[i].wrapping_sub(1));
         self.ram.write_u8(SPRITE_D + j, DIR[i]);
         self.ram.write_u8(SPRITE_E + j, 1);
@@ -2493,10 +2552,14 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 );
                 sound = self.ram.read_u8(SPRITE_E + k) != 0;
             }
-            self.ram.write_i8(
-                SPRITE_X_VEL + k,
-                self.ram.read_i8(SPRITE_X_VEL + k).wrapping_neg(),
-            );
+            // C jumps straight to play_sound after a vertical bounce when E
+            // is set, leaving x velocity untouched.
+            if !sound {
+                self.ram.write_i8(
+                    SPRITE_X_VEL + k,
+                    self.ram.read_i8(SPRITE_X_VEL + k).wrapping_neg(),
+                );
+            }
             if self.ram.read_u8(SPRITE_E + k) != 0 {
                 sound = true;
             }
@@ -2569,6 +2632,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         ];
         let i = self.ram.read_u8(SPRITE_D + k) as usize * 4
             + self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        self.runtime.allocate_oam_defer_to_player(self.ram, k);
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
         self.runtime.draw_shadow(self.ram, k);
     }
@@ -2672,10 +2736,14 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         ];
         let i = self.ram.read_u8(SPRITE_SUBTYPE2 + k) as usize * 2
             + self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
-        self.runtime.draw_multiple(self.ram, k, &D[i..i + 1]);
-        self.runtime.draw_shadow(self.ram, k);
+        self.runtime
+            .draw_multiple_player_deferred_with_shadow(self.ram, k, &D[i..i + 1]);
     }
     pub fn kiki_draw(&mut self, k: usize) -> bool {
+        const DMA: [u8; 32] = [
+            0x20, 0xc0, 0x20, 0xc0, 0, 0xa0, 0, 0xa0, 0x40, 0x80, 0x40, 0x60, 0x40, 0x80, 0x40,
+            0x60, 0, 0, 0xfa, 0xff, 0x20, 0, 0, 2, 0, 0, 0, 0, 0x22, 0, 0, 2,
+        ];
         const A: [DrawPiece; 32] = [
             (0, -6, 0x0020, 2),
             (0, 0, 0x0022, 2),
@@ -2727,6 +2795,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let d = self.ram.read_u8(SPRITE_D + k);
         if d < 8 {
             let j = d as usize * 2 + self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
+            self.ram.write_u8(0xae8, DMA[j * 2]);
+            self.ram.write_u8(0xaea, DMA[j * 2 + 1]);
             self.runtime
                 .draw_multiple(self.ram, k, &A[j * 2..j * 2 + 2]);
         } else {
@@ -2736,7 +2806,16 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         if self.ram.read_u8(0xf00 + k) == 0 {
             self.runtime.draw_shadow(self.ram, k);
         }
-        self.runtime.sprite_is_offscreen(self.ram, k)
+        let x = self
+            .ram
+            .read_u16(CUR_SPRITE_X)
+            .wrapping_sub(self.ram.read_u16(0xe2));
+        let y = self
+            .ram
+            .read_u16(CUR_SPRITE_Y)
+            .wrapping_sub(self.ram.read_u16(0xe8))
+            .wrapping_sub(u16::from(self.ram.read_u8(SPRITE_Z + k)));
+        (x | y) & 0xff00 != 0
     }
 
     pub fn kiki_flee(&mut self, k: usize) {
@@ -2928,7 +3007,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             }
             3 | 5 => {
                 if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0 {
-                    let z = [32, 28][((state.wrapping_add(1) >> 1) & 1) as usize];
+                    let z = [32, 28][((state >> 1) & 1) as usize];
                     self.ram.write_u8(SPRITE_Z_VEL + k, z);
                     self.ram.write_u8(SPRITE_AI_STATE + k, state + 1);
                     self.runtime.queue_sfx2(self.ram, k, 0x20);
@@ -3079,6 +3158,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 let dy = self
                     .ram
                     .read_u8(LINK_Y)
+                    .wrapping_add(8)
+                    .wrapping_add(self.ram.read_u8(SPRITE_Z + k))
                     .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k));
                 if dx.wrapping_add(16) < 32 || dy.wrapping_add(16) < 32 {
                     self.ram.write_u8(0xdf0 + k, DELAY[d]);
@@ -3426,7 +3507,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         self.ram.write_i8(SPRITE_Y_VEL + k, -18);
         self.ram.write_i8(SPRITE_X_VEL + k, 0);
         self.ram.write_u8(SPRITE_A + k, 0);
-        self.ram.write_u8(SPRITE_C + k, 0);
+        self.ram.write_u8(SPRITE_B + k, 0);
         self.ram.write_u8(TMP_COUNTER, 2);
         loop {
             let i = self.ram.read_u8(TMP_COUNTER) as usize;
@@ -3436,7 +3517,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 self.ram.write_i8(SPRITE_X_VEL + j, XV[i]);
                 self.ram.write_i8(SPRITE_Y_VEL + j, YV[i]);
                 self.ram.write_u8(SPRITE_A + j, A[i]);
-                self.ram.write_u8(SPRITE_C + j, B[i]);
+                self.ram.write_u8(SPRITE_B + j, B[i]);
             }
             let n = self.ram.read_u8(TMP_COUNTER).wrapping_sub(1);
             self.ram.write_u8(TMP_COUNTER, n);
@@ -3460,12 +3541,12 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             self.ram
                 .write_u8(SPRITE_A + k, self.ram.read_u8(SPRITE_A + k).wrapping_add(1));
         }
-        let b = (self.ram.read_u8(SPRITE_C + k) & 1) as usize;
+        let b = (self.ram.read_u8(SPRITE_B + k) & 1) as usize;
         let yv = self.ram.read_i8(SPRITE_Y_VEL + k).wrapping_add(STEP[b]);
         self.ram.write_i8(SPRITE_Y_VEL + k, yv);
         if yv as u8 == TARGET[b] {
             self.ram
-                .write_u8(SPRITE_C + k, self.ram.read_u8(SPRITE_C + k).wrapping_add(1));
+                .write_u8(SPRITE_B + k, self.ram.read_u8(SPRITE_B + k).wrapping_add(1));
         }
         self.runtime.move_xy(self.ram, k);
         if xv != 0 && yv != 0 && self.runtime.check_if_room_is_clear(self.ram) {
@@ -3571,7 +3652,9 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                     let p = p.wrapping_sub(3);
                     self.ram.write_u8(POLY_CONFIG1, p);
                     if p >= 64 {
-                        self.runtime.add_sword_charge_sparkle(self.ram, k);
+                        let ancilla_source = self.ram.read_u8(SPRITE_A + k) as usize;
+                        self.runtime
+                            .add_sword_charge_sparkle(self.ram, ancilla_source);
                     }
                 }
             }
@@ -4386,7 +4469,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let angle = self
             .ram
             .read_u16(OVERLORD_X_LO)
-            .wrapping_add(self.ram.read_u16(OVERLORD_X_LO + 4));
+            .wrapping_add(u16::from(self.ram.read_u8(OVERLORD_X_LO + 4)));
         self.ram.write_u16(OVERLORD_X_LO, angle);
         if self.ram.read_u8(FRAME_COUNTER) & 3 == 0 {
             let a = self.ram.read_u8(SPRITE_A + k).wrapping_add(1);
@@ -4549,10 +4632,11 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 self.ram.write_i8(SPRITE_Y_VEL + k, V[d]);
                 self.runtime.move_xy(self.ram, k);
                 self.runtime.check_tile_collision(self.ram, k);
-                let face = self.runtime.direction_to_face_link(self.ram, k);
-                if (self.ram.read_u8(0xdf0 + k) == 0 || self.ram.read_u8(SPRITE_WALLCOLL + k) != 0)
-                    && face != self.ram.read_u8(SPRITE_A + k)
-                {
+                let must_retarget =
+                    self.ram.read_u8(0xdf0 + k) == 0 || self.ram.read_u8(SPRITE_WALLCOLL + k) != 0;
+                let face = must_retarget.then(|| self.runtime.direction_to_face_link(self.ram, k));
+                if face.is_some_and(|face| face != self.ram.read_u8(SPRITE_A + k)) {
+                    let face = face.unwrap();
                     self.ram.write_u8(SPRITE_A + k, face);
                     self.ram.write_u8(SPRITE_AI_STATE + k, 0);
                 } else {
@@ -4820,7 +4904,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             return;
         }
         if self.ram.read_u8(SPRITE_HEAD_DIR + k) != 0 {
-            self.runtime.spawn_sparkle(self.ram, k, 0, 0);
+            self.runtime.spawn_bee_sparkle(self.ram, k);
         }
         self.bee_bzzt(k);
         self.runtime.move_xy(self.ram, k);
@@ -4828,7 +4912,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         self.ram.write_u8(SPRITE_GRAPHICS + k, f >> 1 & 1);
         if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) == 0 {
             self.runtime.check_damage_to_link(self.ram, k);
-            if self.runtime.check_damage_from_link(self.ram, k) != 0 {
+            if self.runtime.check_damage_from_link(self.ram, k) & 2 != 0 {
                 self.runtime.show_message(self.ram, 0xc8);
                 self.ram.write_u8(SPRITE_AI_STATE + k, 2);
                 return;
@@ -4887,7 +4971,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 let f = (k as u8) ^ self.ram.read_u8(FRAME_COUNTER);
                 self.ram.write_u8(SPRITE_GRAPHICS + k, f >> 1 & 1);
                 if self.ram.read_u8(SPRITE_HEAD_DIR + k) != 0 {
-                    self.runtime.spawn_sparkle(self.ram, k, 0, 0);
+                    self.runtime.spawn_bee_sparkle(self.ram, k);
                 }
                 if self.ram.read_u8(SPRITE_B + k)
                     >= [10, 20][self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize]
@@ -4898,7 +4982,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) != 0 {
                     return;
                 }
-                if self.runtime.check_damage_from_link(self.ram, k) != 0 {
+                if self.runtime.check_damage_from_link(self.ram, k) & 2 != 0 {
                     self.runtime.show_message(self.ram, 0xc8);
                     self.ram.write_u8(SPRITE_AI_STATE + k, 2);
                     return;
@@ -5330,6 +5414,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             let dy = self
                 .ram
                 .read_u8(LINK_Y)
+                .wrapping_add(8)
+                .wrapping_add(self.ram.read_u8(SPRITE_Z + k))
                 .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k));
             if (dx.wrapping_add(8) < 16 || dy.wrapping_add(8) < 16)
                 && self.ram.read_u8(SPRITE_D + k) == dir
@@ -5367,6 +5453,9 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         match self.ram.read_u8(SPRITE_AI_STATE + k) {
             0 => {
                 if self.ram.read_u8(0xdf0 + k) == 0 {
+                    // C calls Sprite_DirectionToFaceLink even when the range
+                    // check fails; it also supplies the Z-adjusted Y delta.
+                    self.runtime.direction_to_face_link(self.ram, k);
                     let dx = self
                         .ram
                         .read_u8(LINK_X)
@@ -5374,6 +5463,8 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                     let dy = self
                         .ram
                         .read_u8(LINK_Y)
+                        .wrapping_add(8)
+                        .wrapping_add(self.ram.read_u8(SPRITE_Z + k))
                         .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k));
                     if dx.wrapping_add(48) < 96 && dy.wrapping_add(48) < 96 {
                         self.ram.write_u8(SPRITE_AI_STATE + k, 1);
@@ -5541,32 +5632,49 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         self.ram.write_u8(0xda0 + k, (angle >> 8) as u8);
     }
     pub fn firebar_main(&mut self, k: usize) {
+        let Some((x, y, base_flags)) = self.runtime.firebar_prep_oam(self.ram, k) else {
+            return;
+        };
+        self.ram.write_u8(0xfb6, base_flags);
         let angle =
             self.ram.read_u8(SPRITE_A + k) as u16 | (self.ram.read_u8(SPRITE_B + k) as u16) << 8;
         let s = self.runtime.guruguru_bar_sin(angle, 0x40);
         let c = self.runtime.guruguru_bar_sin((angle + 0x80) & 0x1ff, 0x40);
-        let flags = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) << 4 & 0xc0) as u16;
-        let mut d = [(0i8, 0i8, 0x0028u16, 2u8); 4];
-        for (i, piece) in d.iter_mut().enumerate() {
+        let flags = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) << 4 & 0xc0) | base_flags;
+        let first = (usize::from(self.ram.read_u16(0x90)) - oam::OAM_BUFFER) / 4;
+        for (offset, i) in (0..4).rev().enumerate() {
             let n = (i + 1) as i16;
-            piece.0 = ((s as i16 * n) / 4) as i8;
-            piece.1 = ((c as i16 * n) / 4) as i8;
-            piece.2 |= flags << 8;
+            oam::set_plain(
+                self.ram,
+                first + offset,
+                x.wrapping_add_signed(s as i16 * n / 4) as u8,
+                y.wrapping_add_signed(c as i16 * n / 4) as u8,
+                0x28,
+                flags,
+                2,
+            );
         }
-        self.runtime.draw_multiple(self.ram, k, &d);
+        self.runtime.correct_oam_entries(self.ram, k, 3, 0xff);
         if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 == 0
             && self.ram.read_u8(SUBMODULE_INDEX) == 0
             && self.ram.read_u8(FLAG_UNK1) == 0
         {
-            let sx = self.sprite_x(k);
-            let sy = self.sprite_y(k);
             let lx = self.ram.read_u16(LINK_X);
             let ly = self.ram.read_u16(LINK_Y);
-            for p in d {
-                let x = sx.wrapping_add_signed(p.0 as i16);
-                let y = sy.wrapping_add_signed(p.1 as i16);
-                if x.wrapping_sub(lx).wrapping_add(12) < 24
-                    && y.wrapping_sub(ly).wrapping_add(4) < 16
+            for index in first..first + 4 {
+                let piece = oam::read(self.ram, index);
+                if self.ram.read_u8(oam::BYTEWISE_EXTENDED_OAM + index) & 1 == 0
+                    && (u16::from(piece.x)
+                        .wrapping_add(self.ram.read_u16(0xe2))
+                        .wrapping_sub(lx)
+                        .wrapping_add(12) as u8)
+                        < 24
+                    && piece.y < 0xf0
+                    && (u16::from(piece.y)
+                        .wrapping_add(self.ram.read_u16(0xe8))
+                        .wrapping_sub(ly)
+                        .wrapping_add(4) as u8)
+                        < 16
                 {
                     self.runtime.attempt_damage_to_link_plus_recoil(self.ram, k);
                 }
@@ -5766,7 +5874,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                     return;
                 }
                 let tx = self.ram.read_i8(SPRITE_Z_VEL + k);
-                let ty = self.ram.read_i8(SPRITE_G + k);
+                let ty = self.ram.read_i8(SPRITE_Z_SUBPOS + k);
                 let x = self.ram.read_i8(SPRITE_X_VEL + k);
                 let y = self.ram.read_i8(SPRITE_Y_VEL + k);
                 if x != tx {
@@ -5792,12 +5900,12 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                     if r & 0x1c == 0 {
                         let (y, x) = self.runtime.project_speed_towards_link(self.ram, k, 24);
                         self.ram.write_i8(SPRITE_Z_VEL + k, x);
-                        self.ram.write_i8(SPRITE_G + k, y);
+                        self.ram.write_i8(SPRITE_Z_SUBPOS + k, y);
                     } else {
                         self.ram
                             .write_i8(SPRITE_Z_VEL + k, [16, 16, -16, -16][(r & 3) as usize]);
                         self.ram
-                            .write_i8(SPRITE_G + k, [-16, 16, 16, -16][(r & 3) as usize]);
+                            .write_i8(SPRITE_Z_SUBPOS + k, [-16, 16, 16, -16][(r & 3) as usize]);
                     }
                 } else {
                     let x = self.ram.read_i8(SPRITE_X_VEL + k);
@@ -5826,7 +5934,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                             self.set_sprite_y(j, y);
                             self.ram.write_u8(SPRITE_Z + j, z);
                             self.ram.write_i8(SPRITE_Z_VEL + j, [32, -32, 0][i]);
-                            self.ram.write_i8(SPRITE_G + j, [-32, -32, 48][i]);
+                            self.ram.write_i8(SPRITE_Z_SUBPOS + j, [-32, -32, 48][i]);
                             self.ram.write_u8(0xdf0 + j, 32);
                         }
                     }
@@ -5858,8 +5966,10 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 SPRITE_Y_VEL + k,
                 self.ram.read_i8(SPRITE_Y_VEL + k).wrapping_neg(),
             );
-            self.ram
-                .write_i8(SPRITE_G + k, self.ram.read_i8(SPRITE_G + k).wrapping_neg());
+            self.ram.write_i8(
+                SPRITE_Z_SUBPOS + k,
+                self.ram.read_i8(SPRITE_Z_SUBPOS + k).wrapping_neg(),
+            );
         }
     }
     pub fn kholdstare_spawn_puff_cloud_garnish(&mut self, k: usize) {
@@ -6471,11 +6581,12 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 self.ram.write_i8(SPRITE_Y_VEL + k, y.wrapping_add(YD[d]))
             }
             self.runtime.move_xy(self.ram, k);
-            if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0
-                && self.runtime.check_tile_collision(self.ram, k) != 0
-            {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 64)
+            if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0 {
+                self.runtime.get_16bit_coords(self.ram, k);
+                if self.runtime.check_tile_collision(self.ram, k) != 0 {
+                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                    self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 64)
+                }
             }
         } else if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0 {
             const X: [i8; 4] = [-16, 16, 0, 0];
@@ -7139,6 +7250,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             (4, 11, 0x0338, 0),
         ];
         let i = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_sub(7) as usize * 5;
+        self.runtime.allocate_oam_defer_to_player(self.ram, k);
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 5]);
     }
 
@@ -7352,13 +7464,17 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                         }
                         if self.ram.read_u8(DUNGEON_ROOM_INDEX) != 36 {
                             let d = self.ram.read_u8(SPRITE_D + k) as usize;
-                            self.ram.write_i8(
+                            self.ram.write_u16(
                                 DRAG_PLAYER_X,
-                                self.ram.read_i8(DRAG_PLAYER_X).wrapping_add(DX[d]),
+                                self.ram
+                                    .read_u16(DRAG_PLAYER_X)
+                                    .wrapping_add_signed(DX[d] as i16),
                             );
-                            self.ram.write_i8(
+                            self.ram.write_u16(
                                 DRAG_PLAYER_Y,
-                                self.ram.read_i8(DRAG_PLAYER_Y).wrapping_add(DY[d]),
+                                self.ram
+                                    .read_u16(DRAG_PLAYER_Y)
+                                    .wrapping_add_signed(DY[d] as i16),
                             );
                             self.runtime.move_xy(self.ram, k);
                             self.somaria_platform_drag_link(k);
@@ -7496,7 +7612,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             let x = (old & !7).wrapping_add(4);
             let t = x.wrapping_sub(old);
             if t != 0 {
-                self.ram.write_i8(DRAG_PLAYER_X, t as i8);
+                self.ram.write_u16(DRAG_PLAYER_X, (t as i8 as i16) as u16);
                 self.ram.write_u8(SPRITE_X_LO + k, x);
             }
         }
@@ -7507,7 +7623,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             let y = (old & !7).wrapping_add(4);
             let t = y.wrapping_sub(old);
             if t != 0 {
-                self.ram.write_i8(DRAG_PLAYER_Y, t as i8);
+                self.ram.write_u16(DRAG_PLAYER_Y, (t as i8 as i16) as u16);
                 self.ram.write_u8(SPRITE_Y_LO + k, y);
             }
         }
@@ -7517,27 +7633,33 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         self.somaria_platform_handle_drag_y(k);
     }
 
-    pub fn somaria_platform_drag_link(&mut self, k: usize) {
+    pub fn somaria_platform_drag_link(&mut self, _k: usize) {
         let x = self
-            .sprite_x(k)
+            .ram
+            .read_u16(0xfd8)
             .wrapping_sub(8)
             .wrapping_sub(self.ram.read_u16(LINK_X));
         if x != 0 {
             let d = if x & 0x8000 != 0 { -1 } else { 1 };
-            self.ram.write_i8(
+            self.ram.write_u16(
                 DRAG_PLAYER_X,
-                self.ram.read_i8(DRAG_PLAYER_X).wrapping_add(d),
+                self.ram
+                    .read_u16(DRAG_PLAYER_X)
+                    .wrapping_add_signed(d as i16),
             );
         }
         let y = self
-            .sprite_y(k)
+            .ram
+            .read_u16(0xfda)
             .wrapping_sub(16)
             .wrapping_sub(self.ram.read_u16(LINK_Y));
         if y != 0 {
             let d = if y & 0x8000 != 0 { -1 } else { 1 };
-            self.ram.write_i8(
+            self.ram.write_u16(
                 DRAG_PLAYER_Y,
-                self.ram.read_i8(DRAG_PLAYER_Y).wrapping_add(d),
+                self.ram
+                    .read_u16(DRAG_PLAYER_Y)
+                    .wrapping_add_signed(d as i16),
             );
         }
     }
@@ -7789,6 +7911,16 @@ mod tests {
             runtime: &mut rt,
         };
         f(&mut bank);
+    }
+    #[test]
+    fn arrghus_phase_adds_only_low_byte_of_step() {
+        with_bank(|b| {
+            b.ram.write_u16(OVERLORD_X_LO, 0x0800);
+            b.ram.write_u8(OVERLORD_X_LO + 4, 0xa0);
+            b.ram.write_u8(OVERLORD_X_LO + 5, 0xe0);
+            b.arrghus_handle_puffs(0);
+            assert_eq!(b.ram.read_u16(OVERLORD_X_LO), 0x08a0);
+        });
     }
     #[test]
     fn shop_cost_is_atomic_and_16_bit() {

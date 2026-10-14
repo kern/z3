@@ -402,6 +402,15 @@ struct ApuWriteEnt {
 };
 static struct ApuWriteEnt g_apu_write_ents[16], g_apu_write;
 static uint8 g_apu_write_ent_pos, g_apu_write_count, g_apu_total_write;
+void ZeldaExportApuQueueForTest(uint8 *destination) {
+  memcpy(destination, g_apu_write.ports, 4);
+  for (int i = 0; i < 16; i++)
+    memcpy(destination + 4 + i * 4, g_apu_write_ents[i].ports, 4);
+  destination[68] = g_apu_write_ent_pos;
+  destination[69] = g_apu_write_count;
+  destination[70] = g_apu_total_write;
+  memcpy(destination + 71, g_zenv.player->input_ports, 4);
+}
 void zelda_apu_write(uint32_t adr, uint8_t val) {
   g_apu_write.ports[adr & 0x3] = val;
 }

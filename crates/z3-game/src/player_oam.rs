@@ -1430,7 +1430,7 @@ fn draw_shield(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r4: usize, sr: Sword
     } else {
         kShieldStuff_oam_index_ptrs_0
     };
-    let mut pos = (usize::from(table[r4]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let pos = (usize::from(table[r4]) + usize::from(ram.read_u16(0x352))) >> 2;
     let mut j = usize::from(sr.r6) * 3;
     for i in 0..3 {
         let tile0 = kShieldStuff_OamData[j];
@@ -1442,7 +1442,6 @@ fn draw_shield(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r4: usize, sr: Sword
                 oam::BYTEWISE_EXTENDED_OAM + pos,
                 sr.r12 | ram.read_u16(0x3fa) as u8,
             );
-            pos += 1;
             ox = ox.wrapping_add(8);
             if i == 1 {
                 ox = ox.wrapping_sub(16);
@@ -1726,14 +1725,15 @@ mod tests {
     }
 
     #[test]
-    fn missing_middle_shield_tile_does_not_advance_coordinates() {
+    fn shield_tiles_overwrite_one_oam_slot_like_c() {
         let mut bytes = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut bytes);
         let pos = usize::from(kShieldStuff_oam_index_ptrs_0[0]) >> 2;
         draw_shield(&mut ram, false, 10, 20, 0, SwordResult { r6: 8, r12: 0 });
         let first = oam::read(&ram, pos);
         let second = oam::read(&ram, pos + 1);
-        assert_eq!(second.x, first.x.wrapping_add(8));
-        assert_eq!(second.y, first.y);
+        assert_ne!(first.x, 0);
+        assert_eq!(second.x, 0);
+        assert_eq!(second.y, 0);
     }
 }

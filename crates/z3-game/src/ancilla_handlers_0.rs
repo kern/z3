@@ -37,8 +37,8 @@ const TILE_COLL0_ATTRS: [u8; 256] = [
     0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
     0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 ];
 const TILE_COLL_ATTRS: [u8; 256] = [
     0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 3, 3, 3,
@@ -581,7 +581,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         None
     }
 
-    fn add_ancilla(&mut self, kind: u8, limit: u8) -> Option<usize> {
+    pub fn add_ancilla(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.alloc_init(kind, limit)?;
         self.write(Self::type_address(k), kind);
         self.write(0xc7c + k, self.read(0xee));
@@ -1501,7 +1501,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.ram.read_u16(0x20).wrapping_add(i16::from(y) as u16),
         );
         self.write(
-            0x12d,
+            0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22)) | 0x0b,
         );
         Some(k)
@@ -1906,7 +1906,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 .wrapping_add(i16::from(Y[direction]) as u16),
         );
         self.write(
-            0x12d,
+            0x12e,
             misc::calculate_sfx_pan(self.ram, self.get_x(k)) | 0x2a,
         );
         Some(k)
@@ -1934,7 +1934,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x4b, 0x0c);
         self.write(0xc54 + k, 0);
         self.write(
-            0x12d,
+            0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22))
                 | if self.read(0x2e0) == 0 { 0x14 } else { 0x15 },
         );
@@ -1968,7 +1968,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn add_dwarf_poof(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
         self.write(
-            0x12d,
+            0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22))
                 | if self.read(0xf3cc) == 8 { 0x14 } else { 0x15 },
         );
@@ -1991,7 +1991,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0xc5e + k, 0);
         self.write(0xc68 + k, 7);
         self.write(
-            0x12d,
+            0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22)) | 21,
         );
         self.set_xy(k, x, y.wrapping_sub(2));
@@ -2021,7 +2021,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let link_x = self.ram.read_u16(0x22);
         self.ram.write_u16(0x15813, link_y);
         let top = self.ram.read_u16(0xe8).wrapping_sub(16);
-        self.ram.write_u16(0x1580c, top & 0xfff0);
+        self.ram.write_u16(0x1580c, top & 0x00f0);
         self.ram.write_u16(0x15815, link_x);
         self.ram.write_u16(0x1580e, link_x.wrapping_add(8));
         self.ram.write_u16(0x1580a, link_y.wrapping_sub(16));
@@ -2072,7 +2072,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return Some(k);
         }
         self.write(
-            0x12d,
+            0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22)) | 0x0d,
         );
         self.set_xy(
@@ -2199,7 +2199,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0xc54 + k, 0);
         self.write(0xc5e + k, 0);
         self.write(0xaaa, 13);
-        self.write(0x12d, 0x35);
+        self.write(0x12e, 0x35);
         for i in 0..5 {
             self.write(0x15805 + i, 0);
             self.write(0x15800 + i, 1);
@@ -2315,11 +2315,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         };
         self.write(0x12e, misc::link_calculate_sfx_pan(self.ram) | 15);
         self.write(0xc54 + k, 0);
-        self.write(0x389 + k, 0);
+        self.write(0x746 + k, 0);
         self.write(0xc5e + k, 0xff);
-        self.write(0x39f + k, 1);
+        self.write(0x385 + k, 1);
         self.write(0x3b1 + k, 3);
-        self.write(0x3e4 + k, 6);
+        self.write(0x39f + k, 6);
         let direction = usize::from(self.read(0x2f) >> 1);
         self.write(0xc72 + k, direction as u8);
         self.write(0xc22 + k, Y_VEL[direction] as u8);
@@ -2662,6 +2662,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             (0xc2c, 0),
             (0xc5e, 0),
             (0x3b1, 0),
+            (0x39f, 0),
             (0x3a4, 0),
             (0x3c5, 0),
             (0x394, 12),
@@ -3130,7 +3131,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.ram.write_u16(0x10036, 0x98);
         self.write(0x4c6, 2);
         self.write(0xb0, 0);
-        self.write(0x10, 0);
+        self.write(0xc8, 0);
         self.write(0xc7c, self.read(0xee));
         self.write(ANCILLA_FLOOR2, self.read(0x476));
         self.write(0xc5e, 0);
@@ -3284,6 +3285,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const OFFSET: [u8; 16] = [0, 6, 4, 0, 2, 10, 12, 0, 0, 8, 14, 0, 0, 0, 0, 0];
         let x = self.get_x(source);
         let y = self.get_y(source);
+        self.ram.write_u16(0x39b, x);
+        self.ram.write_u16(0x399, y);
         if let Some(k) = self.add_ancilla(6, 1) {
             self.write(0xc5e + k, 0);
             self.write(0x39f + k, 1);
@@ -3897,8 +3900,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0, 0, 0, 8, 8, 0, 8, 8, 0xf8, 0xf8, 0xf8, 0x10, 0x10, 0xf8, 0x10, 0x10,
         ];
         let (x0, y0) = self.prep_oam_coord(k);
-        let index_from_runtime = self.runtime.allocate_oam(self.ram, k, self.read(0xc90 + k));
-        self.write(0xc86 + k, index_from_runtime);
+        self.runtime.allocate_oam(self.ram, k, self.read(0xc90 + k));
         let original = self.current_oam_index();
         let mut index = original;
         let mut frame = usize::from(self.item_to_link(k)) * 4;
@@ -4382,7 +4384,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [4, 4, -13, 20];
         const PRIORITY: [u8; 4] = [0x20, 0x10, 0x30, 0x20];
         self.allocate_oam_from_region_a_d_f(k, 4);
-        self.write(0xc86 + k, self.current_oam_index() as u8);
+        self.write(0xc86 + k, self.read(0x90));
         if self.read(0xc68 + k) == 0 {
             self.clear(k);
             return;
@@ -4709,6 +4711,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             let (x, y) = self.sparkle_prep_oam_from_radial(radial);
             self.set_oam(original + (3 - i), x, y, CHAR[i], flags | priority, 0);
         }
+        let mut draw_trail = true;
         if self.read(0x11) == 0 {
             let timer = self.read(0x39f + k).wrapping_sub(1);
             self.write(0x39f + k, timer);
@@ -4719,10 +4722,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 if trail == 3 {
                     self.write(0x15804, self.read(0x15804).wrapping_add(spin) & 0x3f);
                 }
+            } else {
+                draw_trail = false;
             }
         }
         let trail = self.read(0x3a4 + k);
-        if trail != 3 {
+        if draw_trail && trail != 3 {
             let radial = Self::radial_projection(self.read(0x15804), self.read(0x15808));
             let (x, y) = self.sparkle_prep_oam_from_radial(radial);
             self.set_oam(
@@ -4922,6 +4927,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.set_oam(index, x, y, CHAR[i], flags | priority, 0);
             index += 1;
         }
+        let mut draw_trail = true;
         if self.read(0x11) == 0 {
             let timer = self.read(0x39f + k).wrapping_sub(1);
             self.write(0x39f + k, timer);
@@ -4932,10 +4938,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 if trail == 3 {
                     self.write(0x15804, self.read(0x15804).wrapping_add(9) & 0x3f);
                 }
+            } else {
+                draw_trail = false;
             }
         }
         let trail = self.read(0x3a4 + k);
-        if trail != 3 {
+        if draw_trail && trail != 3 {
             let radial = Self::radial_projection(self.read(0x15804), self.read(0x15808));
             let (x, y) = self.sparkle_prep_oam_from_radial(radial);
             self.set_oam(index, x, y, TRAIL_CHAR[usize::from(trail)], 4 | priority, 0);
@@ -5304,7 +5312,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if timer == 0 {
             self.write(0x3b1 + k, 1);
             if self.read(0x385 + k) == 0 {
-                if (self.item_to_link(k) as i8) >= 0 {
+                let phase = self.item_to_link(k).wrapping_sub(1);
+                self.write(0xc5e + k, phase);
+                if (phase as i8) >= 0 {
                     let velocity = if self.step(k) != 0 {
                         self.read(0x294 + k).wrapping_add(1)
                     } else {
@@ -5584,21 +5594,20 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             const FLAGS: [u8; 3] = [5, 1, 4];
             self.write(0xbf0 + k, FLAGS[0]);
             if self.step(k) != 2 {
-                let frame = if self.read(0xc68 + k) < 16 {
-                    0
+                if self.read(0xc68 + k) < 16 {
+                    self.write(0x3a4 + k, 0);
+                    self.write(0xbf0 + k, FLAGS[0]);
                 } else {
                     let timer = self.read(0x39f + k).wrapping_sub(1);
                     self.write(0x39f + k, timer);
-                    if (timer as i8) >= 0 {
-                        self.read(0x3a4 + k)
-                    } else {
+                    if (timer as i8) < 0 {
                         self.write(0x39f + k, 2);
                         let frame = self.read(0x3a4 + k).wrapping_add(1);
-                        if frame == 3 { 0 } else { frame }
+                        let frame = if frame == 3 { 0 } else { frame };
+                        self.write(0x3a4 + k, frame);
+                        self.write(0xbf0 + k, FLAGS[usize::from(frame)]);
                     }
-                };
-                self.write(0x3a4 + k, frame);
-                self.write(0xbf0 + k, FLAGS[usize::from(frame)]);
+                }
             }
         }
         if matches!(item, 0x34..=0x36) {
@@ -5642,7 +5651,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             if decode_timer != 0 {
                 if decode_timer == 1 {
                     if item == 0x20 {
-                        self.write(0x12c, 0x0f);
+                        self.write(0x12d, 0x0f);
                         self.runtime
                             .decode_animated_sprite_tile_variable(self.ram, 0x28);
                     } else {
@@ -5920,10 +5929,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         }
         self.write(0x394 + k, 0);
-        let picked = usize::from(self.read(0x2ec)) == k + 1;
+        let mut picked = usize::from(self.read(0x2ec)) == k + 1;
         if self.read(0x3c5 + k) == 0 {
             if matches!(self.read(0x11), 0 | 8 | 16) {
                 self.handle_lift_logic(k);
+                picked = usize::from(self.read(0x2ec)) == k + 1;
             } else if picked && self.read(0x380 + k) != 0 {
                 if self.read(0x380 + k) != 3 {
                     self.latch_link_coordinates(k, 3);
@@ -6313,7 +6323,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         if y < 200 && self.read(0x10010) != 1 {
                             self.write(0x10010, 1);
                             let pan = usize::from(0x98_u8.wrapping_sub(self.read(0xe2)) >> 5);
-                            self.write(0x12d, PAN[pan] | 0x0c);
+                            self.write(0x12e, PAN[pan] | 0x0c);
                         }
                         if y < 168 {
                             self.write(0x10000 + slot, 128);
@@ -6321,10 +6331,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         let x = self.ram.read_u16(0x1001a);
                         self.ram.write_u16(0x10030 + slot * 2, x);
                         self.ram.write_u16(0x10020 + slot * 2, y);
-                        if self.read(0x12d) == 0 {
+                        if self.read(0x12e) == 0 {
                             let pan =
                                 usize::from(x.wrapping_sub(self.ram.read_u16(0xe2)) as u8 >> 5);
-                            self.write(0x12d, PAN[pan] | 0x2a);
+                            self.write(0x12e, PAN[pan] | 0x2a);
                         }
                     }
                 }
@@ -6498,7 +6508,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         if timer == 0 {
                             self.write(0x4c6, 5);
                             self.write(0xb0, 0);
-                            self.write(0x16, 0);
+                            self.write(0xc8, 0);
                             self.write(0xc54 + k, self.step(k).wrapping_add(1));
                         }
                     }
@@ -6719,6 +6729,33 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         y
     }
 
+    fn clear_pickup_item_and_check(&mut self, k: usize) {
+        self.write(0x2ec, 0);
+        if self.item_to_link(k) != 0 || self.read(0x308) != 0 || self.floor(k) != self.read(0xee) {
+            return;
+        }
+        let Some(collision) = self.check_link_collision(k, 0) else {
+            return;
+        };
+        if collision.r8 >= 16 || collision.r10 >= 12 {
+            let facing = if collision.r8 >= collision.r10 {
+                if (collision.r4 as i16) < 0 { 1 } else { 0 }
+            } else if (collision.r6 as i16) < 0 {
+                3
+            } else {
+                2
+            };
+            if facing * 2 != usize::from(self.read(0x2f)) {
+                return;
+            }
+        }
+        self.write(0x2ec, (k + 1) as u8);
+        self.write(0x380 + k, 0);
+        self.write(0x3b1 + k, 16);
+        self.write(0x385 + k, 0);
+        self.write(0x29e + k, 0);
+    }
+
     fn handle_lift_logic(&mut self, k: usize) {
         const DELAY: [u8; 3] = [16, 8, 9];
         if self.read(0x3ea + k) != 0 {
@@ -6747,33 +6784,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         if self.read(0x385 + k) == 0 {
             if self.read(0x2ec) == 0 {
-                self.write(0x2ec, 0);
-                let Some(collision) = self.check_link_collision(k, 0) else {
-                    return;
-                };
-                if self.item_to_link(k) != 0
-                    || self.read(0x308) != 0
-                    || self.floor(k) != self.read(0xee)
-                {
-                    return;
-                }
-                if collision.r8 >= 16 || collision.r10 >= 12 {
-                    let facing = if collision.r8 >= collision.r10 {
-                        if (collision.r4 as i16) < 0 { 1 } else { 0 }
-                    } else if (collision.r6 as i16) < 0 {
-                        3
-                    } else {
-                        2
-                    };
-                    if facing * 2 != usize::from(self.read(0x2f)) {
-                        return;
-                    }
-                }
-                self.write(0x2ec, (k + 1) as u8);
-                self.write(0x380 + k, 0);
-                self.write(0x3b1 + k, DELAY[0]);
-                self.write(0x385 + k, 0);
-                self.write(0x29e + k, 0);
+                self.clear_pickup_item_and_check(k);
                 return;
             }
             if usize::from(self.read(0x2ec)) != k + 1 {
@@ -6791,7 +6802,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 return;
             }
             if self.read(0x308) & 0x80 == 0 {
-                self.write(0x2ec, 0);
+                self.clear_pickup_item_and_check(k);
                 return;
             }
             let mut phase = usize::from(self.read(0x380 + k));
@@ -7346,7 +7357,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                             .read_u16(0x10030 + j * 2)
                             .wrapping_sub(self.ram.read_u16(0xe2));
                         if x < 256 {
-                            self.write(0x12d, SFX_PAN[usize::from(x >> 5)] | 0x0c);
+                            self.write(0x12e, SFX_PAN[usize::from(x >> 5)] | 0x0c);
                         }
                     }
                 }
@@ -7370,7 +7381,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.item_to_link(0) == 6 && self.read(0x10000) == 0 && self.read(0x10001) == 0 {
             self.clear(0);
             self.clear(1);
-            self.write(0x5e, 0);
+            self.write(0x112, 0);
         }
     }
 
@@ -8098,7 +8109,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         self.write(0x15864 + new_slot, (y >> 8) as u8);
                         let screen_x = x.wrapping_sub(self.ram.read_u16(0xe2)).wrapping_add(8);
                         if screen_x < 256 {
-                            self.write(0x12d, SFX_PAN[usize::from(screen_x >> 5)] | 0x2a);
+                            self.write(0x12e, SFX_PAN[usize::from(screen_x >> 5)] | 0x2a);
                         }
                     }
                 }
@@ -8231,7 +8242,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                             u16::from(RANDOM[frame + 3]).wrapping_add(self.ram.read_u16(0xe2)),
                         );
                         self.write(
-                            0x12d,
+                            0x12e,
                             0x0c | SFX_PAN
                                 [usize::from(self.ram.read_u16(0x159d5 + new_slot * 2) >> 5 & 7)],
                         );
@@ -8367,6 +8378,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     fn quake_control_bolts(&mut self, k: usize) {
         const LIMIT: [u8; 5] = [0x17, 0x16, 0x17, 0x16, 0x10];
         let mut next_step = self.step(k);
+        self.write(0x1580f, next_step);
         let mut slot = usize::from(self.read(0x1580a));
         loop {
             if self.read(0x15805 + slot) != LIMIT[slot] {
@@ -8386,6 +8398,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         self.write(0x1580a, 4);
                     } else if slot == 4 && state == 7 {
                         next_step = 1;
+                        self.write(0x1580f, next_step);
                     }
                 }
                 if !skip_draw {
@@ -8529,7 +8542,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         for sprite in (0..16).rev() {
             if ((self.read(0x1a) ^ sprite as u8) & 3) != 0
                 || self.read(0xdd0 + sprite) != 9
-                || self.read(0xc00 + sprite) & 0x20 != 0
+                || self.read(0xcd2 + sprite) & 0x20 != 0
             {
                 continue;
             }
@@ -8859,10 +8872,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 );
                 index += 1;
             }
-            count -= 1;
             if count == 0 {
                 break;
             }
+            count -= 1;
         }
     }
 
@@ -8934,7 +8947,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     && (ledge & 3 != 0 || self.read(0x380 + k) != self.read(0x76))
                 {
                     self.write(0x394 + k, 2);
-                    if (self.read(0x385 + k) as i8) < 0 {
+                    let l = self.read(0x385 + k).wrapping_sub(1);
+                    self.write(0x385 + k, l);
+                    if (l as i8) < 0 {
                         self.write(0x385 + k, 0);
                     }
                 } else {
@@ -9102,6 +9117,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         self.allocate_oam_from_region_a_d_f(k, 4);
+        self.write(0xc86 + k, self.read(0x90));
         let (x, y) = self.prep_oam_coord(k);
         let frame = usize::from(self.item_to_link(k));
         self.set_oam(

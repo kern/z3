@@ -745,7 +745,15 @@ impl Ppu {
                 let (mut lx, mut ly) = (x, y);
                 if self.mosaic(layer) {
                     lx -= lx % i32::from(self.mosaic_size);
-                    ly -= (ly - 1) % i32::from(self.mosaic_size);
+                    // The C optimized renderer samples the mosaic table at
+                    // the one-based scanline, while its legacy pixel renderer
+                    // rounds from scanline - 1. Preserve each renderer's
+                    // phase so both match their respective C paths.
+                    ly -= if self.render_flags & RENDER_NEW != 0 {
+                        ly % i32::from(self.mosaic_size)
+                    } else {
+                        (ly - 1) % i32::from(self.mosaic_size)
+                    };
                 }
                 if self.mode == 7 {
                     self.mode7_pixel(lx, layer, priority != 0)
@@ -1000,7 +1008,7 @@ impl Ppu {
 
         if self.line_has_sprites {
             for index in 0..draw_width {
-                let pixel = usize::from(self.obj_buffer[extra - left + index] & 0xff);
+                let pixel = usize::from(self.obj_buffer[EXTRA_LEFT_RIGHT - left + index] & 0xff);
                 if pixel == 0 {
                     continue;
                 }

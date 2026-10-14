@@ -52,6 +52,7 @@ const DIALOGUE_READ_POS: usize = 0x1cd9;
 const TEXT_WAIT_COUNTDOWN: usize = 0x1ce0;
 const TEXT_TILEMAP_CUR: usize = 0x1ce2;
 const CHOICE: usize = 0x1ce8;
+const CHOICE_BACKUP: usize = 0x1cf4;
 const TEXT_WAIT_COUNTDOWN2: usize = 0x1ce9;
 const DIALOGUE_SCROLL_SPEED: usize = 0x1cea;
 const DIALOGUE_INDEX: usize = 0x1cf0;
@@ -437,10 +438,18 @@ pub struct MessagingAssets<'a> {
     pub dungeon_map_info: &'a [u8],
 }
 pub trait MessagingRuntime {
+    fn misc_bugfixes_enabled(&self) -> bool {
+        false
+    }
+    fn run_hud_module(&mut self, _ram: &mut Ram<'_>) {}
+    fn hud_floor_indicator(&mut self, _ram: &mut Ram<'_>) {}
+    fn link_oam_main(&mut self, _ram: &mut Ram<'_>) {}
     fn enable_force_blank(&mut self, _ram: &mut Ram<'_>) {}
     fn reset_hud_palettes_4_and_5(&mut self, _ram: &mut Ram<'_>) {}
     fn decompress_story_gfx(&mut self, _ram: &mut Ram<'_>) {}
     fn palette_filter_history(&mut self, _ram: &mut Ram<'_>) {}
+    fn apply_palette_filter_bounce(&mut self, _ram: &mut Ram<'_>) {}
+    fn reset_transition_props_and_advance_reset_interface(&mut self, _ram: &mut Ram<'_>) {}
     fn hud_refill_health(&mut self, _ram: &mut Ram<'_>) -> bool {
         false
     }
@@ -458,6 +467,7 @@ pub trait MessagingRuntime {
     fn flute_load_selected_screen(&mut self, _ram: &mut Ram<'_>) {}
     fn flute_load_overlay(&mut self, _ram: &mut Ram<'_>) {}
     fn flute_finish(&mut self, _ram: &mut Ram<'_>) {}
+    fn flute_sprite_main(&mut self, _ram: &mut Ram<'_>) {}
     fn transfer_mode7_characters(&mut self, _ram: &mut Ram<'_>) {}
     fn overworld_map_setup_hdma(&mut self, _ram: &mut Ram<'_>, _zoomed: bool) {}
     fn interface_gameplay_step(&mut self, _ram: &mut Ram<'_>, _run_world: bool) {}
@@ -576,7 +586,20 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         );
     }
     pub fn draw_message_characters(&mut self) {
+        let mut diagnostic_iterations = 0usize;
         loop {
+            diagnostic_iterations += 1;
+            if diagnostic_iterations > 10_000 {
+                panic!(
+                    "message parser loop: module={:02x} sub={:02x} state={:02x} pos={:04x} byte={:02x}",
+                    self.ram.read_u8(MAIN_MODULE),
+                    self.ram.read_u8(SUBMODULE),
+                    self.ram.read_u8(TEXT_RENDER_STATE),
+                    self.ram.read_u16(DIALOGUE_READ_POS),
+                    self.ram
+                        .read_u8(MESSAGE_TEXT + usize::from(self.ram.read_u16(DIALOGUE_READ_POS)))
+                );
+            }
             let p = usize::from(self.ram.read_u16(DIALOGUE_READ_POS));
             let a = self.ram.read_u8(MESSAGE_TEXT + p);
             let c = decode_command(
@@ -649,7 +672,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 CMD_CHOOSE3 => self.choose_three(),
                 CMD_CHOOSE => self.choose_two(1),
                 CMD_SELECTION_CHANGE => self.choose_two(11),
-                CMD_CHOOSE2 => self.choose_two(9),
+                CMD_CHOOSE2 => self.choose_one_or_two(),
                 CMD_SCROLL => {
                     if self.draw_scroll() {
                         self.command_done(c)
@@ -716,6 +739,31 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 self.ram.write_u8(SOUND2, 32);
                 self.ram
                     .write_u16(DIALOGUE_INDEX, message_base + u16::from(t));
+                self.load_character_buffer();
+                self.init_vwf_state();
+            }
+        }
+    }
+    fn choose_one_or_two(&mut self) {
+        let delay = self.ram.read_u8(TEXT_WAIT_COUNTDOWN2);
+        if delay != 0 {
+            let delay = delay - 1;
+            self.ram.write_u8(TEXT_WAIT_COUNTDOWN2, delay);
+            if delay == 1 {
+                self.ram.write_u8(SOUND2, 36);
+            }
+            return;
+        }
+        let input = self.ram.read_u8(0xf4) | (self.ram.read_u8(0xf6) & 0xc0);
+        if input & 0xd0 != 0 {
+            self.ram.write_u8(SOUND1, 43);
+            self.ram.write_u8(TEXT_RENDER_STATE, 4);
+        } else if input & 12 != 0 {
+            let choice = u8::from(input & 8 == 0);
+            if self.ram.read_u8(CHOICE) != choice {
+                self.ram.write_u8(CHOICE, choice);
+                self.ram.write_u8(SOUND2, 32);
+                self.ram.write_u16(DIALOGUE_INDEX, 9 + u16::from(choice));
                 self.load_character_buffer();
                 self.init_vwf_state();
             }
@@ -945,12 +993,16 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
     fn write_player_name(&mut self, dst: &mut Vec<u8>) {
         let slot = u16::from_le_bytes([self.sram[0x1ffe], self.sram[0x1fff]]);
         let offs = ((slot >> 1).wrapping_sub(1) as usize) * 0x500;
+        let start = dst.len();
         for i in 0..6 {
             let p = 0x3d9 + offs + i * 2;
             let a = u16::from_le_bytes([self.sram[p], self.sram[p + 1]]);
-            dst.push(Self::filter_player_name_character(
-                (a as u8 & 15) | ((a >> 1) as u8 & 0xf0),
-            ));
+            let character =
+                Self::filter_player_name_character((a as u8 & 15) | ((a >> 1) as u8 & 0xf0));
+            // C writes all six name bytes into WRAM before rewinding the
+            // destination pointer past trailing padding characters.
+            self.ram.write_u8(MESSAGE_TEXT + start + i, character);
+            dst.push(character);
         }
         while dst.last() == Some(&0x59) {
             dst.pop();
@@ -1122,9 +1174,29 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
     }
 
     pub fn copy_save_to_wram(&mut self, offset: usize) {
+        for address in [0x1abf, 0x1acf, 0x1adf, 0x1aef, 0x1aff] {
+            self.ram.write_u8(address, 0);
+        }
         self.ram
             .slice_mut(0xf000, 0x500)
             .copy_from_slice(&self.sram[offset..offset + 0x500]);
+        self.ram.write_u16(0xc00d, 7);
+        self.ram.write_u16(0xc013, 7);
+        self.ram.write_u16(0xc00f, 0);
+        self.ram.write_u16(0xc015, 0);
+        self.ram.write_u16(0x219, 0x6040);
+        self.ram.write_u16(0x21d, 0x4841);
+        self.ram.write_u16(0x21f, 0x7f);
+        self.ram.write_u16(0x221, 0xffff);
+        if self.runtime.misc_bugfixes_enabled() {
+            self.ram.write_u8(0xc011, 0);
+        }
+        self.ram.write_u8(0x204, 0x80);
+        self.ram.write_u8(0x10, 5);
+        self.ram.write_u8(0x11, 0);
+        self.ram.write_u8(0x10e, 0);
+        self.ram.write_u8(0x710, 0);
+        self.ram.write_u8(0xab2, 0);
     }
 
     pub fn red_potion(&mut self) {
@@ -1157,13 +1229,16 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
 
     pub fn run_submodule(&mut self) {
         match self.ram.read_u8(SUBMODULE) {
-            2 | 11 => self.render_text(),
+            1 => self.runtime.run_hud_module(self.ram),
+            2 => self.render_text(),
             3 => self.dungeon_map(),
             4 => self.red_potion(),
+            5 => self.module0e_05_desert_prayer(),
             7 => self.overworld_map(),
             8 => self.green_potion(),
             9 => self.blue_potion(),
             10 => self.flute_menu(),
+            11 => self.module0e_0b_save_menu(),
             _ => {}
         }
     }
@@ -1174,7 +1249,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             0 => self.dungeon_map_backup(),
             1 => self.dungeon_map_draw(),
             2 => self.dungeon_map_lighten(),
-            3 => self.dungeon_map_handle_input(),
+            3 => self.dungeon_map_handle_input_and_sprites(),
             4 => self.dungeon_map_slide(),
             5 => self.dungeon_map_fade(),
             6 | 7 => self.runtime.dungeon_map_step(self.ram, state),
@@ -1205,7 +1280,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             self.ram.write_u16(0x20e, u16::from(dungeon_floor));
         } else {
             self.ram
-                .write_u16(0x20e, u16::from(dungeon_floor.wrapping_add(1)));
+                .write_u16(0x20e, u16::from(dungeon_floor).wrapping_add(1));
             self.ram.write_u16(0x211, 2);
         }
         self.dungeon_map_draw_floor_numbers(0, !0x1000);
@@ -1221,7 +1296,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         self.ram.write_u16(6, 0);
         self.ram.write_u16(10, 0);
         self.ram.write_u8(NMI_SUBROUTINE, 8);
-        self.ram.write_u8(0x18, 0x22);
+        self.ram.write_u8(0x116, 0x22);
         self.ram
             .write_u8(0x20d, self.ram.read_u8(0x20d).wrapping_add(1));
     }
@@ -1238,7 +1313,9 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         let t5 = DUNG_TAB5[palace];
         let mask = UPPER_BITMASKS[palace];
         let floor = usize::from(self.ram.read_u8(0x20e).wrapping_add((t5 & 0xf) as u8));
-        let layout = self.assets.dungeon_map_floor_layout;
+        let layout =
+            z3_core::assets::packed_array_entry(self.assets.dungeon_map_floor_layout, palace)
+                .expect("dungeon map floor layout");
         for column in 0..5 {
             let room = layout[floor * 25 + row * 5 + column];
             let (room_flags, info) = if room == 0xf {
@@ -1251,7 +1328,13 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                     count += usize::from(layout[index] != 0xf);
                     index += 1;
                 }
-                (flags, usize::from(self.assets.dungeon_map_info[count]))
+                (
+                    flags,
+                    usize::from(
+                        self.get_other_dungmap_info(count)
+                            .expect("dungeon map tile info"),
+                    ),
+                )
             };
             let tiles = Self::dungeon_room_quadrants(
                 info as u8,
@@ -1443,8 +1526,17 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         }
         self.ram.write_u8(MOSAIC, 3);
         self.ram.write_u8(MAPBAK_HDMAEN, self.ram.read_u8(HDMAEN));
+        self.ram.write_u8(INIDISP, 0x80);
+        self.ram.write_u8(HDMAEN, 0);
         self.ram.write_u8(OW_MAP_STATE, 1);
         self.ram.write_u8(0x20d, 0);
+        self.ram.write_u8(0x9c, 0x20);
+        self.ram.write_u8(0x9d, 0x40);
+        self.ram.write_u8(0x9e, 0x80);
+        self.ram.write_u16(0x100, 0x250);
+        for i in 0..512 {
+            self.ram.write_u8(0x1dd80 + i, self.ram.read_u8(0xc500 + i));
+        }
         self.ram.write_u16(MAPBAK_BG1_X, self.ram.read_u16(0x11a));
         self.ram.write_u16(MAPBAK_BG1_Y, self.ram.read_u16(0x11c));
         self.ram.write_u16(0x11a, 0);
@@ -1458,6 +1550,8 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             self.ram.write_u16(d, self.ram.read_u16(s));
             self.ram.write_u16(s, 0);
         }
+        self.ram.write_u16(0xe4, 0);
+        self.ram.write_u16(0xea, 0);
         self.ram.write_u16(MAPBAK_CGWSEL, self.ram.read_u16(0x99));
         self.ram.write_u8(0x99, 2);
         self.ram.write_u8(0x9a, 0x20);
@@ -1567,6 +1661,8 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         if a != 0 {
             return;
         }
+        self.ram.write_u8(INIDISP, 0x80);
+        self.ram.write_u8(HDMAEN, 0);
         self.ram
             .write_u8(OW_MAP_STATE, self.ram.read_u8(OW_MAP_STATE).wrapping_add(1));
         self.ram.write_u16(0x99, self.ram.read_u16(MAPBAK_CGWSEL));
@@ -1581,7 +1677,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         self.ram.write_u16(0x11a, self.ram.read_u16(MAPBAK_BG1_X));
         self.ram.write_u16(0x11c, self.ram.read_u16(MAPBAK_BG1_Y));
         self.ram
-            .write_u8(HUD_UPDATE, self.ram.read_u8(HUD_UPDATE).wrapping_add(1));
+            .write_u8(0x15, self.ram.read_u8(0x15).wrapping_add(1));
     }
     pub fn dungeon_map_restore(&mut self) {
         let a = self.ram.read_u8(INIDISP).wrapping_add(1);
@@ -1661,16 +1757,12 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             15 => self.game_over_resituate_link(),
             _ => {}
         }
+        if self.ram.read_u8(SUBMODULE) != 9 {
+            self.runtime.link_oam_main(self.ram);
+        }
     }
     pub fn death_initialize(&mut self) {
-        self.ram.write_u8(0x12c, 0xf1);
-        self.ram.write_u8(0x12d, 5);
-        self.ram.write_u8(OW_MAP_STATE, 5);
-        self.ram.write_u8(SOME_MENU_CTR, 32);
-        self.ram
-            .write_u8(HUD_UPDATE, self.ram.read_u8(HUD_UPDATE).wrapping_add(1));
-        self.ram
-            .write_u8(SUBMODULE, self.ram.read_u8(SUBMODULE).wrapping_add(1));
+        self.death_func1();
     }
     pub fn game_over_delay_before_iris(&mut self) {
         let n = self.ram.read_u8(SOME_MENU_CTR).wrapping_sub(1);
@@ -1680,8 +1772,8 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         }
         self.death_initialize_game_over_letters();
         self.runtime.death_step(self.ram, 2);
-        self.ram.write_u8(0x9d, 0x30);
-        self.ram.write_u8(0x9c, 0);
+        self.ram.write_u8(0x98, 0x30);
+        self.ram.write_u8(0x97, 0);
         self.ram
             .write_u8(SUBMODULE, self.ram.read_u8(SUBMODULE).wrapping_add(1));
     }
@@ -1720,7 +1812,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         if self.ram.read_u8(IS_HEART_ANIM) == 0 {
             self.runtime.death_step(self.ram, 13);
         } else {
-            self.runtime.death_step(self.ram, 11);
+            self.runtime.death_step(self.ram, 0x31);
         }
     }
     pub fn game_over_resituate_link(&mut self) {
@@ -1943,6 +2035,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         if self.ram.read_u8(OW_MAP_FLAGS) & 0x80 != 0 {
             self.ram
                 .write_u8(OW_MAP_FLAGS, self.ram.read_u8(OW_MAP_FLAGS) & !0x80);
+            self.overworld_map_setup_hdma();
         }
         if self.ram.read_u8(OW_MAP_FLAGS) == 0 && self.did_press_button_for_map() {
             self.ram.write_u8(OW_MAP_STATE, 6);
@@ -1957,6 +2050,19 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             let zoom = usize::from(self.ram.read_u8(OW_MAP_FLAGS) ^ 1);
             self.ram.write_u8(OW_MAP_FLAGS, zoom as u8 | 0x80);
             self.ram.write_u8(MODE7_ZOOM_TIMER, [33, 12][zoom]);
+            if zoom == 1 {
+                let y = ((self.ram.read_u16(0xc108) >> 4).wrapping_sub(0x48)) & !1;
+                self.ram.write_u16(BG1_VOFS2, y);
+                self.ram.write_u16(M7Y, y.wrapping_add(0x100));
+                let x = (self.ram.read_u16(0xc10a) >> 4).wrapping_sub(0x80) as i16;
+                let scaled = ((5 * x.unsigned_abs()) >> 1) as i16;
+                let x = (if x < 0 { -scaled } else { scaled } as u16).wrapping_add(0x80) & !1;
+                self.ram.write_u16(BG1_HOFS2, x);
+            } else {
+                self.ram.write_u16(BG1_VOFS2, 200);
+                self.ram.write_u16(M7Y, 456);
+                self.ram.write_u16(BG1_HOFS2, 128);
+            }
         }
         if self.ram.read_u8(OW_MAP_FLAGS) != 0 {
             let k = usize::from((self.ram.read_u8(JOYPAD_H) & 12) >> 1);
@@ -2062,7 +2168,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         match self.ram.read_u8(OW_MAP_STATE) {
             0 => self.world_map_fade_out(),
             1 => {
-                self.ram.write_u8(0xc100, 0);
+                self.ram.write_u8(0x1af0, 0);
                 self.runtime.world_map_load_light(self.ram)
             }
             2 => self.runtime.world_map_load_sprite_gfx(self.ram),
@@ -2079,13 +2185,16 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 let a = self.ram.read_u8(INIDISP) + 1;
                 self.ram.write_u8(INIDISP, a);
                 if a == 15 {
-                    self.runtime.flute_finish(self.ram)
+                    self.bird_travel_finish_doit();
+                } else {
+                    self.runtime.flute_sprite_main(self.ram)
                 }
             }
             _ => {}
         }
     }
     pub fn flute_handle_selection(&mut self) {
+        const BIRD_CHAR: [u8; 8] = [0x7f, 0x79, 0x6c, 0x6d, 0x6e, 0x6f, 0x7c, 0x7d];
         let timer = self.ram.read_u8(SOME_MENU_CTR);
         if timer == 0 && (self.ram.read_u8(JOYPAD_L) | self.ram.read_u8(JOYPAD_H)) & 0xc0 != 0 {
             self.ram.write_u8(OW_MAP_STATE, 6);
@@ -2094,7 +2203,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         if timer != 0 {
             self.ram.write_u8(SOME_MENU_CTR, timer - 1)
         }
-        let mut choice = self.ram.read_u8(0xc100);
+        let mut choice = self.ram.read_u8(0x1af0);
         if self.ram.read_u8(0xf4) & 10 != 0 {
             choice = choice.wrapping_sub(1);
             self.ram.write_u8(SOUND2, 32)
@@ -2103,13 +2212,34 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             choice = choice.wrapping_add(1);
             self.ram.write_u8(SOUND2, 32)
         }
-        self.ram.write_u8(0xc100, choice & 7);
-        for i in 0..8 {
-            self.ram.write_u8(0xc110 + i, BIRD_X_LO[i]);
-            self.ram.write_u8(0xc120 + i, BIRD_X_HI[i]);
-            self.ram.write_u8(0xc130 + i, BIRD_Y_LO[i]);
-            self.ram.write_u8(0xc140 + i, BIRD_Y_HI[i]);
+        self.ram.write_u8(0x1af0, choice & 7);
+        if self.ram.read_u8(0x1a) & 0x10 != 0
+            && let Some((x, y)) = self.world_map_oam_coordinates()
+        {
+            self.world_map_add_sprite(16, 2, 0x3e, 0, x.wrapping_sub(4), y.wrapping_sub(4));
         }
+        let saved_x = self.ram.read_u16(0xc10a);
+        let saved_y = self.ram.read_u16(0xc108);
+        for i in 0..8 {
+            self.ram.write_u8(0x1ab0 + i, BIRD_X_LO[i]);
+            self.ram.write_u8(0x1ac0 + i, BIRD_X_HI[i]);
+            self.ram.write_u8(0x1ad0 + i, BIRD_Y_LO[i]);
+            self.ram.write_u8(0x1ae0 + i, BIRD_Y_HI[i]);
+            self.ram
+                .write_u16(0xc10a, u16::from_le_bytes([BIRD_X_LO[i], BIRD_X_HI[i]]));
+            self.ram
+                .write_u16(0xc108, u16::from_le_bytes([BIRD_Y_LO[i], BIRD_Y_HI[i]]));
+            if let Some((x, y)) = self.world_map_oam_coordinates() {
+                let flags = if i == usize::from(choice & 7) {
+                    0x30 + (self.ram.read_u8(0x1a) & 6)
+                } else {
+                    0x32
+                };
+                self.world_map_add_sprite(i, 0, flags, BIRD_CHAR[i], x, y);
+            }
+        }
+        self.ram.write_u16(0xc10a, saved_x);
+        self.ram.write_u16(0xc108, saved_y);
     }
 
     pub fn map_has_pendant(&self, k: usize) -> bool {
@@ -2139,7 +2269,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         if self.ram.read_u32(0x64c) & 1 != 0 {
             big |= (x >> 8) as u8 & 1;
         }
-        crate::oam::set_helper0(self.ram, sprite, x, y, ch, flags, big);
+        crate::oam::set_plain(self.ram, sprite, x as u8, y as u8, ch, flags, big);
     }
 
     // C entry-point spellings.  Keeping these small forwarding methods is
@@ -2147,10 +2277,12 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
     // landing point even when the idiomatic implementation above has a
     // shorter name.
     pub fn get_dungmap_floor_layout(&self) -> Option<&[u8]> {
-        Some(self.assets.dungeon_map_floor_layout)
+        z3_core::assets::packed_array_entry(self.assets.dungeon_map_floor_layout, self.palace())
     }
     pub fn get_other_dungmap_info(&self, count: usize) -> Option<u8> {
-        self.assets.dungeon_map_info.get(count).copied()
+        z3_core::assets::packed_array_entry(self.assets.dungeon_map_info, self.palace())?
+            .get(count)
+            .copied()
     }
     pub fn dung_map_4(&mut self) {
         self.dungeon_map_slide();
@@ -2198,8 +2330,21 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
     }
     pub fn module0e_05_desert_prayer(&mut self) {
         match self.ram.read_u8(SUBSUBMODULE) {
-            0 | 1 | 3 => self.runtime.palette_filter_history(self.ram),
-            2 => self.desert_prayer_initialize_iris_hdma(),
+            0 => self
+                .runtime
+                .reset_transition_props_and_advance_reset_interface(self.ram),
+            1 => self.runtime.apply_palette_filter_bounce(self.ram),
+            2 => {
+                self.desert_prayer_initialize_iris_hdma();
+                self.ram
+                    .write_u8(0xc007, self.ram.read_u8(0xc00b).wrapping_sub(1));
+                self.ram.write_u8(0xc00b, 0);
+                self.ram.write_u8(0xc009, 2);
+            }
+            3 => {
+                self.runtime.apply_palette_filter_bounce(self.ram);
+                self.desert_prayer_build_iris_hdma_table();
+            }
             4 => self.desert_prayer_build_iris_hdma_table(),
             _ => {}
         }
@@ -2227,12 +2372,12 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             self.ram.write_u8(SUBSUBMODULE, 0);
             self.ram.write_u8(NMI_LOAD_BG, 1);
             if self.ram.read_u8(CHOICE) != 0 {
-                self.ram.write_u8(0x12c, 15);
+                self.ram.write_u8(0x12d, 15);
                 self.ram.write_u8(MAIN_MODULE, 23);
                 self.ram.write_u8(SUBMODULE, 1);
                 self.ram.write_u16(0x430, 0);
             } else {
-                self.ram.write_u8(CHOICE, self.ram.read_u8(0xc8a));
+                self.ram.write_u8(CHOICE, self.ram.read_u8(CHOICE_BACKUP));
             }
         }
     }
@@ -2343,8 +2488,11 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 self.ram.write_u16(0x1dba0 + usize::from(k) * 2, packed);
             }
             if (lower as i16) < 0 || (r4 >= lower && r4 < upper) {
-                let mirror = u16::from((shape_line as u8).wrapping_sub(2));
-                let mirror = r14.wrapping_add(mirror);
+                // C promotes BYTE(spotlight_var4) to int before subtracting 2.
+                // At the first line, 1 - 2 is -1, not u8::MAX.
+                let mirror = r14
+                    .wrapping_add(u16::from(shape_line as u8))
+                    .wrapping_sub(2);
                 if mirror < 240 {
                     self.ram
                         .write_u16(0x1dba0 + usize::from(mirror) * 2, packed);
@@ -2417,13 +2565,27 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         self.death_func1();
     }
     pub fn death_func1(&mut self) {
+        self.ram.write_u8(0xc227, self.ram.read_u8(0x130));
+        self.ram.write_u8(0xc228, self.ram.read_u8(0x131));
         self.ram.write_u8(0x12c, 0xf1);
         self.ram.write_u8(0x12d, 5);
         self.ram.write_u8(OW_MAP_STATE, 5);
+        self.ram.write_u8(0x3f3, 0);
         self.ram.write_u8(0x322, 0);
+        self.ram.write_u8(0x55, 0);
+        self.ram.write_u16(MAPBAK_BG1_X, self.ram.read_u16(0xc007));
+        self.ram.write_u16(MAPBAK_BG1_Y, self.ram.read_u16(0xc009));
+        let palette = self.ram.slice(0xc300, 256).to_vec();
+        self.ram.slice_mut(0x1dd80, 256).copy_from_slice(&palette);
+        self.ram.slice_mut(0xc340, 192).fill(0);
+        self.ram.write_u16(0xc007, 0);
+        self.ram.write_u16(0xc009, 0);
+        self.ram.write_u16(MAPBAK_CGWSEL, self.ram.read_u16(0x99));
         self.ram.write_u8(SOME_MENU_CTR, 32);
         self.ram.write_u16(0x11a, 0);
         self.ram.write_u16(0x11c, 0);
+        self.ram.write_u8(0x4a0, 0);
+        self.runtime.hud_floor_indicator(self.ram);
         self.ram
             .write_u8(HUD_UPDATE, self.ram.read_u8(HUD_UPDATE).wrapping_add(1));
         self.ram
@@ -2488,6 +2650,8 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         self.ram.write_u8(INIDISP, value);
         if value == 15 {
             self.bird_travel_finish_doit();
+        } else {
+            self.runtime.flute_sprite_main(self.ram);
         }
     }
     pub fn bird_travel_finish_doit(&mut self) {
@@ -2683,7 +2847,9 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 room = DUNG_TAB22[i];
             }
         }
-        let layout = self.assets.dungeon_map_floor_layout;
+        let layout =
+            z3_core::assets::packed_array_entry(self.assets.dungeon_map_floor_layout, palace)
+                .expect("dungeon map floor layout");
         let current_floor = &layout[floor * 25..floor * 25 + 25];
         let position = current_floor
             .iter()
@@ -2715,7 +2881,11 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             0xfaa,
             boss_y
                 .wrapping_add_signed(
-                    (i16::from(self.ram.read_u8(0x20e))).wrapping_sub(DUNG_TAB28[palace]) * 0x60,
+                    i16::from(
+                        self.ram
+                            .read_u8(0x20e)
+                            .wrapping_sub(DUNG_TAB28[palace] as u8) as i8,
+                    ) * 0x60,
                 )
                 .wrapping_add(DUNG_TAB24[0]),
         );
@@ -2806,7 +2976,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             .ram
             .read_u8(0xcf5)
             .wrapping_add(DUNG_TAB24[marker as usize] as u8);
-        for i in 0..4 {
+        for i in (0..4).rev() {
             let mut frame = usize::from((self.ram.read_u8(0x1a) >> 2) & 1);
             if self.ram.read_u8(0x217).wrapping_add(1) & 0xf0 == base_y.wrapping_add(1)
                 && self.ram.read_u16(0x217) < 256
@@ -2815,7 +2985,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
             }
             crate::oam::set_plain(
                 self.ram,
-                sprite + i,
+                sprite + (3 - i),
                 base_x.wrapping_add_signed(DUNG_TAB29[i]),
                 base_y.wrapping_add_signed(DUNG_TAB30[i]),
                 0,
@@ -2859,7 +3029,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 let flags = 0x3d | if i == 0 { 0x40 } else { 0 };
                 crate::oam::set_plain(
                     self.ram,
-                    sprite + i,
+                    sprite + (3 - i),
                     x,
                     y.wrapping_add((flag * 16) as u8),
                     DUNG_TAB36[i],
@@ -2868,7 +3038,7 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
                 );
                 crate::oam::set_plain(
                     self.ram,
-                    sprite + i + 4,
+                    sprite + (3 - i) + 4,
                     x,
                     y.wrapping_add((flag * 16 + 8) as u8),
                     DUNG_TAB36[i],
@@ -3090,15 +3260,20 @@ impl<R: MessagingRuntime> Messaging<'_, '_, '_, '_, R> {
         self.ram.write_u16(0x430, 0);
     }
     pub fn display_select_menu(&mut self) {
-        self.ram.write_u8(0xc8a, self.ram.read_u8(CHOICE));
-        self.ram.write_u16(DIALOGUE_NUMBER, 0x186);
-        self.runtime.display_select_menu(self.ram);
-        self.ram.write_u8(SUBSUBMODULE, 0);
-        self.ram.write_u8(SUBMODULE, 11);
-        self.ram
-            .write_u8(SAVED_MODULE, self.ram.read_u8(MAIN_MODULE));
-        self.ram.write_u8(MAIN_MODULE, 14);
+        display_select_menu_core(self.ram);
     }
+}
+
+pub fn display_select_menu_core(ram: &mut Ram<'_>) {
+    ram.write_u8(CHOICE_BACKUP, ram.read_u8(CHOICE));
+    ram.write_u16(0x1cf0, 0x186);
+    let module = ram.read_u8(MAIN_MODULE);
+    crate::misc::main_show_text_message(ram);
+    ram.write_u8(MAIN_MODULE, module);
+    ram.write_u8(SUBSUBMODULE, 0);
+    ram.write_u8(SUBMODULE, 11);
+    ram.write_u8(SAVED_MODULE, module);
+    ram.write_u8(MAIN_MODULE, 14);
 }
 
 #[cfg(test)]
@@ -3282,7 +3457,7 @@ mod tests {
             assert_eq!(m.ram.read_u8(SUBMODULE), 1);
             assert_eq!(m.ram.read_u8(SUBSUBMODULE), 0);
             assert_eq!(m.ram.read_u8(NMI_LOAD_BG), 1);
-            assert_eq!(m.ram.read_u8(0x12c), 15);
+            assert_eq!(m.ram.read_u8(0x12d), 15);
         });
     }
 }

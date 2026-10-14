@@ -889,6 +889,19 @@ void ZeldaWriteSram() {
   }
 }
 
+bool ZeldaLoadReferenceReplayForTest(int chapter) {
+  if (chapter < 0 || chapter >= (int)(sizeof(kReferenceSaves) / sizeof(kReferenceSaves[0])))
+    return false;
+  char name[128];
+  sprintf(name, "saves/ref/%s", kReferenceSaves[chapter]);
+  FILE *f = fopen(name, "rb");
+  if (f == NULL)
+    return false;
+  StateRecorder_Load(&state_recorder, f, true);
+  fclose(f);
+  return true;
+}
+
 bool ZeldaLoadSnapshotForTest(const uint8 *data, size_t size) {
   LoadFuncState state = { (uint8 *)data, (uint8 *)data + size };
   LoadSnesState(&loadFunc, &state);

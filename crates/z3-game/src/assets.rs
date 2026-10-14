@@ -14,6 +14,7 @@ use crate::overworld::OverworldAssets;
 pub struct RuntimeAssets<'a> {
     file: AssetFile<'a>,
     words: Vec<Vec<u16>>,
+    dungeon_room_words_odd: Vec<u16>,
     signed_bytes: Vec<Vec<i8>>,
     signed_words: Vec<Vec<i16>>,
     gloves_color: [u16; 2],
@@ -35,6 +36,16 @@ impl<'a> RuntimeAssets<'a> {
                     .collect()
             })
             .collect();
+        // Door offsets address the byte stream, and some lists begin on an odd byte.
+        // Decoding only even-aligned words would shift those lists by one byte.
+        let dungeon_room_words_odd = file
+            .get(3)
+            .expect("dungeon room asset")
+            .get(1..)
+            .unwrap_or_default()
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
         let signed_bytes = file
             .iter()
             .map(|asset| asset.iter().map(|&byte| byte as i8).collect())
@@ -51,6 +62,7 @@ impl<'a> RuntimeAssets<'a> {
         Ok(Self {
             file,
             words,
+            dungeon_room_words_odd,
             signed_bytes,
             signed_words,
             gloves_color,
@@ -153,7 +165,11 @@ impl<'a> RuntimeAssets<'a> {
     #[must_use]
     pub fn dungeon_room_door_info(&self, room: usize) -> &[u16] {
         let byte_offset = usize::from(self.words(5)[room]);
-        &self.words(3)[byte_offset / 2..]
+        if byte_offset & 1 == 0 {
+            &self.words(3)[byte_offset / 2..]
+        } else {
+            &self.dungeon_room_words_odd[byte_offset / 2..]
+        }
     }
 
     #[must_use]
@@ -358,7 +374,13 @@ impl OverworldAssets for RuntimeAssets<'_> {
         self.words(110)
     }
     fn background_palettes(&self) -> &[u8] {
-        self.bytes(109)
+        // The C port indexes this table with credits screen 0x88, one byte
+        // beyond its declared 136-byte payload. Its asset pointers refer into
+        // one contiguous file, so that byte comes from the following payload.
+        // Keep the same packed-file view for this lookup.
+        let payload = self.bytes(109);
+        let start = payload.as_ptr() as usize - self.file.bytes().as_ptr() as usize;
+        &self.file.bytes()[start..]
     }
     fn sprite_graphics(&self) -> &[u8] {
         self.bytes(161)
@@ -482,8 +504,8 @@ impl OverworldAssets for RuntimeAssets<'_> {
     fn bird_map16_source_offsets(&self) -> &[u16] {
         self.words(114)
     }
-    fn bird_screen_indices(&self) -> &[u8] {
-        self.bytes(113)
+    fn bird_screen_indices(&self) -> &[u16] {
+        self.words(113)
     }
     fn bird_unk1(&self) -> &[i8] {
         self.signed_bytes(121)
@@ -538,5 +560,32 @@ impl OverworldAssets for RuntimeAssets<'_> {
     }
     fn special_exit_sprite_palette(&self) -> &[u8] {
         self.bytes(156)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use z3_core::assets::{ASSET_COUNT, ASSET_SIGNATURE, HEADER_SIZE};
+
+    #[test]
+    fn dungeon_door_offsets_address_exact_bytes() {
+        let mut bundle = vec![0; HEADER_SIZE + ASSET_COUNT * 4];
+        bundle[..ASSET_SIGNATURE.len()].copy_from_slice(&ASSET_SIGNATURE);
+        bundle[80..84].copy_from_slice(&(ASSET_COUNT as u32).to_le_bytes());
+        for index in 0..ASSET_COUNT {
+            bundle.resize((bundle.len() + 3) & !3, 0);
+            let payload: &[u8] = match index {
+                3 => &[0, 0x34, 0x12, 0xff, 0xff, 0x78, 0x56, 0xff, 0xff],
+                5 => &[1, 0, 5, 0],
+                _ => &[],
+            };
+            bundle[HEADER_SIZE + index * 4..HEADER_SIZE + index * 4 + 4]
+                .copy_from_slice(&(payload.len() as u32).to_le_bytes());
+            bundle.extend_from_slice(payload);
+        }
+        let assets = RuntimeAssets::parse(&bundle).unwrap();
+        assert_eq!(&assets.dungeon_room_door_info(0)[..2], &[0x1234, 0xffff]);
+        assert_eq!(&assets.dungeon_room_door_info(1)[..2], &[0x5678, 0xffff]);
     }
 }

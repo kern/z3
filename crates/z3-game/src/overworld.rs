@@ -487,7 +487,7 @@ pub trait OverworldAssets {
     fn bird_map16_source_offsets(&self) -> &[u16] {
         &[]
     }
-    fn bird_screen_indices(&self) -> &[u8] {
+    fn bird_screen_indices(&self) -> &[u16] {
         &[]
     }
     fn bird_unk1(&self) -> &[i8] {
@@ -1379,7 +1379,11 @@ pub fn load_gfx_and_screen_size(ram: &mut Ram<'_>, assets: &impl OverworldAssets
     );
     ram.write_u8(
         AUX_TILE_THEME_INDEX,
-        assets.overworld_aux_tile_themes()[screen],
+        assets
+            .overworld_aux_tile_themes()
+            .get(screen)
+            .copied()
+            .unwrap_or(0),
     );
     ram.write_u8(
         OVERWORLD_AREA_IS_BIG_BACKUP,
@@ -1406,10 +1410,13 @@ pub fn load_gfx_and_screen_size(ram: &mut Ram<'_>, assets: &impl OverworldAssets
     };
     ram.write_u8(MISC_SPRITE_GRAPHICS_INDEX, VARIOUS_PACKS[pack]);
     let area = screen & 0xbf;
-    ram.write_u16(OVERWORLD_OFFSET_BASE_Y_ADDR, OVERWORLD_OFFSET_BASE_Y[area]);
+    ram.write_u16(
+        OVERWORLD_OFFSET_BASE_Y_ADDR,
+        OVERWORLD_OFFSET_BASE_Y.get(area).copied().unwrap_or(0),
+    );
     ram.write_u16(
         OVERWORLD_OFFSET_BASE_X_ADDR,
-        OVERWORLD_OFFSET_BASE_X[area] >> 3,
+        OVERWORLD_OFFSET_BASE_X.get(area).copied().unwrap_or(0) >> 3,
     );
     let mask = if is_small { 0x1f0 } else { 0x3f0 };
     ram.write_u16(OVERWORLD_OFFSET_MASK_Y, mask);
@@ -1488,9 +1495,9 @@ pub fn load_overlays_inner(
         if ram.read_u8(SAVE_OW_EVENT_INFO + 0x70) & 0x20 == 0 {
             0x9f
         } else {
-            ram.write_u8(TS_COPY, 0);
-            ram.write_u8(SUBMODULE, ram.read_u8(SUBMODULE).wrapping_add(1));
-            return;
+            // The C assignment in the preceding conditional leaves xv at 0x9c
+            // even when none of its screen tests match.
+            0x9c
         }
     } else if ram.read_u8(SRAM_PROGRESS_INDICATOR) < 2 {
         0x9f
@@ -1516,8 +1523,8 @@ pub fn load_overlays_inner(
     if matches!(overlay, 0x97 | 0x94 | 0x93 | 0x9d | 0x9e | 0x9f) {
         ram.write_u8(CGADSUB_COPY, 0x72);
     } else if matches!(overlay, 0x95 | 0x9c)
-        || matches!(ram.read_u8(OVERLAY_STATE_CACHE), 0x5b | 0x1b)
-            && matches!(ram.read_u8(SUBMODULE), 35 | 44)
+        || ram.read_u8(OVERLAY_STATE_CACHE) == 0x5b
+        || ram.read_u8(OVERLAY_STATE_CACHE) == 0x1b && matches!(ram.read_u8(SUBMODULE), 35 | 44)
     {
         ram.write_u8(CGADSUB_COPY, 0x20);
     } else {
@@ -2025,17 +2032,16 @@ pub fn pre_overworld_load_properties(
             } else {
                 2
             }
-        } else if ram.read_u16(SAVEGAME_MASTER_SWORD_FLAGS) & 0x40 != 0 {
-            2
-        } else if room == 0 || room == 0xe1 {
-            5
-        } else if ram.read_u8(QUEUED_MUSIC_CONTROL) == 0xf2 {
+        } else if room != 0 && room != 0xe1 && ram.read_u8(QUEUED_MUSIC_CONTROL) == 0xf2 {
             skip_dark_world_override = true;
             0xf3
-        } else if ram.read_u8(SRAM_PROGRESS_INDICATOR) < 2 {
+        } else if room != 0 && room != 0xe1 && ram.read_u8(SRAM_PROGRESS_INDICATOR) < 2 {
             3
-        } else {
+        } else if room != 0 && room != 0xe1 || ram.read_u16(SAVEGAME_MASTER_SWORD_FLAGS) & 0x40 != 0
+        {
             2
+        } else {
+            5
         }
     };
     if !skip_dark_world_override && ram.read_u8(SAVEGAME_IS_DARKWORLD) != 0 {
@@ -2699,7 +2705,9 @@ pub fn tool_and_tile_interaction(
     let replacement = if item & 2 != 0 {
         if attribute == 0x21b {
             ram.write_u8(SOUND_EFFECT_1, 17);
-            let _ = handle_peg_puzzles(ram, position);
+            if handle_peg_puzzles(ram, position) {
+                update_map_32x32_b(ram, |ram| update_map_32x32(ram, assets));
+            }
             Some(0xdcb)
         } else {
             pick_hammer_sfx(ram, assets, attribute);
@@ -2741,9 +2749,13 @@ pub fn tool_and_tile_interaction(
     };
 
     if let Some(mut value) = replacement {
-        let secret = reveal_secret(ram, assets, position);
-        if secret != 0 {
-            value = secret;
+        // The hammer-peg path in C jumps directly to memoize_getout,
+        // bypassing check_secret and preserving dung_secrets_unk1.
+        if item & 2 == 0 {
+            let secret = reveal_secret(ram, assets, position);
+            if secret != 0 {
+                value = secret;
+            }
         }
         ram.write_u16(DUNG_BG2 + usize::from(position), value);
         memorize_map16_change(ram, position, value);
@@ -3010,6 +3022,14 @@ pub fn module09_whirlpool(
             ram.write_u8(OVERWORLD_MAP_STATE, 0);
             ram.write_u8(NMI_DISABLE_CORE_UPDATES, 0);
         }
+        4 | 6 => {
+            ram.write_u8(NMI_SUBROUTINE_INDEX, 13);
+            ram.write_u8(
+                NMI_DISABLE_CORE_UPDATES,
+                ram.read_u8(NMI_DISABLE_CORE_UPDATES).wrapping_add(1),
+            );
+            ram.write_u8(SUBSUBMODULE, ram.read_u8(SUBSUBMODULE).wrapping_add(1));
+        }
         _ => {}
     }
 }
@@ -3131,7 +3151,7 @@ pub fn load_bird_travel_position(
     ram.write_u16(OVERWORLD_UNK1 + 2, 0u16.wrapping_sub(unk1));
     ram.write_u16(OVERWORLD_UNK1 + 4, unk3);
     ram.write_u16(OVERWORLD_UNK1 + 6, 0u16.wrapping_sub(unk3));
-    let screen = u16::from(assets.bird_screen_indices()[index]);
+    let screen = assets.bird_screen_indices()[index];
     ram.write_u16(OVERWORLD_AREA_INDEX, screen);
     ram.write_u16(OVERWORLD_SCREEN_INDEX, screen);
     let source = assets.bird_map16_source_offsets()[index];
@@ -3264,12 +3284,17 @@ pub fn decompress_and_draw_one_quadrant(
     screen: usize,
 ) {
     let mut decoded = [0u8; 4096];
-    decompress_bank02(&mut decoded, assets.overworld_hibytes(screen));
+    let length = decompress_bank02(&mut decoded, assets.overworld_hibytes(screen));
+    for (index, &value) in decoded[..length].iter().enumerate() {
+        ram.write_u8(0x14400 + index, value);
+    }
     for (index, &value) in decoded[..256].iter().enumerate() {
         ram.write_u8(0x14001 + index * 2, value);
     }
-    decoded.fill(0);
-    decompress_bank02(&mut decoded, assets.overworld_lobytes(screen));
+    let length = decompress_bank02(&mut decoded, assets.overworld_lobytes(screen));
+    for (index, &value) in decoded[..length].iter().enumerate() {
+        ram.write_u8(0x14400 + index, value);
+    }
     for (index, &value) in decoded[..256].iter().enumerate() {
         ram.write_u8(0x14000 + index * 2, value);
     }
@@ -4990,6 +5015,7 @@ pub fn animate_entrance_turtle_rock(
     mut restore_additive_palette: impl FnMut(&mut Ram<'_>, u8, u8),
     mut restore_subtractive_palette: impl FnMut(&mut Ram<'_>, u8, u8),
 ) {
+    const VRAM_UPLOAD_DATA: usize = 0x1002;
     let x = if ram.read_u8(FRAME_COUNTER) & 1 != 0 {
         u16::MAX
     } else {
@@ -5008,10 +5034,10 @@ pub fn animate_entrance_turtle_rock(
                 );
                 approach_fixed_color(ram, 0);
             }
-            ram.write_u16(UVRAM_DATA, 0x10 + u16::from(state) * 4);
-            ram.write_u16(UVRAM_DATA + 2, 0xfe47);
-            ram.write_u16(UVRAM_DATA + 4, 0x1e3);
-            ram.write_u8(UVRAM_DATA + 6, 0xff);
+            ram.write_u16(VRAM_UPLOAD_DATA, 0x10 + u16::from(state) * 4);
+            ram.write_u16(VRAM_UPLOAD_DATA + 2, 0xfe47);
+            ram.write_u16(VRAM_UPLOAD_DATA + 4, 0x1e3);
+            ram.write_u8(VRAM_UPLOAD_DATA + 6, 0xff);
             ram.write_u8(SUBSUBMODULE, state + 1);
             ram.write_u8(NMI_LOAD_BG_FROM_VRAM, 1);
         }
@@ -5037,12 +5063,12 @@ pub fn animate_entrance_turtle_rock(
             let mut offset = 0usize;
             loop {
                 ram.write_u16(
-                    UVRAM_DATA + offset,
-                    ram.read_u16(UVRAM_DATA + offset) | 0x10,
+                    VRAM_UPLOAD_DATA + offset,
+                    ram.read_u16(VRAM_UPLOAD_DATA + offset) | 0x10,
                 );
                 for entry in [4, 6] {
-                    if ram.read_u16(UVRAM_DATA + offset + entry) == 0x8aa {
-                        ram.write_u16(UVRAM_DATA + offset + entry, 0x1e3);
+                    if ram.read_u16(VRAM_UPLOAD_DATA + offset + entry) == 0x8aa {
+                        ram.write_u16(VRAM_UPLOAD_DATA + offset + entry, 0x1e3);
                     }
                 }
                 offset += 8;
@@ -5288,7 +5314,10 @@ pub fn decompress_enemy_damage_subclasses(ram: &mut Ram<'_>, assets: &impl Overw
     let compressed = assets.enemy_damage_data();
     ram.slice_mut(ENEMY_DAMAGE_SCRATCH, compressed.len())
         .copy_from_slice(compressed);
-    for (index, &packed) in compressed[..0x800].iter().enumerate() {
+    // C reads 0x800 bytes from scratch even when the asset payload is shorter.
+    // The remaining bytes retain their previous WRAM contents.
+    for index in 0..0x800 {
+        let packed = ram.read_u8(ENEMY_DAMAGE_SCRATCH + index);
         ram.write_u8(ENEMY_DAMAGE_DATA + index * 2, packed >> 4);
         ram.write_u8(ENEMY_DAMAGE_DATA + index * 2 + 1, packed & 0x0f);
     }
@@ -8046,10 +8075,10 @@ mod tests {
         assert_eq!(ram.read_u8(SAVE_OW_EVENT_INFO + 7), 0x20);
         assert_eq!(ram.read_u16(BG1_X_OFFSET), 0xffff);
         assert_eq!(ram.read_u16(BG1_Y_OFFSET), 1);
-        assert_eq!(ram.read_u16(UVRAM_DATA), 0x10);
-        assert_eq!(ram.read_u16(UVRAM_DATA + 2), 0xfe47);
-        assert_eq!(ram.read_u16(UVRAM_DATA + 4), 0x1e3);
-        assert_eq!(ram.read_u8(UVRAM_DATA + 6), 0xff);
+        assert_eq!(ram.read_u16(0x1002), 0x10);
+        assert_eq!(ram.read_u16(0x1004), 0xfe47);
+        assert_eq!(ram.read_u16(0x1006), 0x1e3);
+        assert_eq!(ram.read_u8(0x1008), 0xff);
         assert_eq!(ram.read_u8(SUBSUBMODULE), 1);
         assert_eq!(ram.read_u8(NMI_LOAD_BG_FROM_VRAM), 1);
     }

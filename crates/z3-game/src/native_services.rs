@@ -104,23 +104,16 @@ impl LoadGfxHooks for NativeGameServices<'_> {
         self.with_load_gfx(&mut ram, |gfx| {
             gfx.decompress_animated_overworld_tiles(0x5a);
         });
-        crate::ancilla::Ancilla {
-            ram: &mut ram,
-            runtime: self,
-        }
-        .terminate_select_interactives(0);
-        ram.write_u8(0x037b, 0);
-        ram.write_u8(0x03f0, 0);
-        ram.write_u8(0x03f2, 0);
-        ram.write_u8(0x03f3, 0);
-        ram.write_u8(0x02f2, 0);
+        overworld::reset_ancilla_and_cutscene(&mut ram, |ram, selected| {
+            crate::ancilla::Ancilla { ram, runtime: self }.terminate_select_interactives(selected);
+        });
     }
 
     fn pre_overworld_load_overlays(&mut self, wram: &mut [u8; z3_core::WRAM_SIZE]) {
         let mut ram = Ram::new(wram);
         overworld::pre_overworld_load_overlays(&mut ram, |ram| {
             overworld::load_overlays_inner(ram, |ram| {
-                overworld::overworld_load_event_overlay(ram);
+                overworld::load_overworld_overlay(ram, self.assets);
             });
         });
     }
@@ -196,6 +189,22 @@ impl LoadGfxHooks for NativeGameServices<'_> {
     }
 }
 impl MessagingRuntime for NativeGameServices<'_> {
+    fn misc_bugfixes_enabled(&self) -> bool {
+        self.enhanced_features0 & 0x1000 != 0
+    }
+
+    fn run_hud_module(&mut self, ram: &mut Ram<'_>) {
+        Hud { ram, runtime: self }.run_module();
+    }
+
+    fn hud_floor_indicator(&mut self, ram: &mut Ram<'_>) {
+        Hud { ram, runtime: self }.floor_indicator();
+    }
+
+    fn link_oam_main(&mut self, ram: &mut Ram<'_>) {
+        UnifiedGameplayServices::run_link_oam_main(self, ram);
+    }
+
     fn enable_force_blank(&mut self, ram: &mut Ram<'_>) {
         self.with_load_gfx(ram, |gfx| gfx.enable_force_blank());
     }
@@ -230,6 +239,15 @@ impl MessagingRuntime for NativeGameServices<'_> {
         .palette_filter_history();
     }
 
+    fn apply_palette_filter_bounce(&mut self, ram: &mut Ram<'_>) {
+        self.with_load_gfx(ram, |gfx| gfx.apply_palette_filter_bounce());
+    }
+
+    fn reset_transition_props_and_advance_reset_interface(&mut self, ram: &mut Ram<'_>) {
+        crate::dungeon::Dungeon::new(ram.bytes_mut(), self)
+            .reset_transition_props_and_advance_reset_interface();
+    }
+
     fn hud_refill_health(&mut self, ram: &mut Ram<'_>) -> bool {
         Hud { ram, runtime: self }.refill_health()
     }
@@ -244,7 +262,7 @@ impl MessagingRuntime for NativeGameServices<'_> {
         } else {
             ram.read_u8(0xf340 + usize::from(item))
         };
-        let icon = Hud::<NativeGameServices<'_>>::item_box_icon(item.wrapping_sub(1), value);
+        let icon = Hud::<NativeGameServices<'_>>::item_box_icon(item, value);
         ram.write_u16(0x13c2, icon[0]);
         ram.write_u16(0x13c4, icon[1]);
         ram.write_u16(0x13ec, icon[2]);
@@ -261,13 +279,13 @@ impl MessagingRuntime for NativeGameServices<'_> {
         if ram.read_u16(0x8a) & 0x40 != 0 {
             ram.slice_mut(0x1000, 1024)
                 .copy_from_slice(&self.assets.bytes(68)[..1024]);
-            ram.write_u8(0x14, 21);
+            ram.write_u8(0x17, 21);
         }
         ram.write_u8(0x200, ram.read_u8(0x200).wrapping_add(1));
     }
 
     fn world_map_load_sprite_gfx(&mut self, ram: &mut Ram<'_>) {
-        ram.write_u8(0x0aa, 0x10);
+        ram.write_u8(0xaaa, 0x10);
         LoadGfx {
             wram: ram.bytes_mut(),
             vram: self.scratch_vram.as_mut(),
@@ -275,7 +293,7 @@ impl MessagingRuntime for NativeGameServices<'_> {
             hooks: &mut NoGfxHooks,
         }
         .graphics_load_chr_half_slot();
-        ram.write_u8(0x0aa, 0);
+        ram.write_u8(0xaaa, 0);
         ram.write_u8(0x0200, ram.read_u8(0x0200).wrapping_add(1));
     }
 
@@ -453,6 +471,10 @@ impl MessagingRuntime for NativeGameServices<'_> {
         UnifiedGameplayServices::run_sprite_main(self, ram);
     }
 
+    fn flute_sprite_main(&mut self, ram: &mut Ram<'_>) {
+        UnifiedGameplayServices::run_sprite_main(self, ram);
+    }
+
     fn transfer_mode7_characters(&mut self, _ram: &mut Ram<'_>) {
         self.pending_host_actions
             .push(NativeHostAction::TransferMode7Characters);
@@ -478,32 +500,36 @@ impl MessagingRuntime for NativeGameServices<'_> {
         ram.write_u8(0x1e, ram.read_u8(0x1c));
         ram.write_u8(0x1f, ram.read_u8(0x1d));
         ram.write_u8(0x9b, 0x80);
-        ram.slice_mut(0x1b00, 240 * 2).fill(0);
+        ram.slice_mut(0x1dba0, 240 * 2).fill(0);
     }
 
     fn dungeon_map_prepare_graphics(&mut self, ram: &mut Ram<'_>) {
         let hdma = ram.read_u8(0x9b);
         ram.write_u8(0x9b, 0);
         ram.write_u8(0xc20e, ram.read_u8(0xaa1));
-        ram.write_u8(0xc20f, ram.read_u8(0xaa2));
-        ram.write_u8(0xc210, ram.read_u8(0xaa3));
+        ram.write_u8(0xc20f, ram.read_u8(0xaa3));
+        ram.write_u8(0xc210, ram.read_u8(0xaa2));
         ram.write_u8(0xc211, ram.read_u8(0x1c));
         ram.write_u8(0xc212, ram.read_u8(0x1d));
         ram.write_u8(0xaa1, 32);
-        ram.write_u8(0xaa2, 0x80 | (ram.read_u16(0x40c) >> 1) as u8);
-        ram.write_u8(0xaa3, 64);
+        ram.write_u8(0xaa3, 0x80 | (ram.read_u16(0x40c) >> 1) as u8);
+        ram.write_u8(0xaa2, 64);
         ram.write_u8(0x1c, 0x16);
         ram.write_u8(0x1d, 1);
         self.with_load_gfx(ram, |gfx| {
             gfx.erase_tile_maps_dungeonmap();
             gfx.initialize_tilesets();
+        });
+        ram.write_u16(0xaa8, 0x200);
+        self.with_load_gfx(ram, |gfx| {
             gfx.palette_load_dungeon_map_bg();
             gfx.palette_load_dungeon_map_sprite();
+        });
+        ram.write_u8(0xab2, 1);
+        self.with_load_gfx(ram, |gfx| {
             gfx.palette_load_hud();
             gfx.load_actual_gear_palettes();
         });
-        ram.write_u16(0xaa8, 0x200);
-        ram.write_u8(0xab9, 1);
         ram.write_u8(0x15, ram.read_u8(0x15).wrapping_add(1));
         ram.write_u8(0x20d, ram.read_u8(0x20d).wrapping_add(1));
         ram.write_u8(0x9b, hdma);
@@ -547,6 +573,49 @@ impl MessagingRuntime for NativeGameServices<'_> {
     }
 
     fn death_finalize_choice(&mut self, ram: &mut Ram<'_>, sram: &mut [u8], count_as_death: bool) {
+        // Death_Func15 is also reached by Module17_SaveAndQuit. Calling back
+        // into Messaging::death_func15 here would recurse indefinitely.
+        ram.write_u8(0x12c, 0xf1);
+        if ram.read_u8(0x1b) != 0 {
+            crate::dungeon::Dungeon::new(ram.bytes_mut(), self).dungeon_flag_room_data_quadrants();
+        }
+        overworld::adjust_link_bunny_status(ram);
+        if ram.read_u8(0xf3c5) < 3 {
+            ram.write_u8(0xf3ca, 0);
+            if ram.read_u8(0xf357) == 0 {
+                overworld::force_nonbunny_status(ram);
+            }
+        }
+        if ram.read_u16(0xa0) == 0 {
+            ram.write_u8(0x1b, 0);
+        }
+        let room = ram.read_u8(0xa0);
+        crate::player::Player {
+            ram,
+            runtime: self,
+            applied_movement_to_camera: false,
+        }
+        .reset_some_things_after_death(room);
+        if matches!(ram.read_u8(0xf3cc), 6 | 9 | 10 | 13) {
+            ram.write_u8(0xf3cc, 0);
+        }
+        let health = crate::messaging::HEALTH_AFTER_DEATH[usize::from(ram.read_u8(0xf36c) >> 3)];
+        ram.write_u8(0x4aa, health);
+        ram.write_u8(0xf36d, health);
+        let palace = ram.read_u8(0x40c);
+        if palace != 0xff {
+            ram.write_u8(
+                0xf37c + usize::from(if palace == 2 { 0 } else { palace } >> 1),
+                ram.read_u8(0xf36f),
+            );
+        }
+        crate::sprite::Sprite::new(ram.bytes_mut(), self).sprite_reset_all();
+        if ram.read_u16(0xf405) == 0xffff
+            && (self.enhanced_features0 & 0x1000 == 0 || count_as_death)
+        {
+            ram.write_u16(0xf403, ram.read_u16(0xf403).wrapping_add(1));
+        }
+        ram.write_u8(0x10a, ram.read_u8(0x10a).wrapping_add(1));
         let messages: [&[u8]; 0] = [];
         let dictionary: [&[u8]; 0] = [];
         let assets = MessagingAssets {
@@ -559,13 +628,81 @@ impl MessagingRuntime for NativeGameServices<'_> {
             dungeon_map_floor_layout: &[],
             dungeon_map_info: &[],
         };
-        Messaging {
-            ram,
-            sram,
-            assets: &assets,
-            runtime: self,
+        if ram.read_u8(0xb0) != 1 {
+            if ram.read_u8(0x1b) != 0 {
+                if ram.read_u8(0xf3cc) != 1 && palace != 0xff {
+                    ram.write_u8(0x4aa, 0);
+                } else {
+                    ram.write_u8(0x132, 0);
+                    ram.write_u8(0x1b, 0);
+                }
+            }
+            if ram.read_u8(0x1b) == 0 && ram.read_u8(0xf3ca) != 0 {
+                ram.write_u16(0xa0, 32);
+            }
+            if ram.read_u8(0xf3c5) != 0 {
+                if ram.read_u8(0xb0) == 0 {
+                    Messaging {
+                        ram,
+                        sram,
+                        assets: &assets,
+                        runtime: self,
+                    }
+                    .save_game_file();
+                }
+                ram.write_u8(0x10, 5);
+                ram.write_u8(0x11, 0);
+                ram.write_u8(0x14, 0);
+            } else {
+                let slot = u16::from_le_bytes([sram[0x1ffe], sram[0x1fff]]);
+                let offset = usize::from((slot >> 1).wrapping_sub(1)) * 0x500;
+                ram.write_u16(0, offset as u16);
+                ram.write_u8(0x10a, 0);
+                Messaging {
+                    ram,
+                    sram,
+                    assets: &assets,
+                    runtime: self,
+                }
+                .copy_save_to_wram(offset);
+            }
+        } else {
+            if ram.read_u8(0xf3c5) != 0 {
+                Messaging {
+                    ram,
+                    sram,
+                    assets: &assets,
+                    runtime: self,
+                }
+                .save_game_file();
+            }
+            ram.write_u8(0x1c, 16);
+            ram.write_u8(0x1b, 0);
+            ram.write_u8(0x710, ram.read_u8(0x710).wrapping_add(1));
+            AttractRuntime::intro_initialize_memory_darken(self, ram);
+            AttractRuntime::overworld_load_all_palettes(self, ram);
+            ram.write_u8(0xea, 0);
+            for address in [0x63a, 0x638, 0x120, 0x124, 0x11e, 0x122] {
+                ram.write_u16(address, 0);
+            }
+            ram.write_u8(0x12c, 0xf1);
+            ram.write_u8(0x23, 0);
+            ram.write_u8(0x10, 0);
+            ram.write_u8(0x11, 10);
+            ram.write_u8(0xb0, 10);
+            ram.write_u8(0x4aa, 0);
+            ram.write_u8(0x10a, 0);
+            ram.write_u8(0x132, 0);
+            for address in [0xe0, 0xe2, 0xe4, 0xe6, 0xe8, 0xea] {
+                ram.write_u16(address, 0);
+            }
+            for address in [0x120, 0x11e, 0x124, 0x122] {
+                ram.write_u16(address, 0);
+            }
+            ram.slice_mut(0xf000, 0x500).fill(0);
+            ram.write_u8(0x136, 0);
+            crate::misc::load_overworld_songs(ram, self);
         }
-        .death_func15(count_as_death);
     }
 
     fn load_actual_gear_palettes(&mut self, ram: &mut Ram<'_>) {
@@ -671,7 +808,7 @@ impl AttractRuntime for NativeGameServices<'_> {
         ram.write_u8(0x23, 0);
         ram.write_u8(0x24, 0);
         ram.write_u8(0x25, 0);
-        crate::runtime::hdma_setup(dma, 0x0a_bddd, 0x0a_bddd, 0x42, 0x1b, 0x1e, 0);
+        crate::integration::setup_world_map_hdma_transfer(ram, dma);
         ram.write_u8(0x9b, 0xc0);
         LoadGfx {
             wram: ram.bytes_mut(),
@@ -784,10 +921,11 @@ impl AttractRuntime for NativeGameServices<'_> {
         ram.write_u8(0x8a, 0);
         ram.write_u8(0xab6, 0);
         ram.write_u8(0xab8, 0);
-        ram.write_u16(0x00, 0);
-        ram.write_u16(0x02, 0);
+        ram.write_u16(0xc8, 0);
+        ram.write_u16(0xca, 0);
         ram.write_u16(0xc009, 2);
         ram.write_u16(0xc007, 31);
+        ram.write_u8(0xc00b, 0);
         ram.write_u8(0x11, ram.read_u8(0x11).wrapping_add(1));
     }
 
@@ -799,12 +937,13 @@ impl AttractRuntime for NativeGameServices<'_> {
         ram.write_u8(0x12, 0xff);
         ram.write_u8(0x1c, 0x15);
         ram.write_u8(0x1d, 0);
+        ram.write_u8(0x1b, 0);
         ram.write_u8(0x12c, 0xf1);
         self.with_load_gfx(ram, |gfx| gfx.palette_bg_and_fixed_color_black());
         ram.slice_mut(0x20, 0x70).fill(0);
         ram.slice_mut(0xf000, 0x500).fill(0);
         ram.write_u8(0x10, 1);
-        ram.write_u8(0x3f4, 1);
+        ram.write_u8(0x4aa, 1);
         ram.write_u8(0x11, 0);
     }
 
@@ -921,7 +1060,7 @@ impl EndingRuntime for NativeGameServices<'_> {
     }
 
     fn sprite_reset(&mut self, ram: &mut Ram<'_>, k: usize) {
-        ram.write_u8(0xdd0 + k, 0);
+        crate::sprite::Sprite::new(ram.bytes_mut(), self).sprite_prep_reset_properties(k);
     }
 
     fn sprite_move_xy(&mut self, ram: &mut Ram<'_>, k: usize) {
@@ -933,10 +1072,10 @@ impl EndingRuntime for NativeGameServices<'_> {
     }
 
     fn sprite_draw_shadow(&mut self, ram: &mut Ram<'_>, k: usize) {
-        let mut info = crate::sprite::PrepOamCoordsRet::default();
+        let mut info = self.ending_sprite_oam;
         let mut sprite = crate::sprite::Sprite::new(ram.bytes_mut(), self);
-        sprite.sprite_get_16_bit_coords(k);
         sprite.sprite_draw_shadow(k, &mut info);
+        self.ending_sprite_oam = info;
     }
 
     fn oam_allocate_region_a(&mut self, ram: &mut Ram<'_>, bytes: u8) {
@@ -966,6 +1105,7 @@ impl EndingRuntime for NativeGameServices<'_> {
         let mut sprite = crate::sprite::Sprite::new(ram.bytes_mut(), self);
         sprite.sprite_get_16_bit_coords(k);
         sprite.sprite_draw_multiple(k, &entries, Some(&mut info));
+        self.ending_sprite_oam = info;
     }
 
     fn ending_map_data(&self) -> &[u16] {
@@ -1049,6 +1189,18 @@ impl DungeonHooks for NativeGameServices<'_> {
 
     fn dungeon_movable_block(&self, index: usize) -> (u16, u16) {
         self.assets.dungeon_movable_block(index)
+    }
+
+    fn dungeon_movable_init_data(&self) -> &[u8] {
+        self.assets.bytes(53)
+    }
+
+    fn dungeon_torch_init_data(&self) -> &[u8] {
+        self.assets.bytes(54)
+    }
+
+    fn dungeon_torch_junk_data(&self) -> &[u8] {
+        self.assets.bytes(55)
     }
 
     fn dungeon_torch_data(&self, index: usize) -> u16 {
@@ -1139,8 +1291,9 @@ impl DungeonHooks for NativeGameServices<'_> {
             .map_or(-1, |k| k as i32)
     }
     fn overworld_bomb_tiles_32x32(&mut self, ram: &mut Ram<'_>, x: u16, y: u16) {
+        let assets = self.assets;
         let services = std::cell::RefCell::new(self);
-        overworld::bomb_tiles_32x32(ram, services.borrow().assets, x, y, |ram, kind, x, y| {
+        overworld::bomb_tiles_32x32(ram, assets, x, y, |ram, kind, x, y| {
             crate::sprite::Sprite::new(ram.bytes_mut(), &mut **services.borrow_mut())
                 .sprite_spawn_immediately_smashed_terrain(kind, x, y);
         });
@@ -1354,6 +1507,9 @@ impl DungeonHooks for NativeGameServices<'_> {
     }
     fn dungeon_reset_sprites(&mut self, ram: &mut Ram<'_>) {
         crate::sprite::Sprite::new(ram.bytes_mut(), self).dungeon_reset_sprites();
+    }
+    fn sprite_reset_all(&mut self, ram: &mut Ram<'_>) {
+        crate::sprite::Sprite::new(ram.bytes_mut(), self).sprite_reset_all();
     }
     fn load_new_sprite_gfx_set(&mut self, ram: &mut Ram<'_>) {
         self.with_load_gfx(ram, |g| g.load_new_sprite_gfx_set());
@@ -1576,7 +1732,7 @@ impl DungeonHooks for NativeGameServices<'_> {
     }
 
     fn display_select_menu(&mut self, ram: &mut Ram<'_>) {
-        HudRuntime::display_select_menu(self, ram);
+        crate::messaging::display_select_menu_core(ram);
     }
 
     fn hud_handle_item_switch_inputs(&mut self, ram: &mut Ram<'_>) {
@@ -1641,12 +1797,18 @@ impl FileSelectRuntime for NativeGameServices<'_> {
             hooks: &mut NoGfxHooks,
         }
         .load_file_select_graphics();
+        crate::overworld::decompress_enemy_damage_subclasses(ram, self.assets);
     }
     fn copy_selected_save_to_wram(&mut self, ram: &mut Ram<'_>, sram: &[u8], slot: usize) {
+        // CopySaveToWRAM clears the bird-travel scratch slot before loading a
+        // selected file. These values can survive a save/quit into file select.
+        for address in [0x1abf, 0x1acf, 0x1adf, 0x1aef, 0x1aff] {
+            ram.write_u8(address, 0);
+        }
         ram.slice_mut(0xf000, 0x500)
             .copy_from_slice(&sram[slot * 0x500..(slot + 1) * 0x500]);
-        ram.write_u8(0xc012, 7);
-        ram.write_u8(0xc013, 7);
+        ram.write_u16(0xc00d, 7);
+        ram.write_u16(0xc013, 7);
         ram.write_u16(0xc00f, 0);
         ram.write_u16(0xc015, 0);
         ram.write_u16(0x219, 0x6040);
@@ -1659,9 +1821,11 @@ impl FileSelectRuntime for NativeGameServices<'_> {
         ram.write_u8(0x204, 0x80);
         ram.write_u8(0x10, 5);
         ram.write_u8(0x11, 0);
+        ram.write_u8(0x10e, 0);
+        ram.write_u8(0x710, 0);
         ram.write_u8(0x010a, 0);
         ram.write_u8(0x15, 0);
-        ram.write_u8(0xaa4, 0);
+        ram.write_u8(0xab2, 0);
     }
     fn persist_sram(&mut self, sram: &[u8]) {
         if let Ok(sram) = <&[u8; 0x2000]>::try_from(sram) {
@@ -1764,7 +1928,14 @@ impl MiscHooks for NativeGameServices<'_> {
             }
             MiscCall::LinkMain => DungeonHooks::link_main(self, ram),
             MiscCall::DungeonPrepExitSpotlight => self.prep_exit_with_spotlight(ram),
-            MiscCall::SpotlightConfigure => self.configure_spotlight_table(ram),
+            MiscCall::SpotlightConfigure => {
+                let services = std::cell::RefCell::new(self);
+                overworld::spotlight_configure_table_and_control(
+                    ram,
+                    |ram| services.borrow_mut().configure_spotlight_table(ram),
+                    |ram| services.borrow_mut().open_spotlight_next(ram),
+                );
+            }
             MiscCall::PaletteRevertSwap => {
                 self.with_load_gfx(ram, |gfx| gfx.palette_revert_translucency_swap());
             }
@@ -1894,7 +2065,7 @@ impl MiscHooks for NativeGameServices<'_> {
             .push(NativeHostAction::LoadSongBank(bank));
     }
     fn predefined_tile_word(&self, word_index: usize) -> u16 {
-        self.assets.words(83)[word_index]
+        self.assets.words(69)[word_index]
     }
     fn refill_magic(&mut self, ram: &mut Ram<'_>) -> bool {
         Hud { ram, runtime: self }.refill_magic_power()
@@ -1902,12 +2073,10 @@ impl MiscHooks for NativeGameServices<'_> {
     fn refill_health(&mut self, ram: &mut Ram<'_>) -> bool {
         Hud { ram, runtime: self }.refill_health()
     }
-    fn add_ancilla(&mut self, ram: &mut Ram<'_>, kind: u8, _arg: u8) -> i32 {
-        let slot = (crate::ancilla::Ancilla { ram, runtime: self }).alloc_high();
-        slot.map_or(-1, |slot| {
-            ram.write_u8(0xc4a + slot, kind);
-            slot as i32
-        })
+    fn add_ancilla(&mut self, ram: &mut Ram<'_>, kind: u8, limit: u8) -> i32 {
+        (crate::ancilla::Ancilla { ram, runtime: self })
+            .add_ancilla(kind, limit)
+            .map_or(-1, |slot| slot as i32)
     }
     fn set_ancilla_xy(&mut self, ram: &mut Ram<'_>, ancilla: usize, x: u16, y: u16) {
         let mut context = crate::ancilla::Ancilla { ram, runtime: self };
@@ -1915,16 +2084,17 @@ impl MiscHooks for NativeGameServices<'_> {
         context.set_y(ancilla, y);
     }
     fn sprite_x(&self, ram: &Ram<'_>, sprite: usize) -> u16 {
-        u16::from(ram.read_u8(0xe00 + sprite)) | u16::from(ram.read_u8(0xe20 + sprite)) << 8
+        u16::from(ram.read_u8(0xd10 + sprite)) | u16::from(ram.read_u8(0xd30 + sprite)) << 8
     }
     fn dungeon_item_tile_action(&mut self, ram: &mut Ram<'_>, x: u16, y: u16) -> u8 {
         crate::dungeon::Dungeon::new(ram.bytes_mut(), self).handle_item_tile_action_dungeon(x, y)
     }
     fn overworld_item_tile_action(&mut self, ram: &mut Ram<'_>, x: u16, y: u16) -> u8 {
+        let assets = self.assets;
         let services = std::cell::RefCell::new(self);
         overworld::tool_and_tile_interaction(
             ram,
-            services.borrow().assets,
+            assets,
             x,
             y,
             |ram, kind, sx, sy| {
@@ -2058,6 +2228,10 @@ impl OverworldServices for NativeGameServices<'_> {
             OverworldCall::ReloadOverworldSprites => {
                 crate::sprite::Sprite::new(ram.bytes_mut(), self).sprite_reload_all_overworld();
             }
+            OverworldCall::ReloadOverworldSpritesJustLoad => {
+                crate::sprite::Sprite::new(ram.bytes_mut(), self)
+                    .sprite_overworld_reload_all_just_load();
+            }
             OverworldCall::HandleMovingAnimation => {
                 crate::player::Player {
                     ram,
@@ -2178,6 +2352,72 @@ impl OverworldServices for NativeGameServices<'_> {
                 hooks: &mut NoGfxHooks,
             }
             .palette_filter_isolate_whirlpool_blue(),
+            OverworldCall::FindPartnerWhirlpoolExit => {
+                let assets = self.assets;
+                let services = std::cell::RefCell::new(self);
+                overworld::find_partner_whirlpool_exit(ram, assets, |ram, index| {
+                    overworld::load_bird_travel_position(
+                        ram,
+                        assets,
+                        index,
+                        |ram| overworld::load_gfx_and_screen_size(ram, assets),
+                        |ram| {
+                            crate::sprite::Sprite::new(
+                                ram.bytes_mut(),
+                                &mut **services.borrow_mut(),
+                            )
+                            .sprite_reset_all()
+                        },
+                        |ram| {
+                            PreOverworldHooks::reload_overworld_sprites(
+                                &mut **services.borrow_mut(),
+                                ram,
+                            )
+                        },
+                        |ram| {
+                            TransitionHooks::reset_torch_background_and_player(
+                                &mut **services.borrow_mut(),
+                                ram,
+                            )
+                        },
+                    );
+                });
+            }
+            OverworldCall::LoadOverlayAndMap => {
+                let module = ram.read_u16(0x10);
+                let map_state = ram.read_u16(0x200);
+                overworld::load_and_build_screen(ram, self.assets, |ram| {
+                    overworld::draw_quadrants_and_overlays(
+                        ram,
+                        self.assets,
+                        overworld::overworld_load_event_overlay,
+                    );
+                });
+                ram.write_u16(0x200, map_state.wrapping_add(1));
+                ram.write_u16(0x10, module);
+            }
+            OverworldCall::WhirlpoolReloadPalettes => {
+                let screen = usize::from(ram.read_u8(0x8a));
+                let background =
+                    overworld::OverworldAssets::background_palettes(self.assets)[screen];
+                let sprites = ram.read_u8(0xfd40 + screen);
+                self.with_load_gfx(ram, |gfx| {
+                    gfx.palette_load_sprite_main();
+                    gfx.palette_load_sprite_environment();
+                    gfx.palette_load_sp0l();
+                    gfx.palette_load_hud();
+                    gfx.palette_load_owbg_main();
+                    gfx.overworld_load_palettes(background, sprites);
+                    gfx.palette_set_ow_bg_color();
+                });
+                overworld::overworld_set_fixed_col_and_scroll(ram);
+            }
+            OverworldCall::WhirlpoolRestoreRedGreen => {
+                self.with_load_gfx(ram, |gfx| gfx.palette_filter_whirlpool_restore_red_green());
+            }
+            OverworldCall::WhirlpoolRestoreBlue => {
+                self.with_load_gfx(ram, |gfx| gfx.palette_filter_whirlpool_restore_blue());
+            }
         }
     }
     fn is_playing_music_track(&mut self, track: u8) -> bool {
@@ -2661,7 +2901,7 @@ mod structural_tests {
             include_str!("native_services.rs"),
             "impl DungeonHooks for NativeGameServices",
         );
-        assert_eq!(declared.len(), 107, "DungeonHooks inventory changed");
+        assert_eq!(declared.len(), 111, "DungeonHooks inventory changed");
         assert_eq!(
             implemented, declared,
             "NativeGameServices inherited a DungeonHooks default"

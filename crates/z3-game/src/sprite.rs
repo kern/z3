@@ -1027,7 +1027,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.w8(0, block as u8);
         self.w16(1, (block >> 3).wrapping_add(0xef80));
         if block != 0xffff {
-            let address = 0x1ef80 + usize::from(block >> 3);
+            // The C port narrows this sum to uint16 before adding the WRAM bank.
+            let address = 0x10000 + usize::from(0xef80u16.wrapping_add(block >> 3));
             self.w8(address, self.r8(address) & !(0x80 >> (block & 7)));
         }
         if self.r8(0x1b) == 0 {
@@ -1087,7 +1088,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.set_arr(0xc4a, slot, 0);
         }
         for address in [
-            0x3c3, 0xb6a, 0xb9b, 0xb88, 0xb99, 0xfb4, 0xb9e, 0xcf4, 0xff9, 0xff8, 0xffb, 0xffc,
+            0x2ec, 0xb6a, 0xb9b, 0xb88, 0xb99, 0xfb4, 0xb9e, 0xcf4, 0xff9, 0xff8, 0xffb, 0xffc,
             0xffd, 0xfc6, 0x3fc,
         ] {
             self.w8(address, 0);
@@ -1144,7 +1145,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return slot;
         }
         self.set_arr(SPRITE_STATE, slot, 8);
-        self.w8(0, y);
+        self.w8(0xfb5, y);
         self.set_arr(SPRITE_FLOOR, slot, y >> 7);
         self.sprite_set_y(
             slot,
@@ -1156,8 +1157,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             (u16::from(x) << 4 & 0x1ff).wrapping_add(u16::from(self.r8(0xfb0)) << 8),
         );
         self.set_arr(SPRITE_TYPE, slot, kind);
-        self.w8(0, (self.r8(0) & 0x60) >> 2);
-        self.set_arr(SPRITE_SUBTYPE, slot, self.r8(0) | self.r8(0xfb6) >> 5);
+        self.w8(0xfb5, (self.r8(0xfb5) & 0x60) >> 2);
+        self.set_arr(SPRITE_SUBTYPE, slot, self.r8(0xfb5) | self.r8(0xfb6) >> 5);
         self.set_arr(0xbc0, slot, slot as u8);
         self.set_arr(SPRITE_DIE_ACTION, slot, 0);
         slot
@@ -1954,7 +1955,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         for output in 0..count {
             let i = count - 1 - output;
             let j = base + i;
-            self.set_oam_plain(
+            oam::set_helper0(
+                &mut self.ram,
                 oam + output,
                 info.x.wrapping_add_signed(NUMBERED_ABSORBABLE_X[j]),
                 info.y.wrapping_add_signed(NUMBERED_ABSORBABLE_Y[j]),
@@ -2010,7 +2012,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn sprite_explode_spawn_ea(&mut self, slot: usize) {
         let kind = self.arr(SPRITE_TYPE, slot);
-        self.w8(0, kind);
+        self.w8(0xfb5, kind);
         let mut info = SpriteSpawnInfo::default();
         let spawned = self.sprite_spawn_dynamically_ex(slot, 0xea, &mut info, 14);
         if spawned < 0 {
@@ -2179,7 +2181,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return;
         }
         let previous_state = self.arr(SPRITE_STATE, slot);
-        self.w8(0, previous_state);
+        self.w8(0xfb5, previous_state);
         let damage = self.arr(SPRITE_GIVE_DAMAGE, slot);
         if damage == 253 {
             self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
@@ -2661,7 +2663,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if info.y.wrapping_add(0x10) < 0x100 {
             entry.y = info.y as u8;
             let table_index = usize::from(
-                SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1[usize::from(self.arr(SPRITE_TYPE, slot))]
+                SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1
+                    .get(usize::from(self.arr(SPRITE_TYPE, slot)))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(
+                            self.arr(SPRITE_TYPE, slot),
+                        )
+                            - SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1.len()]
+                    })
                     .wrapping_add(self.arr(SPRITE_GRAPHICS, slot)),
             );
             entry.charnum = SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[table_index];
@@ -2742,7 +2752,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if info.y.wrapping_add(0x10) < 0x100 {
             entry.y = info.y as u8;
             let table_index = usize::from(
-                SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1[usize::from(self.arr(SPRITE_TYPE, slot))]
+                SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1
+                    .get(usize::from(self.arr(SPRITE_TYPE, slot)))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(
+                            self.arr(SPRITE_TYPE, slot),
+                        )
+                            - SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1.len()]
+                    })
                     .wrapping_add(self.arr(SPRITE_GRAPHICS, slot)),
             );
             entry.charnum = SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[table_index];
@@ -2761,7 +2779,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return;
         }
         let table_index = usize::from(
-            SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1[usize::from(self.arr(SPRITE_TYPE, slot))]
+            SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1
+                .get(usize::from(self.arr(SPRITE_TYPE, slot)))
+                .copied()
+                .unwrap_or_else(|| {
+                    SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(self.arr(SPRITE_TYPE, slot))
+                        - SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1.len()]
+                })
                 .wrapping_add(self.arr(SPRITE_GRAPHICS, slot)),
         );
         let charnum = SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[table_index];
@@ -3397,7 +3421,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let counter = self.r8(0xcf7);
         self.w8(0xcf7, counter.wrapping_add(1));
         let index = usize::from((counter & 7) + if self.r8(0xfff) != 0 { 8 } else { 0 });
-        if AREA_MASKS[usize::from(self.r8(0x40a) & 0x3f)] & SLOT_MASKS[index] != 0 {
+        if AREA_MASKS[usize::from(self.r8(0x40a) & 0x3f)] & SLOT_MASKS[index] == 0 {
             self.w8(0xb9c, SECRET_VALUES[index]);
         }
     }
@@ -4275,7 +4299,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     pub fn sprite_check_damage_from_link(&mut self, slot: usize) -> u8 {
         if self.arr(SPRITE_HIT_TIMER, slot) & 0x80 != 0
             || self.arr(SPRITE_FLOOR, slot) != self.r8(0xee)
-            || self.r8(0xfab) == 0x80
+            || self.r8(0x44) == 0x80
         {
             return 0;
         }
@@ -4328,6 +4352,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             }
         } else if kind == 0x92 {
             if self.arr(SPRITE_C, slot) < 3 {
+                if self.r8(0x47) == 0 {
+                    self.sprite_apply_recoil_to_link(slot, 4);
+                    self.w8(0x46, 16);
+                    self.w8(0x47, 16);
+                }
                 self.link_place_weapon_tink();
                 return 1;
             }
@@ -4374,7 +4403,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let mut hitbox = SpriteHitBox::default();
         self.sprite_do_hit_boxes_fast(slot, &mut hitbox);
-        if self.r8(0x37a) & 0x10 != 0 || self.r8(0xfab) == 0x80 {
+        if self.r8(0x37a) & 0x10 != 0 || self.r8(0x44) == 0x80 {
             self.sprite_attempt_damage_to_link_with_collision_check(slot);
             return;
         }
@@ -4425,7 +4454,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if zaps && self.arr(SPRITE_STATE, slot) == 9 {
             if self.r8(0x31f) == 0 {
                 self.set_arr(SPRITE_DELAY_AUX1, slot, 64);
-                self.w8(0x3a, 64);
+                self.w8(0x360, 64);
                 self.sprite_attempt_damage_to_link_plus_recoil(slot);
             }
         } else {
@@ -4738,7 +4767,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     pub fn garnish_dust_common(&mut self, slot: usize, shift: u8) {
         const CHAR: [u8; 3] = [0xdf, 0xcf, 0xa9];
         let frame = self.arr(GARNISH_COUNTDOWN, slot) >> shift;
-        self.w8(0, frame);
+        self.w8(0xfb5, frame);
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
@@ -5068,6 +5097,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.set_arr(GARNISH_TYPE, slot, 0);
             return;
         }
+        // The C routine writes the OAM x byte before testing whether y is visible.
+        // Preserve that partial write when the debris exits the bottom of the screen.
+        let oam_index = self.current_oam_index();
+        self.ram.write_u8(oam::OAM_BUFFER + oam_index * 4, screen_x);
         let screen_y = self
             .arr(GARNISH_Y_LO, slot)
             .wrapping_sub(self.r16(0xe8) as u8);
@@ -5168,6 +5201,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.scatter_debris_draw(slot, x, y);
             return;
         }
+        // The C renderer reuses this WRAM scratch byte for the debris kind.
+        self.w8(0xfb5, debris);
         let mut base = usize::from(((self.arr(GARNISH_COUNTDOWN, slot) >> 2) ^ 7) << 2);
         if debris == 4 || debris == 2 && self.r8(0x1b) == 0 {
             base += 0x20;
@@ -5182,10 +5217,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             } else {
                 SCATTER_DEBRIS_DRAW_CHAR[j]
             };
-            self.set_oam_plain(
+            oam::set_helper1(
+                &mut self.ram,
                 oam + (3 - i),
                 x.wrapping_add_signed(SCATTER_DEBRIS_DRAW_X[j]),
-                y.wrapping_add_signed(i16::from(SCATTER_DEBRIS_DRAW_Y[j])),
+                y.wrapping_add_signed(i16::from(SCATTER_DEBRIS_DRAW_Y[j])) as u8,
                 character,
                 SCATTER_DEBRIS_DRAW_FLAGS[j] | oam_flags,
                 0,
@@ -5201,10 +5237,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let oam = self.current_oam_index();
         for i in (0..=2).rev() {
             let j = base + i;
-            self.set_oam_plain(
+            oam::set_helper1(
+                &mut self.ram,
                 oam + (2 - i),
                 x.wrapping_add_signed(i16::from(SCATTER_DEBRIS_DRAW_X2[j])),
-                y.wrapping_add_signed(i16::from(SCATTER_DEBRIS_DRAW_Y2[j])),
+                y.wrapping_add_signed(i16::from(SCATTER_DEBRIS_DRAW_Y2[j])) as u8,
                 SCATTER_DEBRIS_DRAW_CHAR2[j],
                 SCATTER_DEBRIS_DRAW_FLAGS2[j] | 0x22,
                 0,

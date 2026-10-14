@@ -77,7 +77,6 @@ impl crate::tile_detect::TileDetectHooks for NativeGameServices<'_> {
 impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_> {
     fn draw_single_large(&mut self, ram: &mut Ram<'_>, k: usize) {
         let mut s = Sprite::new(ram.bytes_mut(), self);
-        s.sprite_get_16_bit_coords(k);
         s.sprite_draw_single_large(k);
     }
     fn check_damage_to_link_same_layer(&mut self, ram: &mut Ram<'_>, k: usize) -> bool {
@@ -107,15 +106,20 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
     fn prep_oam(&mut self, ram: &mut Ram<'_>, k: usize) -> Option<(u8, u8)> {
         let mut v = PrepOamCoordsRet::default();
         let mut s = Sprite::new(ram.bytes_mut(), self);
-        s.sprite_get_16_bit_coords(k);
         (!s.sprite_prep_oam_coord_or_double_ret(k, &mut v)).then_some((v.x as u8, v.y as u8))
+    }
+    fn prep_oam_wide(&mut self, ram: &mut Ram<'_>, k: usize) -> Option<(u16, u16)> {
+        let mut v = PrepOamCoordsRet::default();
+        let mut s = Sprite::new(ram.bytes_mut(), self);
+        (!s.sprite_prep_oam_coord_or_double_ret(k, &mut v)).then_some((v.x, v.y))
     }
     fn prep_oam_with_flags(&mut self, ram: &mut Ram<'_>, k: usize) -> Option<(u8, u8, u8)> {
         let mut v = PrepOamCoordsRet::default();
         let mut s = Sprite::new(ram.bytes_mut(), self);
         s.sprite_get_16_bit_coords(k);
-        (!s.sprite_prep_oam_coord_or_double_ret(k, &mut v))
-            .then_some((v.x as u8, v.y as u8, v.flags))
+        let visible = !s.sprite_prep_oam_coord_or_double_ret(k, &mut v);
+        self.last_sprite_oam = v;
+        visible.then_some((v.x as u8, v.y as u8, v.flags))
     }
     fn nullify_hookshot_drag(&mut self, ram: &mut Ram<'_>) {
         Sprite::new(ram.bytes_mut(), self).sprite_nullify_hookshot_drag();
@@ -173,6 +177,11 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         crate::tagalong::initialize(ram, self);
     }
     fn active_cross_bank(&mut self, ram: &mut Ram<'_>, k: usize, kind: u8) {
+        if (crate::sprite_main_bank0::SpriteMainBank0 { ram, runtime: self })
+            .dispatch_active_local(k, kind)
+        {
+            return;
+        }
         if (crate::sprite_main_bank2b::SpriteMainBank2b { ram, runtime: self })
             .dispatch_active(k, kind)
         {
@@ -401,6 +410,7 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
             &mut info,
             slot as i32,
         );
+        self.last_bank1_spawn = (v >= 0).then_some((v as usize, info));
         (v >= 0).then_some(v as usize)
     }
     fn moldorm_draw(&mut self, ram: &mut Ram<'_>, k: usize) {
@@ -438,12 +448,8 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         Sprite::new(ram.bytes_mut(), self).sprite_return_if_lifted(k);
         ram.read_u8(0xdd0 + k) == 0
     }
-    fn draw_distress(&mut self, ram: &mut Ram<'_>, x: u8, y: u8, time: u8) {
-        Sprite::new(ram.bytes_mut(), self).sprite_draw_distress_custom(
-            u16::from(x),
-            u16::from(y),
-            time,
-        );
+    fn draw_distress(&mut self, ram: &mut Ram<'_>, x: u16, y: u16, time: u8) {
+        Sprite::new(ram.bytes_mut(), self).sprite_draw_distress_custom(x, y, time);
     }
     fn direction_to_face_link_with_differences(
         &mut self,
@@ -462,14 +468,21 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         piece: usize,
         character: u8,
         low_flags: u8,
+        flag_mask: u8,
     ) {
+        let pointer = usize::from(ram.read_u16(0x90));
+        let current = pointer.saturating_sub(crate::oam::OAM_BUFFER) / 4;
+        let piece = current + piece;
         let mut entry = crate::oam::read(ram, piece);
         entry.charnum = character;
-        entry.flags = entry.flags & 0xf0 | low_flags;
+        entry.flags = entry.flags & !flag_mask | low_flags;
         crate::oam::write(ram, piece, entry);
     }
     fn throwable_scenery_interact(&mut self, ram: &mut Ram<'_>, k: usize) {
         Sprite::new(ram.bytes_mut(), self).throwable_scenery_interact_with_sprites_and_tiles(k);
+    }
+    fn oam_allocate_region_a(&mut self, ram: &mut Ram<'_>, bytes: u8) {
+        Sprite::new(ram.bytes_mut(), self).oam_allocate_from_region_a(bytes);
     }
     fn oam_allocate_region_b(&mut self, ram: &mut Ram<'_>, bytes: u8) {
         Sprite::new(ram.bytes_mut(), self).oam_allocate_from_region_b(bytes);
@@ -495,7 +508,8 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         let mut v = PrepOamCoordsRet::default();
         {
             let mut s = Sprite::new(ram.bytes_mut(), self);
-            s.sprite_get_16_bit_coords(k);
+            // Preserve cur_sprite_x/y: some callers (Crystal Maiden) adjust
+            // them before the deferred draw, as the C routine does.
             s.sprite_draw_multiple_player_deferred(k, &p, Some(&mut v));
         }
         self.last_sprite_oam = v;
@@ -553,6 +567,9 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         crate::oam::set_plain(ram, entry, x, y, character, flags, size);
         ram.write_u16(0x90, ram.read_u16(0x90).wrapping_add(4));
         ram.write_u16(0x92, ram.read_u16(0x92).wrapping_add(1));
+    }
+    fn correct_oam_entries(&mut self, ram: &mut Ram<'_>, k: usize, last_entry: usize, size: u8) {
+        Sprite::new(ram.bytes_mut(), self).sprite_correct_oam_entries(k, last_entry, size);
     }
     fn draw_absorbable_transient(&mut self, ram: &mut Ram<'_>, k: usize, shadow: bool) -> bool {
         Sprite::new(ram.bytes_mut(), self).sprite_draw_absorbable_transient(k, shadow)
@@ -613,8 +630,15 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         crate::sprite_main_bank0::SpriteMainBank0 { ram, runtime: self }
             .fortune_teller_light_or_dark_world(k, dark);
     }
-    fn prep_and_draw_single_large_no_prep(&mut self, ram: &mut Ram<'_>, k: usize) {
-        let v = PrepOamCoordsRet::default();
+    fn prep_and_draw_single_large_no_prep(
+        &mut self,
+        ram: &mut Ram<'_>,
+        k: usize,
+        x: u16,
+        y: u16,
+        flags: u8,
+    ) {
+        let v = PrepOamCoordsRet { x, y, flags, r4: 0 };
         Sprite::new(ram.bytes_mut(), self).sprite_prep_and_draw_single_large_no_prep(k, &v);
     }
     fn sprite_func3(&mut self, ram: &mut Ram<'_>, k: usize) {
@@ -733,6 +757,7 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         let _ = crate::ancilla::Ancilla { ram, runtime: self }.add_happiness_pond_rupees(choice);
     }
     fn spawn_dynamic(&mut self, ram: &mut Ram<'_>, source: usize, kind: u8) -> Option<usize> {
+        self.last_bank1_spawn = None;
         let mut info = SpriteSpawnInfo::default();
         let mut sprite = Sprite::new(ram.bytes_mut(), self);
         let slot = sprite.sprite_spawn_dynamically(source, kind, &mut info);
@@ -744,11 +769,31 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         }
     }
 
-    fn set_spawned_coordinates(&mut self, _ram: &mut Ram<'_>, _slot: usize) {
-        // The trait splits the C spawn and coordinate-copy calls, but its spawn
-        // result does not carry SpriteSpawnInfo. `spawn_dynamic` therefore
-        // performs both C operations atomically; this matching follow-up is
-        // deliberately inert and does not omit any C state mutation.
+    fn spawn_dynamic_xy(&mut self, ram: &mut Ram<'_>, source: usize, kind: u8) -> Option<usize> {
+        self.last_bank1_spawn = None;
+        let mut info = SpriteSpawnInfo::default();
+        let mut sprite = Sprite::new(ram.bytes_mut(), self);
+        let slot = sprite.sprite_spawn_dynamically(source, kind, &mut info);
+        if slot < 0 {
+            None
+        } else {
+            sprite.sprite_set_x(slot as usize, info.r0_x);
+            sprite.sprite_set_y(slot as usize, info.r2_y);
+            Some(slot as usize)
+        }
+    }
+
+    fn set_spawned_coordinates(&mut self, ram: &mut Ram<'_>, slot: usize) {
+        // Ordinary bank-1 spawns already copy the coordinates in spawn_dynamic;
+        // SpawnDynamicallyEx leaves them untouched until this explicit C call.
+        if self
+            .last_bank1_spawn
+            .as_ref()
+            .is_some_and(|(spawned, _)| *spawned == slot)
+        {
+            let (_, info) = self.last_bank1_spawn.take().unwrap();
+            Sprite::new(ram.bytes_mut(), self).sprite_set_spawned_coordinates(slot, info);
+        }
     }
 
     fn prep_oam_with_flags_wide(
@@ -759,11 +804,9 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
         let mut result = PrepOamCoordsRet::default();
         let mut sprite = Sprite::new(ram.bytes_mut(), self);
         sprite.sprite_get_16_bit_coords(slot);
-        (!sprite.sprite_prep_oam_coord_or_double_ret(slot, &mut result)).then_some((
-            result.x,
-            result.y,
-            result.flags,
-        ))
+        let visible = !sprite.sprite_prep_oam_coord_or_double_ret(slot, &mut result);
+        self.last_sprite_oam = result;
+        visible.then_some((result.x, result.y, result.flags))
     }
 
     fn emit_oam_wide(
@@ -897,6 +940,12 @@ impl crate::sprite_main_bank1::SpriteMainBank1Runtime for NativeGameServices<'_>
     }
 }
 impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'_> {
+    fn direction_to_face_link_with_differences(&mut self, ram: &mut Ram<'_>, k: usize) -> (u8, u8) {
+        let pair = Sprite::new(ram.bytes_mut(), self)
+            .sprite_direction_to_face_link(k)
+            .1;
+        (pair.a, pair.b)
+    }
     fn approach_target_speed(&mut self, ram: &mut Ram<'_>, k: usize, x: u8, y: u8) {
         Sprite::new(ram.bytes_mut(), self).sprite_approach_target_speed(k, x, y);
     }
@@ -904,6 +953,7 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
         let mut info = SpriteSpawnInfo::default();
         let slot =
             Sprite::new(ram.bytes_mut(), self).sprite_spawn_dynamically(source, kind, &mut info);
+        self.last_bank2a_spawn = (slot >= 0).then_some((slot as usize, info));
         (slot >= 0).then_some(slot as usize)
     }
     fn spawn_dynamic_ex(
@@ -920,10 +970,16 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
             &mut info,
             slot as i32,
         );
+        self.last_bank2a_spawn = (spawned >= 0).then_some((spawned as usize, info));
         (spawned >= 0).then_some(spawned as usize)
     }
     fn set_spawned_coordinates(&mut self, ram: &mut Ram<'_>, slot: usize) {
-        let info = SpriteSpawnInfo::default();
+        let info = self
+            .last_bank2a_spawn
+            .take()
+            .filter(|(spawned, _)| *spawned == slot)
+            .map(|(_, info)| info)
+            .expect("bank2a spawn info must match coordinate-copy slot");
         Sprite::new(ram.bytes_mut(), self).sprite_set_spawned_coordinates(slot, info);
     }
     fn spawn_fire_phlegm(&mut self, ram: &mut Ram<'_>, k: usize) -> Option<usize> {
@@ -941,6 +997,16 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
     fn garnish_flame_trail(&mut self, ram: &mut Ram<'_>, k: usize, low: bool) -> usize {
         crate::sprite_main_bank2a::SpriteMainBank2a { ram, runtime: self }
             .garnish_flame_trail(k, low)
+    }
+    fn sfx1_with_pan(&mut self, ram: &mut Ram<'_>, k: usize, sound: u8) {
+        crate::misc::sprite_sfx1_with_pan(ram, self, k, sound);
+    }
+    fn kill_friends(&mut self, ram: &mut Ram<'_>) {
+        Sprite::new(ram.bytes_mut(), self).sprite_kill_friends();
+    }
+    fn spawn_probe_always(&mut self, ram: &mut Ram<'_>, k: usize, direction: u8) {
+        crate::sprite_main_bank0::SpriteMainBank0 { ram, runtime: self }
+            .sprite_spawn_probe_always(k, direction);
     }
     fn sfx2_with_pan(&mut self, ram: &mut Ram<'_>, k: usize, sound: u8) {
         crate::misc::sprite_sfx2_with_pan(ram, self, k, sound);
@@ -1030,7 +1096,22 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
             result.flags,
         ))
     }
+    fn prep_oam_or_double_ret_wide(
+        &mut self,
+        ram: &mut Ram<'_>,
+        k: usize,
+    ) -> Option<(u16, u16, u8)> {
+        let mut result = PrepOamCoordsRet::default();
+        let visible =
+            !Sprite::new(ram.bytes_mut(), self).sprite_prep_oam_coord_or_double_ret(k, &mut result);
+        visible.then_some((result.x, result.y, result.flags))
+    }
     fn draw_shadow(&mut self, ram: &mut Ram<'_>, k: usize) {
+        // C's shadow helper skips a sprite culled by the preceding draw.
+        // Preparing it again would kill it twice and overwrite WRAM scratch.
+        if ram.read_u8(0xf00 + k) != 0 {
+            return;
+        }
         let mut v = PrepOamCoordsRet::default();
         let mut s = Sprite::new(ram.bytes_mut(), self);
         s.sprite_get_16_bit_coords(k);
@@ -1038,11 +1119,10 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
         s.sprite_draw_shadow(k, &mut v);
     }
     fn draw_shadow_custom(&mut self, ram: &mut Ram<'_>, k: usize, size: u8) {
-        let mut v = PrepOamCoordsRet::default();
+        let mut v = self.last_sprite_oam;
         let mut s = Sprite::new(ram.bytes_mut(), self);
-        s.sprite_get_16_bit_coords(k);
-        s.sprite_prep_oam_coord(k, &mut v);
         s.sprite_draw_shadow_custom(k, &mut v, size);
+        self.last_sprite_oam = v;
     }
     fn antfairy_draw(&mut self, ram: &mut Ram<'_>, k: usize) {
         crate::sprite_main_bank2a::SpriteMainBank2a { ram, runtime: self }.sprite_draw_antfairy(k);
@@ -1096,7 +1176,7 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
         let e = (usize::from(ram.read_u16(0x90)) - crate::oam::OAM_BUFFER) / 4;
         let mut o = crate::oam::read(ram, e);
         o.charnum = character;
-        o.flags = (o.flags & 0xf) | high_flags;
+        o.flags = (o.flags & !0x40) | high_flags;
         crate::oam::write(ram, e, o);
     }
     fn set_oam_char_flags(
@@ -1106,10 +1186,11 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
         character: u8,
         high_flags: u8,
     ) {
-        let mut o = crate::oam::read(ram, entry);
+        let base = (usize::from(ram.read_u16(0x90)) - crate::oam::OAM_BUFFER) / 4;
+        let mut o = crate::oam::read(ram, base + entry);
         o.charnum = character;
-        o.flags = (o.flags & 0xf) | high_flags;
-        crate::oam::write(ram, entry, o);
+        o.flags = (o.flags & 0x3f) | high_flags;
+        crate::oam::write(ram, base + entry, o);
     }
     fn set_current_oam_y(&mut self, ram: &mut Ram<'_>, entry: usize, y: u8) {
         let base = (usize::from(ram.read_u16(0x90)) - crate::oam::OAM_BUFFER) / 4;
@@ -1124,8 +1205,100 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
         Sprite::new(ram.bytes_mut(), self).sprite_attempt_damage_to_link_plus_recoil(k);
     }
     fn draw_big_shadow(&mut self, ram: &mut Ram<'_>, k: usize, animation: u8) {
-        crate::sprite_main_bank2a::SpriteMainBank2a { ram, runtime: self }
-            .sprite_draw_big_shadow(k, animation);
+        const SHADOW: [DrawMultipleData; 15] = [
+            DrawMultipleData {
+                x: -6,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 0,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 6,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: -5,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 0,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 5,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: -4,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 0,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 4,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: -3,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 0,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 3,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: -2,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 0,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+            DrawMultipleData {
+                x: 2,
+                y: 19,
+                char_flags: 0x086c,
+                ext: 2,
+            },
+        ];
+        let start = usize::from(animation.min(4)) * 3;
+        Sprite::new(ram.bytes_mut(), self).sprite_draw_multiple(k, &SHADOW[start..start + 3], None);
     }
     fn load_properties(&mut self, ram: &mut Ram<'_>, k: usize) {
         Sprite::new(ram.bytes_mut(), self).sprite_prep_load_properties(k);
@@ -1169,11 +1342,11 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
                     ram.write_u8(0xc4a + slot, 0);
                 }
             }
-            ram.write_u8(0x3a9, 0);
+            ram.write_u8(0x374, 0);
             ram.write_u8(0x5e, 0);
             ram.write_u8(0x372, 0);
-            ram.write_u8(0x378, 0);
-            ram.write_u8(0x34c, 0);
+            ram.write_u8(0x50, 0);
+            ram.write_u16(0x32b, 0);
         }
     }
     fn force_prize_drop(&mut self, ram: &mut Ram<'_>, k: usize, a: u8, b: u8) {
@@ -1239,13 +1412,12 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
     fn manually_set_death_flag_uw(&mut self, ram: &mut Ram<'_>, k: usize) {
         Sprite::new(ram.bytes_mut(), self).sprite_manually_set_death_flag_uw(k);
     }
-    fn trinexx_flash_shell_palette(&mut self, ram: &mut Ram<'_>, blue: bool, _flash: bool) {
-        with_gfx(self, ram, |g| {
-            if blue {
-                g.trinexx_flash_shell_palette_blue()
-            } else {
-                g.trinexx_flash_shell_palette_red()
-            }
+    fn trinexx_flash_shell_palette(&mut self, ram: &mut Ram<'_>, blue: bool, flash: bool) {
+        with_gfx(self, ram, |g| match (blue, flash) {
+            (true, true) => g.trinexx_flash_shell_palette_blue(),
+            (true, false) => g.trinexx_unflash_shell_palette_blue(),
+            (false, true) => g.trinexx_flash_shell_palette_red(),
+            (false, false) => g.trinexx_unflash_shell_palette_red(),
         });
     }
     fn draw_multiple(&mut self, ram: &mut Ram<'_>, k: usize, pieces: &[(i8, i8, u16, u8)]) {
@@ -1260,12 +1432,17 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
             .collect::<Vec<_>>();
         let mut result = PrepOamCoordsRet::default();
         let mut sprite = Sprite::new(ram.bytes_mut(), self);
-        sprite.sprite_get_16_bit_coords(k);
         sprite.sprite_draw_multiple(k, &pieces, Some(&mut result));
+        self.last_sprite_oam = result;
+    }
+    fn correct_oam_entries(&mut self, ram: &mut Ram<'_>, k: usize, count: usize, size: u8) {
+        Sprite::new(ram.bytes_mut(), self).sprite_correct_oam_entries(k, count, size);
+    }
+    fn last_draw_info(&self) -> PrepOamCoordsRet {
+        self.last_sprite_oam
     }
     fn draw_single_large(&mut self, ram: &mut Ram<'_>, k: usize) {
         let mut sprite = Sprite::new(ram.bytes_mut(), self);
-        sprite.sprite_get_16_bit_coords(k);
         sprite.sprite_draw_single_large(k);
     }
     fn draw_single_small(&mut self, ram: &mut Ram<'_>, k: usize) {
@@ -1342,8 +1519,12 @@ impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for NativeGameServices<'
             .player_bee_hone_in_on_target(target, bee);
     }
     fn spawn_sparkle(&mut self, ram: &mut Ram<'_>, k: usize, x: i8, y: i8) {
-        Sprite::new(ram.bytes_mut(), self)
-            .sprite_garnish_spawn_sparkle_limited(k, x as u16, y as u16);
+        let _ =
+            Sprite::new(ram.bytes_mut(), self).sprite_garnish_spawn_sparkle(k, x as u16, y as u16);
+    }
+    fn spawn_bee_sparkle(&mut self, ram: &mut Ram<'_>, k: usize) {
+        crate::sprite_main_bank0::SpriteMainBank0 { ram, runtime: self }
+            .sprite_spawn_sparkle_garnish(k);
     }
     fn spawn_sparkle_limited(&mut self, ram: &mut Ram<'_>, k: usize, x: i8, y: i8) {
         Sprite::new(ram.bytes_mut(), self)
@@ -1360,7 +1541,9 @@ impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for NativeGameServices<'
         let frame = ram.read_u8(0x1a);
         let mut info = PrepOamCoordsRet::default();
         let mut sprite = Sprite::new(ram.bytes_mut(), self);
-        sprite.sprite_get_16_bit_coords(k);
+        // PinkBall_Distress in C reuses cur_sprite_x/y from the earlier
+        // Sprite_TimersAndOam call, even after Sprite_MoveXYZ changed its
+        // stored coordinates this frame.
         if !sprite.sprite_prep_oam_coord_or_double_ret(k, &mut info) {
             sprite.sprite_draw_distress_custom(info.x, info.y, frame);
         }
@@ -1697,11 +1880,11 @@ impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for NativeGameServices<'
     ) -> (i8, i8) {
         let v = Sprite::new(ram.bytes_mut(), self)
             .sprite_project_speed_towards_location(k, x, y, speed);
-        (v.x as i8, v.y as i8)
+        (v.y as i8, v.x as i8)
     }
     fn project_speed_towards_link(&mut self, ram: &mut Ram<'_>, k: usize, speed: u8) -> (i8, i8) {
         let v = Sprite::new(ram.bytes_mut(), self).sprite_project_speed_towards_link(k, speed);
-        (v.x as i8, v.y as i8)
+        (v.y as i8, v.x as i8)
     }
     fn check_damage_to_link(&mut self, ram: &mut Ram<'_>, k: usize) -> bool {
         Sprite::new(ram.bytes_mut(), self).sprite_check_damage_to_link(k)
@@ -1735,6 +1918,18 @@ impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for NativeGameServices<'
         let mut v = PrepOamCoordsRet::default();
         Sprite::new(ram.bytes_mut(), self).sprite_prep_oam_coord(k, &mut v);
     }
+    fn firebar_prep_oam(&mut self, ram: &mut Ram<'_>, k: usize) -> Option<(u16, u16, u8)> {
+        let mut v = PrepOamCoordsRet::default();
+        let visible =
+            !Sprite::new(ram.bytes_mut(), self).sprite_prep_oam_coord_or_double_ret(k, &mut v);
+        visible.then_some((v.x, v.y, v.flags))
+    }
+    fn prep_oam_coords(&mut self, ram: &mut Ram<'_>, k: usize) -> Option<(u16, u16, u8)> {
+        let mut v = PrepOamCoordsRet::default();
+        let visible =
+            !Sprite::new(ram.bytes_mut(), self).sprite_prep_oam_coord_or_double_ret(k, &mut v);
+        visible.then_some((v.x, v.y, v.flags))
+    }
     fn draw_multiple(
         &mut self,
         ram: &mut Ram<'_>,
@@ -1754,14 +1949,33 @@ impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for NativeGameServices<'
         s.sprite_get_16_bit_coords(k);
         s.sprite_draw_multiple(k, &p, None);
     }
+    fn draw_multiple_player_deferred_with_shadow(
+        &mut self,
+        ram: &mut Ram<'_>,
+        k: usize,
+        pieces: &[crate::sprite_main_bank2b::DrawPiece],
+    ) {
+        let p = pieces
+            .iter()
+            .map(|&(x, y, char_flags, ext)| DrawMultipleData {
+                x,
+                y,
+                char_flags,
+                ext,
+            })
+            .collect::<Vec<_>>();
+        let mut info = PrepOamCoordsRet::default();
+        let mut sprite = Sprite::new(ram.bytes_mut(), self);
+        sprite.sprite_get_16_bit_coords(k);
+        sprite.sprite_draw_multiple_player_deferred(k, &p, Some(&mut info));
+        sprite.sprite_draw_shadow(k, &mut info);
+    }
     fn draw_single_large(&mut self, ram: &mut Ram<'_>, k: usize) {
         let mut s = Sprite::new(ram.bytes_mut(), self);
-        s.sprite_get_16_bit_coords(k);
         s.sprite_draw_single_large(k);
     }
     fn draw_single_small(&mut self, ram: &mut Ram<'_>, k: usize) {
         let mut s = Sprite::new(ram.bytes_mut(), self);
-        s.sprite_get_16_bit_coords(k);
         s.sprite_draw_single_small(k);
     }
     fn allocate_oam_region_b(&mut self, ram: &mut Ram<'_>, bytes: u8) {
@@ -2637,9 +2851,18 @@ impl SpriteMainBank0Runtime for NativeGameServices<'_> {
         Sprite::new(ram.bytes_mut(), self).sprite_draw_shadow(slot, &mut info);
     }
 
+    fn sprite_draw_shadow_with_info(
+        &mut self,
+        ram: &mut Ram<'_>,
+        slot: usize,
+        info: &mut PrepOamCoordsRet,
+    ) {
+        Sprite::new(ram.bytes_mut(), self).sprite_draw_shadow(slot, info);
+    }
+
     fn sprite_direction_to_face_link(&mut self, ram: &mut Ram<'_>, slot: usize) -> (u8, u8) {
         let result = Sprite::new(ram.bytes_mut(), self).sprite_direction_to_face_link(slot);
-        (result.0, result.1.b)
+        (result.1.a, result.1.b)
     }
 
     fn sprite_direction_to_face_link_direction(&mut self, ram: &mut Ram<'_>, slot: usize) -> u8 {
@@ -2725,8 +2948,18 @@ impl SpriteMainBank0Runtime for NativeGameServices<'_> {
 
     fn draw_multiple(&mut self, ram: &mut Ram<'_>, slot: usize, pieces: &[DrawMultipleData]) {
         let mut sprite = Sprite::new(ram.bytes_mut(), self);
-        sprite.sprite_get_16_bit_coords(slot);
         sprite.sprite_draw_multiple(slot, pieces, None);
+    }
+
+    fn draw_multiple_with_info(
+        &mut self,
+        ram: &mut Ram<'_>,
+        slot: usize,
+        pieces: &[DrawMultipleData],
+        info: &mut PrepOamCoordsRet,
+    ) {
+        let mut sprite = Sprite::new(ram.bytes_mut(), self);
+        sprite.sprite_draw_multiple(slot, pieces, Some(info));
     }
 
     fn sprite_spawn_dynamically(
@@ -3282,10 +3515,21 @@ impl PlayerRuntime for NativeGameServices<'_> {
         ram: &mut Ram<'_>,
         second: bool,
     ) -> Option<(u8, u16, u16)> {
+        // The C helper returns its Point16U output separately from scratch RAM.
+        // Map updates inside smash_rock_pile overwrite RAM[0..4], so capture
+        // the output coordinates before they run.
+        let saved_y = ram.read_u16(0x20);
+        if second {
+            ram.write_u16(0x20, saved_y.wrapping_add(8));
+        }
+        let (_, point) = crate::overworld::get_link_map16_coords(ram);
+        ram.write_u16(0x20, saved_y);
         let tile = crate::overworld::smash_rock_pile(ram, self.assets, second, |ram| {
-            crate::overworld::update_map_32x32(ram, self.assets)
+            crate::overworld::update_map_32x32_b(ram, |ram| {
+                crate::overworld::update_map_32x32(ram, self.assets)
+            })
         })?;
-        Some((tile, ram.read_u16(2), ram.read_u16(0)))
+        Some((tile, point.x, point.y))
     }
 
     fn sprite_spawn_immediately_smashed_terrain(
@@ -3561,7 +3805,7 @@ impl PlayerRuntime for NativeGameServices<'_> {
         let _ = crate::ancilla::Ancilla { ram, runtime: self }.add_dashing_dust_ex(
             kind,
             limit,
-            u8::from(charging),
+            u8::from(!charging),
         );
     }
 
@@ -3588,7 +3832,7 @@ impl PlayerRuntime for NativeGameServices<'_> {
     fn liftable_probe_offset(&self, direction: usize) -> (i8, i8) {
         (
             crate::dungeon::DUNGEON_QUERY_IF_TILE_LIFTABLE_X[direction],
-            crate::dungeon::DUNGEON_QUERY_IF_TILE_LIFTABLE_Y[direction],
+            [6, 24, 12, 12][direction],
         )
     }
 
@@ -3614,8 +3858,12 @@ impl PlayerRuntime for NativeGameServices<'_> {
             });
             result
         } else {
+            let (_, lift_point) = crate::overworld::get_link_map16_coords(ram);
+            point = (lift_point.x, lift_point.y);
             crate::overworld::handle_liftable_tiles(ram, self.assets, |ram| {
-                crate::overworld::update_map_32x32(ram, self.assets)
+                crate::overworld::update_map_32x32_b(ram, |ram| {
+                    crate::overworld::update_map_32x32(ram, self.assets)
+                })
             })
         };
         (attribute, point.0, point.1)
@@ -3810,7 +4058,7 @@ mod tests {
             let mut ram = Ram::new(&mut bytes);
             crate::oam::set_plain(&mut ram, 7, 1, 2, 3, 0xb6, 0);
             crate::sprite_main_bank1::SpriteMainBank1Runtime::set_oam_piece_character_and_low_flags(
-                services, &mut ram, 7, 0x9a, 5,
+                services, &mut ram, 7, 0x9a, 5, 0x0f,
             );
             let entry = crate::oam::read(&ram, 7);
             assert_eq!(entry.charnum, 0x9a);

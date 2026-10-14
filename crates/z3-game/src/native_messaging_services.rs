@@ -41,11 +41,11 @@ pub fn dungeon_map_recover_graphics(services: &mut NativeGameServices<'_>, ram: 
     ram.write_u8(0x1c, ram.read_u8(0xc211));
     ram.write_u8(0x1d, ram.read_u8(0xc212));
     ram.write_u8(0xaa1, ram.read_u8(0xc20e));
-    ram.write_u8(0xaa2, ram.read_u8(0xc20f));
-    ram.write_u8(0xaa3, ram.read_u8(0xc210));
+    ram.write_u8(0xaa3, ram.read_u8(0xc20f));
+    ram.write_u8(0xaa2, ram.read_u8(0xc210));
     with_gfx(services, ram, |gfx| gfx.initialize_tilesets());
     ram.write_u16(0xaa8, 0);
-    ram.write_u8(0xab9, 0);
+    ram.write_u8(0xab2, 0);
     Hud {
         ram,
         runtime: services,
@@ -68,7 +68,7 @@ pub fn dungeon_map_recover_graphics(services: &mut NativeGameServices<'_>, ram: 
             break;
         }
     }
-    ram.write_u8(0x14, 0);
+    ram.write_u8(0x17, 0);
     ram.write_u8(0xb0, 0);
     ram.write_u8(0x9b, hdma);
     let palette = ram.slice(0x1dd80, 512).to_vec();
@@ -177,7 +177,7 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
             ram.write_u8(0x13, 15);
             ram.write_u8(0x1c, 20);
             ram.write_u8(0x1d, 0);
-            ram.write_u8(0x99, 32);
+            ram.write_u8(0x9a, 32);
             ram.write_u8(0xc8, 64);
             ram.write_u8(0xc007, 0);
             ram.write_u8(0xc009, 0);
@@ -198,9 +198,9 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
                 if ram.read_u8(0xf35c + i) == 6 {
                     ram.write_u8(0xf35c + i, 2);
                     ram.write_u8(0xc8, 12);
-                    ram.write_u8(0xaa, 15);
+                    ram.write_u8(0xaaa, 15);
                     with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
-                    ram.write_u8(0xaa, 0);
+                    ram.write_u8(0xaaa, 0);
                     ram.write_u8(0x11, 10);
                     return;
                 }
@@ -213,9 +213,9 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
         }
         6 => {
             ram.write_u8(0xc8, 12);
-            ram.write_u8(0xaa, 15);
+            ram.write_u8(0xaaa, 15);
             with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
-            ram.write_u8(0xaa, 0);
+            ram.write_u8(0xaaa, 0);
             ram.write_u8(0xab1, 5);
             ram.write_u16(0xaa8, 0x200);
             with_gfx(services, ram, |gfx| {
@@ -235,10 +235,19 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
             ram.write_u8(0x200, 0);
         }
         11 => revival_fairy_main(services, ram),
+        // Restore0D still refills the HUD while its heart animation runs.
+        0x31 => {
+            revival_fairy_main(services, ram);
+            Hud {
+                ram,
+                runtime: services,
+            }
+            .refill_logic();
+        }
         12 => {
             if ram.read_u8(0xf372) == 0 {
-                let palette = ram.slice(0x1dd80, 512).to_vec();
-                ram.slice_mut(0xc300, 512).copy_from_slice(&palette);
+                let palette = ram.slice(0x1dd80, 256).to_vec();
+                ram.slice_mut(0xc300, 256).copy_from_slice(&palette);
                 ram.slice_mut(0xc540, 192).fill(0);
                 ram.write_u16(0xc500, 0);
                 ram.write_u16(0xc007, 0);
@@ -254,7 +263,7 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
             .refill_logic();
         }
         13 => {
-            ram.write_u8(0xaa, 1);
+            ram.write_u8(0xaaa, 1);
             with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
             let fixed_color = ram.read_u8(0xc017);
             Dungeon::new(ram.bytes_mut(), services)

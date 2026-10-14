@@ -66,6 +66,7 @@ enum {
 };
 
 void SaveLoadSlot(int cmd, int which);
+bool ZeldaLoadReferenceReplayForTest(int chapter);
 bool ZeldaLoadSnapshotForTest(const uint8 *data, size_t size);
 void ZeldaWriteSram();
 void ZeldaReadSram();

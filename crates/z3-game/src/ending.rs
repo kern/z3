@@ -19,6 +19,7 @@ const LINK_X_VEL: usize = 0x31;
 const OVERLAY_INDEX: usize = 0x8c;
 const BGMODE: usize = 0x94;
 const MOSAIC: usize = 0x95;
+const MOSAIC_LEVEL: usize = 0xc011;
 const CGWSEL: usize = 0x99;
 const CGADSUB: usize = 0x9a;
 const HDMAEN: usize = 0x9b;
@@ -333,6 +334,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     pub fn credits_load_scene_overworld_overlay(&mut self) {
         self.external("Overworld_LoadOverlays2");
         self.ram.write_u8(MUSIC_CONTROL, 0);
+        self.ram.write_u8(0x12d, 0);
         self.dec8(SUBMODULE);
         self.inc8(SUBSUBMODULE);
     }
@@ -365,7 +367,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.external("EnableForceBlank");
         self.external("EraseTileMaps_normal");
         let k = (self.ram.read_u8(SUBMODULE) >> 1) as usize;
-        self.ram.write_u16(0x106, ENDING_TAB1[k]);
+        self.ram.write_u16(0x10e, ENDING_TAB1[k]);
         self.external("Dungeon_LoadEntrance");
         self.ram.write_u8(0x45a, 0);
         self.ram.write_u8(0x458, 0);
@@ -463,7 +465,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.external("CallForDuckIndoors");
                 self.external("SaveDungeonKeys");
                 self.inc8(0x200);
-                self.inc8(0x2f);
+                self.inc8(0x2e4);
             }
             1 => {
                 self.external("Dungeon_HandleLayerEffect");
@@ -490,7 +492,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.ram.write_u8(0x1af1, 0);
                 self.external("FluteMenu_LoadSelectedScreen");
                 self.external("LoadOWMusicIfNeeded");
-                self.ram.write_u8(MUSIC_CONTROL, 9)
+                self.ram.write_u8(MUSIC_CONTROL, 9);
             }
             4 => {
                 self.external("Overworld_LoadOverlayAndMap");
@@ -563,7 +565,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.ram.write_u8(MOSAIC_TARGET, 0);
                 self.ram.write_u8(CGWSEL, 2);
                 self.ram.write_u8(CGADSUB, 50);
-                self.ram.write_u8(MOSAIC, 240);
+                self.ram.write_u8(MOSAIC_LEVEL, 240);
                 self.ram.write_u8(BG1_HOFS2 + 1, 1);
                 self.ram.write_u8(0x20, 236);
                 self.ram.write_u8(0x22, 120);
@@ -585,11 +587,13 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             }
             6 => {
                 if self.ram.read_u8(PALETTE_FILTER_COUNTDOWN) & 1 == 0
-                    && self.ram.read_u8(MOSAIC) != 0
+                    && self.ram.read_u8(MOSAIC_LEVEL) != 0
                 {
-                    self.add8(MOSAIC, 0xf0)
+                    self.add8(MOSAIC_LEVEL, 0xf0)
                 }
                 self.ram.write_u8(BGMODE, 9);
+                self.ram
+                    .write_u8(MOSAIC, self.ram.read_u8(MOSAIC_LEVEL) | 7);
                 self.external("ApplyPaletteFilter_bounce")
             }
             7 => {
@@ -869,12 +873,13 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u8(IRQ_FLAG, 255);
         self.ram.write_u8(TM, 0x15);
         self.ram.write_u8(TS, 0);
+        self.ram.write_u8(0x1b, 0);
         self.ram.write_u8(MUSIC_CONTROL, 0xf1);
         self.external("SetBackdropcolorBlack");
         self.ram.slice_mut(0x20, 0x70).fill(0);
         self.ram.slice_mut(0xf000, 1280).fill(0);
         self.ram.write_u8(MAIN_MODULE, 1);
-        self.ram.write_u8(0x3f4, 1);
+        self.ram.write_u8(0x4aa, 1);
         self.ram.write_u8(SUBMODULE, 0);
     }
     pub fn intro_initialize_triforce_poly_thread(&mut self) {
@@ -1267,6 +1272,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         }
     }
     pub fn triforce_room_prep_gfx_slot_for_poly(&mut self) {
+        self.ram.write_u8(0xaa4, 8);
         self.external("LoadCommonSprites");
         self.intro_init_gfx_helper();
         for k in 0..3 {
@@ -1277,6 +1283,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.inc8(SUBMODULE);
     }
     pub fn credits_initialize_polyhedral(&mut self) {
+        self.ram.write_u8(0xaa4, 8);
         self.external("LoadCommonSprites");
         self.intro_init_gfx_helper();
         self.ram.write_u8(POLY_CONFIG1, 0);
@@ -1318,6 +1325,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             }
             2 => {
                 self.ram.write_u16(TRIFORCE_CTR, 0x1c0);
+                let mut finished = false;
                 if self.ram.read_u8(POLY_CONFIG1) < 128 {
                     self.inc8(POLY_CONFIG1);
                 } else if self.ram.read_u8(POLY_B).wrapping_sub(10) & 0x7f >= 92
@@ -1331,10 +1339,12 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                     self.ram.write_u16(MAIN_PALETTE + 0x1ae, 0x7fff);
                     self.inc8(UPDATE_CGRAM);
                     self.ram.write_u8(INTRO_STEP_TIMER, 6);
-                    return;
+                    finished = true;
                 }
-                self.add8(POLY_B, 5);
-                self.add8(POLY_A, 3)
+                if !finished {
+                    self.add8(POLY_B, 5);
+                    self.add8(POLY_A, 3);
+                }
             }
             3 => {
                 if self.dec8(INTRO_STEP_TIMER) == 0 {
@@ -1488,6 +1498,11 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         let idx = ENDING_SPRITES_IDX[scene] as usize;
         let num = ENDING_SPRITES_IDX[scene + 1] as usize - idx;
         let dungeon = matches!(scene, 1 | 10 | 11);
+        if dungeon {
+            let ri = self.ram.read_u16(DUNGEON_ROOM_INDEX2);
+            self.ram.write_u8(0xfb1, (ri >> 3 & 254) as u8);
+            self.ram.write_u8(0xfb0, ((ri & 15) << 1) as u8);
+        }
         for k in (0..num).rev() {
             let (x, y) = if dungeon {
                 let ri = self.ram.read_u16(DUNGEON_ROOM_INDEX2);
@@ -1686,7 +1701,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             }
             2 => {
                 self.ram
-                    .write_u8(0x3ca, [0x20, 0x40][(frame >> 2 & 1) as usize]);
+                    .write_u8(0xaf4, [0x20, 0x40][(frame >> 2 & 1) as usize]);
                 let k = 6;
                 let j = (self.ram.read_u8(SPRITE_X_VEL + k) >> 7) as usize;
                 self.ram.write_u8(
@@ -1794,6 +1809,8 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.credits_sprite_draw_single(3, 4, 8);
                 self.end_sequence_draw_shadow2(3);
                 self.ram.write_u8(SPRITE_GRAPHICS + 2, j);
+                self.ram.write_u8(0x107, 0);
+                self.ram.write_u8(0x108, [0, 4][j as usize]);
                 self.ram.write_u8(SPRITE_OAM_FLAGS + 2, 0x30);
                 self.ram
                     .write_u16(LINK_DMA_GRAPHICS_INDEX, [0xa, 0x224][j as usize]);
@@ -1804,6 +1821,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 let idx = ENDING_SPRITES_IDX[scene] as usize;
                 let n = ENDING_SPRITES_IDX[scene + 1] as usize - idx;
                 for k in (0..n).rev() {
+                    self.ram.write_u8(0xfa0, k as u8);
                     self.ram.write_u8(SPRITE_TYPE + k, [0x52, 0x55, 0x55][k]);
                     self.runtime
                         .oam_allocate_region_a(self.ram, [0x20, 8, 8][k]);
@@ -1825,6 +1843,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.ram.write_u8(SPRITE_TYPE + k, 0xe9);
                 self.runtime.oam_allocate_region_a(self.ram, 12);
                 self.ram.write_u8(SPRITE_OAM_FLAGS + k, 0x37);
+                self.runtime.sprite_get_16_bit_coords(self.ram, k);
                 if frame & 15 == 0 {
                     self.ram.write_u8(
                         SPRITE_GRAPHICS + k,
@@ -1840,7 +1859,9 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 }
                 let k = 0;
                 self.ram.write_u8(SPRITE_TYPE + k, 0x36);
+                self.runtime.oam_allocate_region_a(self.ram, 0x18);
                 self.ram.write_u8(SPRITE_OAM_FLAGS + k, 0x39);
+                self.runtime.sprite_get_16_bit_coords(self.ram, k);
                 if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
                     self.ram.write_u8(SPRITE_DELAY_MAIN + k, 4);
                     self.ram.write_u8(
@@ -1857,6 +1878,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.ram.write_u8(SPRITE_TYPE, 0x2c);
                 self.runtime.oam_allocate_region_a(self.ram, 0x2c);
                 self.ram.write_u8(SPRITE_OAM_FLAGS, 0x3b);
+                self.runtime.sprite_get_16_bit_coords(self.ram, 0);
                 self.ram.write_u8(
                     SPRITE_GRAPHICS,
                     if r < 0x1c0 { (r >> 5 & 1) as u8 } else { 2 },
@@ -2012,9 +2034,12 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                     SPRITE_OAM_FLAGS + k,
                     (self.ram.read_u8(SPRITE_X_VEL + k) >> 1 & 0x40) ^ 0x7e,
                 );
-                self.credits_sprite_draw_set_shadow_prop(k, 1);
+                self.ram.write_u8(SPRITE_FLAGS2 + k, 1);
+                self.ram.write_u8(SPRITE_FLAGS3 + k, 0x30);
                 self.ram.write_u8(SPRITE_Z + k, 16);
                 self.credits_sprite_draw_preexisting_sprite_draw(k, 8);
+                self.ram.write_u8(SPRITE_OAM_FLAGS + 5, 0x37);
+                self.credits_sprite_draw_set_shadow_prop(5, 2);
                 for (k, a) in [(5, 12), (4, 8), (3, 8)] {
                     self.credits_sprite_draw_activate_and_run_sprite(k, a)
                 }
@@ -2183,7 +2208,10 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 | u32::from(self.ram.read_u16(BG1_VOFS_SUB)))
             .wrapping_sub(0x2000);
             self.ram.write_u16(BG1_VOFS_SUB, t as u16);
-            self.ram.write_u16(BG1_VOFS2, (t >> 16) as u16);
+            self.ram.write_u16(
+                BG1_VOFS2,
+                ((t >> 16) as u16).wrapping_add(self.ram.read_u16(0x69e)),
+            );
             self.ram.write_u16(BG1_HOFS2, self.ram.read_u16(BG2_HOFS2))
         } else if oi == 0x97 || oi == 0x9d {
             for (a, s) in [(BG1_VOFS2, BG1_VOFS_SUB), (BG1_HOFS2, BG1_HOFS_SUB)] {
@@ -2221,7 +2249,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             .write_u16(bg2, self.ram.read_u16(bg2).wrapping_add_signed(vel as i16));
         let (w, other) = if vel < 0 { (pos, neg) } else { (neg, pos) };
         let n = self.ram.read_u16(w).wrapping_add(vel.unsigned_abs() as u16);
-        let n2 = if n >= 0x10 {
+        let n2 = if (n.wrapping_sub(0x10) as i16) >= 0 {
             self.ram.write_u16(
                 OW_TRANS_DIR,
                 self.ram.read_u16(OW_TRANS_DIR) | (if vel < 0 { negbit } else { posbit }),
@@ -2232,6 +2260,8 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         };
         self.ram.write_u16(w, n2);
         self.ram.write_u16(other, 0u16.wrapping_sub(n2));
+        let rv = vel as i16 as u16;
+        self.ram.write_u16(if vertical { 0x69e } else { 0x69f }, rv);
         let oi = self.ram.read_u8(OVERLAY_INDEX);
         if oi == 0x97 || oi == 0x9d {
             return;
@@ -2241,7 +2271,6 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         } else {
             oi == 0x95 || oi == 0x9e
         };
-        let rv = vel as i16 as u16;
         let (sh, sp) = if quarter {
             (2, (rv & 3) << 14)
         } else {
@@ -2364,6 +2393,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.runtime.sprite_move_xy(self.ram, k)
     }
     pub fn credits_sprite_draw_activate_and_run_sprite(&mut self, k: usize, bytes: u8) {
+        self.ram.write_u8(0xfa0, k as u8);
         self.runtime.oam_allocate_region_a(self.ram, bytes);
         self.runtime.sprite_get_16_bit_coords(self.ram, k);
         let saved = self.ram.read_u8(SUBMODULE);
@@ -2374,6 +2404,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     }
     pub fn credits_sprite_draw_preexisting_sprite_draw(&mut self, k: usize, bytes: u8) {
         self.runtime.oam_allocate_region_a(self.ram, bytes);
+        self.ram.write_u8(0xfa0, k as u8);
         self.runtime.sprite_get_16_bit_coords(self.ram, k);
         self.runtime.sprite_active_main(self.ram, k);
     }
@@ -2905,6 +2936,146 @@ mod tests {
     use z3_core::WRAM_SIZE;
     struct Rt;
     impl EndingRuntime for Rt {}
+    #[test]
+    fn credits_dungeon_scene_sets_which_entrance_word() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 2);
+        ram.write_u16(0x106, 0x1234);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_load_scene_dungeon();
+        assert_eq!(ram.read_u16(0x10e), ENDING_TAB1[1]);
+        assert_eq!(ram.read_u16(0x106), 0x1234);
+    }
+    #[test]
+    fn credits_dungeon_sprites_leave_room_origin_scratch() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 2);
+        ram.write_u16(DUNGEON_ROOM_INDEX2, 0x12);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_prep_and_load_sprites();
+        assert_eq!(ram.read_u8(0xfb0), 4);
+        assert_eq!(ram.read_u8(0xfb1), 2);
+    }
+    #[test]
+    fn credits_preexisting_sprite_sets_current_object_index() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_sprite_draw_preexisting_sprite_draw(1, 16);
+        assert_eq!(ram.read_u8(0xfa0), 1);
+    }
+    #[test]
+    fn credits_birds_request_vram_dma_at_flag_travel_bird() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 5);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_draw_scene_sprites();
+        assert_eq!(ram.read_u8(0xaf4), 0x20);
+        assert_eq!(ram.read_u8(0x3ca), 0);
+    }
+    #[test]
+    fn credits_blacksmith_scene_sets_link_dma_controls() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 11);
+        ram.write_u8(0x107, 3);
+        ram.write_u8(0x108, 2);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_draw_scene_sprites();
+        assert_eq!(ram.read_u8(0x107), 0);
+        assert_eq!(ram.read_u8(0x108), 0);
+    }
+    #[test]
+    fn credits_overworld_overlay_clears_ambient_sound() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 12);
+        ram.write_u8(0x12d, 0x15);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_load_scene_overworld_overlay();
+        assert_eq!(ram.read_u8(0x12d), 0);
+    }
+    #[test]
+    fn credits_scene_six_updates_current_object_for_each_sprite() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 13);
+        ram.write_u8(0xfa0, 4);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_draw_scene_sprites();
+        assert_eq!(ram.read_u8(0xfa0), 0);
+    }
+    #[test]
+    fn credits_scene_seven_allocates_and_prepares_both_sprites() {
+        struct Spy(Vec<(u8, usize)>);
+        impl EndingRuntime for Spy {
+            fn oam_allocate_region_a(&mut self, _: &mut Ram<'_>, bytes: u8) {
+                self.0.push((0, usize::from(bytes)));
+            }
+            fn sprite_get_16_bit_coords(&mut self, _: &mut Ram<'_>, k: usize) {
+                self.0.push((1, k));
+            }
+            fn sprite_active_main(&mut self, _: &mut Ram<'_>, k: usize) {
+                self.0.push((2, k));
+            }
+        }
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        ram.write_u8(SUBMODULE, 15);
+        let mut spy = Spy(Vec::new());
+        Ending {
+            ram: &mut ram,
+            runtime: &mut spy,
+        }
+        .credits_draw_scene_sprites();
+        assert_eq!(spy.0, [(0, 12), (1, 1), (2, 1), (0, 24), (1, 0), (2, 0)]);
+    }
+    #[test]
+    fn credits_scene_twelve_sets_sixth_sprite_shadow_flags() {
+        let mut b = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut b);
+        let mut rt = Rt;
+        ram.write_u8(SUBMODULE, 25);
+        Ending {
+            ram: &mut ram,
+            runtime: &mut rt,
+        }
+        .credits_draw_scene_sprites();
+        assert_eq!(ram.read_u8(SPRITE_FLAGS2 + 5), 2);
+        assert_eq!(ram.read_u8(SPRITE_FLAGS3 + 6), 0x30);
+        assert_eq!(ram.read_u8(SPRITE_OAM_FLAGS + 5), 0x37);
+    }
     #[test]
     fn triangle_motion_sign_extends_nibbles() {
         let mut b = [0; WRAM_SIZE];

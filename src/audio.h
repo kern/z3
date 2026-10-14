@@ -16,5 +16,7 @@ void ZeldaDiscardUnusedAudioFrames();
 void ZeldaRestoreMusicAfterLoad_Locked(bool is_reset);
 void ZeldaSaveMusicStateToRam_Locked();
 void ZeldaPushApuState();
+// Fixed-format queue snapshot for C/Rust audio oracle diagnostics.
+void ZeldaExportApuQueueForTest(uint8 *destination);
 
 #endif  // ZELDA3_AUDIO_H_

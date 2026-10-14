@@ -56,11 +56,17 @@ fn checked<'a>(
         .ok_or(NmiError::AssetRange { asset, start, len })
 }
 
+#[track_caller]
 fn write_vram_bytes(ppu: &mut Ppu, word_addr: usize, src: &[u8]) -> Result<(), NmiError> {
     let byte_addr = word_addr
         .checked_mul(2)
         .ok_or(NmiError::InvalidVramTarget(word_addr))?;
     if byte_addr.saturating_add(src.len()) > ppu.vram.len() * 2 {
+        eprintln!(
+            "invalid VRAM DMA caller={} target={word_addr:04x} len={:x}",
+            core::panic::Location::caller(),
+            src.len()
+        );
         return Err(NmiError::InvalidVramTarget(word_addr));
     }
     for (i, &value) in src.iter().enumerate() {
@@ -159,7 +165,8 @@ pub fn write_ppu_registers(ram: &Ram<'_>, ppu: &mut Ppu) {
 
 fn update_audio(ram: &mut Ram<'_>, audio: &mut impl NmiAudio) {
     let music = ram.read_u8(0x12c);
-    if music != 0 && !audio.is_bugged_music_track(music) {
+    let bugged = music != 0 && audio.is_bugged_music_track(music);
+    if music != 0 && !bugged {
         ram.write_u8(0x133, music);
         audio.play_music_track(ram, music);
         if music < 0xf2 {
@@ -313,7 +320,16 @@ pub fn do_updates(
             5..=9 => assets.bg_tilemaps[usize::from(bg - 4)],
             other => return Err(NmiError::InvalidBackgroundSource(other)),
         };
-        handle_stripes14(ppu, source)?;
+        if let Err(error) = handle_stripes14(ppu, source) {
+            eprintln!(
+                "Rust NMI bg={bg} vram_offset={:04x} first={:02x?} room={:04x} mapstate={:02x}",
+                ram.read_u16(0x1000),
+                &source[..source.len().min(8)],
+                ram.read_u16(0xa0),
+                ram.read_u8(0x200)
+            );
+            return Err(error);
+        }
         if bg == 1 {
             ram.write_u16(0x1000, 0);
         }
@@ -469,7 +485,15 @@ fn update_ow_scroll(ram: &mut Ram<'_>, ppu: &mut Ppu) -> Result<(), NmiError> {
         cursor += 2;
         let data = ram.slice(cursor, copy_len);
         if vertical {
-            write_vertical(ppu, dst, data)?
+            // The C port writes through a raw pointer into its 0x8000-word VRAM
+            // buffer. An OW column can run past its end at the screen edge;
+            // those writes land outside VRAM (which is the final Ppu field),
+            // not at wrapped VRAM addresses. Preserve the in-range writes.
+            for (i, pair) in data.chunks_exact(2).enumerate() {
+                if let Some(word) = ppu.vram.get_mut(dst + i * 32) {
+                    *word = u16::from_le_bytes([pair[0], pair[1]]);
+                }
+            }
         } else {
             write_vram_bytes(ppu, dst, data)?
         }
@@ -491,7 +515,20 @@ fn arbitrary(
 ) -> Result<(), NmiError> {
     loop {
         let dst = usize::from(ram.read_u16(0x14000 + i));
-        ram_copy(ram, ppu, dst, src, 0x80)?;
+        // The C oracle memcpy's these arbitrary tilemap spans through a raw
+        // VRAM pointer. Some transitions leave an address beyond its final
+        // 0x8000-word Ppu field; those bytes do not enter observable VRAM.
+        let data = ram.slice(src, 0x80);
+        for (offset, &value) in data.iter().enumerate() {
+            let address = dst * 2 + offset;
+            if let Some(word) = ppu.vram.get_mut(address >> 1) {
+                if address & 1 == 0 {
+                    *word = (*word & 0xff00) | u16::from(value);
+                } else {
+                    *word = (*word & 0xff) | (u16::from(value) << 8);
+                }
+            }
+        }
         src += 0x80;
         i += 2;
         if i == end {
