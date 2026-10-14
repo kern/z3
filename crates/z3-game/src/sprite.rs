@@ -967,7 +967,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_func22(&mut self, slot: usize) {
-        let sound = self.hooks.link_calculate_sfx_pan(&self.ram) | 0x28;
+        let sound = crate::misc::calculate_sfx_pan(&self.ram, self.sprite_get_x(slot)) | 0x28;
         self.w8(0x12e, sound);
         self.set_arr(SPRITE_STATE, slot, 3);
         self.set_arr(SPRITE_DELAY_MAIN, slot, 15);
@@ -4345,7 +4345,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     0x32
                 } else {
                     0
-                } | self.hooks.link_calculate_sfx_pan(&self.ram);
+                } | crate::misc::calculate_sfx_pan(&self.ram, self.sprite_get_x(slot));
                 self.w8(0x12f, sfx);
                 self.link_place_weapon_tink();
                 return 1;
@@ -4588,7 +4588,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 0x1c
             } else {
                 8
-            } | self.hooks.link_calculate_sfx_pan(&self.ram);
+            } | crate::misc::calculate_sfx_pan(&self.ram, self.sprite_get_x(slot));
             self.w8(0x12f, sfx);
         }
         self.finish_sprite_damage(slot);
@@ -6119,5 +6119,27 @@ mod tests {
         sprites.prepare_enemy_drop(0, 0x0d);
         assert_eq!(sprites.sprite_get_x(0), 0x1008);
         assert_eq!(sprites.arr(SPRITE_Z_VEL, 0), 0);
+    }
+
+    #[test]
+    fn enemy_hit_sound_pan_follows_enemy_instead_of_link() {
+        let mut bytes = [0u8; WRAM_SIZE];
+        let mut hooks = Hooks;
+        let mut sprites = Sprite::new(&mut bytes, &mut hooks);
+        sprites.w16(0xe2, 0x300);
+        sprites.w16(0x22, 0x380);
+        sprites.set_arr(SPRITE_FLAGS5, 3, 0x10);
+        sprites.sprite_set_x(3, 0x330);
+        sprites.sprite_give_damage(3, 1, 0x20);
+        assert_eq!(sprites.r8(0x12f), 0x9c);
+        sprites.sprite_func22(3);
+        assert_eq!(sprites.r8(0x12e), 0xa8);
+
+        sprites.w16(0x22, 0x330);
+        sprites.sprite_set_x(3, 0x380);
+        sprites.sprite_give_damage(3, 1, 0x20);
+        assert_eq!(sprites.r8(0x12f), 0x1c);
+        sprites.sprite_func22(3);
+        assert_eq!(sprites.r8(0x12e), 0x28);
     }
 }

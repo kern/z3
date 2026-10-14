@@ -2011,7 +2011,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0xaaa, 9);
         self.write(0x15812, 0x40);
         self.write(
-            0x12e,
+            0x12f,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22)) | 0x26,
         );
         for i in 0..8 {
@@ -4672,7 +4672,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             let cycle = self.read(0x394 + k);
             self.write(0x394 + k, cycle.wrapping_add(1));
             if cycle & 0x0f == 0 {
-                self.write(0x12e, misc::calculate_sfx_pan(self.ram, self.get_x(k)) | 1);
+                self.write(0x12f, misc::calculate_sfx_pan(self.ram, self.get_x(k)) | 1);
             }
             if self.check_sprite_collision(k).is_some() || self.check_tile_collision(k) != 0 {
                 const Y_OFFSET: [i8; 4] = [0, 0, -6, -6];
@@ -4789,7 +4789,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     .read_u16(0x15810)
                     .wrapping_add(i16::from(Y[direction]) as u16),
             );
-            self.write(0x12e, 1 | misc::calculate_sfx_pan(self.ram, self.get_x(k)));
+            self.write(0x12f, 1 | misc::calculate_sfx_pan(self.ram, self.get_x(k)));
             self.write(Self::type_address(k), 4);
             self.write(0xc68 + k, 7);
             self.write(0xc90 + k, 16);
@@ -9925,6 +9925,31 @@ mod tests {
         fixture(|ctx| {
             ctx.write(Ancilla::<Runtime>::type_address(9), 0x27);
             assert!(ctx.add_bird_travel(0x27, 4).is_some());
+        });
+    }
+
+    #[test]
+    fn sword_beam_sound_preserves_the_simultaneous_sword_swing_channel() {
+        fixture(|ctx| {
+            ctx.write(Ancilla::<Runtime>::type_address(0), 0x0c);
+            ctx.write(0x12e, 0x82);
+            ctx.ram.write_u16(0x1580e, 0x80);
+            ctx.ram.write_u16(0x15810, 0x80);
+
+            ctx.sword_beam(0);
+
+            assert_eq!(ctx.read(0x12e), 0x82);
+            assert_eq!(ctx.read(0x12f) & 0x3f, 1);
+        });
+    }
+
+    #[test]
+    fn ether_sound_preserves_the_other_sound_effect_channel() {
+        fixture(|ctx| {
+            ctx.write(0x12e, 0x82);
+            assert!(ctx.add_ether_spell(0x18, 4).is_some());
+            assert_eq!(ctx.read(0x12e), 0x82);
+            assert_eq!(ctx.read(0x12f) & 0x3f, 0x26);
         });
     }
 }

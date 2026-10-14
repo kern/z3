@@ -70,10 +70,10 @@ impl COracle {
     }
 
     pub fn step(&mut self, input: u16, run_what: u8) -> io::Result<CanonicalState> {
-        if matches!(run_what, 0xf8..=0xff) {
+        if matches!(run_what, 0xf4..=0xff) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "0xf8..=0xff are reserved for oracle control commands",
+                "0xf4..=0xff are reserved for oracle control commands",
             ));
         }
         let [low, high] = input.to_le_bytes();

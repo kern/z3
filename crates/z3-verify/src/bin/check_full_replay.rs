@@ -1,4 +1,4 @@
-//! Compare every recorded gameplay state and rendered pixel with the C port.
+//! Compare every recorded gameplay state, rendered pixel, and PCM sample with the C port.
 
 use std::{env, error::Error, fs, path::Path};
 
@@ -149,7 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .position(|(left, right)| left != right)
                 {
                     return Err(format!(
-                        "chapter {chapter} frame {frame}: APU queue byte {index} differs: C={:02x} Rust={:02x}; prior module={:02x} sub={:02x} room={:04x} player={:04x},{:04x} state={:02x} sword={:02x}; prior sound WRAM={:02x?}, current sound WRAM={:02x?}",
+                        "chapter {chapter} frame {frame}: APU queue byte {index} differs: C={:02x} Rust={:02x}; prior module={:02x} sub={:02x} room={:04x} player={:04x},{:04x} state={:02x} sword={:02x} BG2HOFS={:04x} ancilla={:02x?}; prior sound WRAM={:02x?}, current sound WRAM={:02x?}",
                         c_queue[index],
                         rust_queue[index],
                         prior_wram[0x10],
@@ -158,7 +158,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         u16::from_le_bytes([prior_wram[0x22], prior_wram[0x23]]),
                         u16::from_le_bytes([prior_wram[0x20], prior_wram[0x21]]),
                         prior_wram[0x5d],
-                        prior_wram[0x359],
+                        prior_wram[0xf359],
+                        u16::from_le_bytes([prior_wram[0xe2], prior_wram[0xe3]]),
+                        &prior_wram[0xc4a..0xc4f],
                         &prior_wram[0x12c..=0x133],
                         &native.wram[0x12c..=0x133],
                     )

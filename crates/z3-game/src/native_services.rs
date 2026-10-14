@@ -1299,7 +1299,7 @@ impl DungeonHooks for NativeGameServices<'_> {
         });
     }
     fn dungeon_calculate_sfx_pan(&self, ram: &Ram<'_>, x: u16) -> u8 {
-        crate::misc::calculate_sfx_pan(ram, x)
+        crate::misc::calculate_sfx_pan_arbitrary(ram, x as u8)
     }
 
     fn dungeon_object_data(&self, word_offset: usize) -> &[u16] {

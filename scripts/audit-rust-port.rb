@@ -76,6 +76,8 @@ EQUIVALENT_NAMES = {
   "MsuPlayer_Open" => "open",
   "ZeldaPopApuState" => "pop_into",
   "ZeldaResetApuQueue" => "reset",
+  # Oracle-only byte snapshot of the translated APU queue.
+  "ZeldaExportApuQueueForTest" => "oracle_snapshot",
   # Oracle-only wrapper around the already translated snapshot loader.
   "ZeldaLoadSnapshotForTest" => "load_snes_state",
   # Oracle-only reference replay loader, paired with the Rust oracle client.
