@@ -147,11 +147,8 @@ fn asset_range(
     index: usize,
 ) -> Result<std::ops::Range<usize>, Box<dyn std::error::Error>> {
     let file = z3_core::assets::AssetFile::parse(bytes)?;
-    let asset = file
-        .get(index)
-        .ok_or("runtime asset index is out of range")?;
-    let start = asset.as_ptr() as usize - bytes.as_ptr() as usize;
-    Ok(start..start + asset.len())
+    file.source_range(index)
+        .ok_or_else(|| "runtime asset index is out of range".into())
 }
 
 fn patch_dim_flashes_palette(palette: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
@@ -561,6 +558,26 @@ pub fn main_entry() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_asset_ranges_identify_every_payload_without_pointer_subtraction() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../zelda3_assets.dat"
+        ))
+        .unwrap();
+        let file = z3_core::assets::AssetFile::parse(&bytes).unwrap();
+        for index in 0..z3_core::assets::ASSET_COUNT {
+            let range = asset_range(&bytes, index).unwrap();
+            assert_eq!(&bytes[range], file.get(index).unwrap());
+        }
+        assert_eq!(
+            asset_range(&bytes, z3_core::assets::ASSET_COUNT)
+                .unwrap_err()
+                .to_string(),
+            "runtime asset index is out of range"
+        );
+    }
 
     fn ui_state() -> UiState {
         UiState {

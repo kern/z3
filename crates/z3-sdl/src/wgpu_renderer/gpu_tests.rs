@@ -4,6 +4,7 @@
 use wgpu::util::DeviceExt;
 
 use super::{
+    history::FrameHistory,
     plan::{MAX_SHADER_PARAMETERS, ShaderUniforms},
     resources::{MipmapGenerator, ensure_history_texture, ensure_pass_target, texture_pair_layout},
     source::BLIT_SHADER,
@@ -24,6 +25,13 @@ fn generated_rgba(frame: u8) -> Vec<u8> {
                 ]
             })
         })
+        .collect()
+}
+
+fn bgra(pixels: &[u8]) -> Vec<u8> {
+    pixels
+        .chunks_exact(4)
+        .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
         .collect()
 }
 
@@ -241,33 +249,25 @@ struct Parameters { values: array<vec4<f32>, 64>, }
     let current_rgba = generated_rgba(1);
     let previous_rgba = generated_rgba(0);
     let mut original = None;
-    let mut history = None;
-    for (target, pixels) in [
-        (&mut original, &current_rgba),
-        (&mut history, &previous_rgba),
-    ] {
-        ensure_history_texture(&device, target, WIDTH, HEIGHT);
-        let bgra = pixels
-            .chunks_exact(4)
-            .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
-            .collect::<Vec<_>>();
-        queue.write_texture(
-            target.as_ref().unwrap().texture.as_image_copy(),
-            &bgra,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(WIDTH * 4),
-                rows_per_image: Some(HEIGHT),
-            },
-            wgpu::Extent3d {
-                width: WIDTH,
-                height: HEIGHT,
-                depth_or_array_layers: 1,
-            },
-        );
-    }
+    ensure_history_texture(&device, &mut original, WIDTH, HEIGHT);
+    queue.write_texture(
+        original.as_ref().unwrap().texture.as_image_copy(),
+        &bgra(&current_rgba),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(WIDTH * 4),
+            rows_per_image: Some(HEIGHT),
+        },
+        wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
+    );
     let original = original.unwrap();
-    let history = history.unwrap();
+    let mut history = FrameHistory::new(1);
+    history.record_presented(&device, &queue, (WIDTH, HEIGHT), &bgra(&previous_rgba));
+    assert_eq!(history.frame_count(), 1);
     let input_group = |input: &wgpu::TextureView| {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("synthetic input bindings"),
@@ -317,7 +317,7 @@ struct Parameters { values: array<vec4<f32>, 64>, }
         })
     };
     let original_group = input_group(&original.view);
-    let history_group = pair_group(&history_layout, &history.view);
+    let history_group = history.bind_group(&device, &history_layout, &sampler, &original.view);
     let fallback_pass_group = pair_group(&pass_layout, &original.view);
     let mut intermediate = None;
     ensure_pass_target(
@@ -376,4 +376,54 @@ struct Parameters { values: array<vec4<f32>, 64>, }
         })
         .collect::<Vec<_>>();
     assert_eq!(read_rgba(&device, &history_readback), expected_history);
+
+    // Reuse the ring slot, then resize it. Both operations use the same
+    // production owner as presentation, including its clock and format.
+    history.record_presented(&device, &queue, (WIDTH, HEIGHT), &bgra(&current_rgba));
+    assert_eq!(history.frame_count(), 2);
+    let history_group = history.bind_group(&device, &history_layout, &sampler, &original.view);
+    let mut encoder = device.create_command_encoder(&Default::default());
+    draw(
+        &mut encoder,
+        &output_view,
+        &history_pass,
+        [&intermediate_group, &history_group, &previous_pass_group],
+    );
+    let reused_readback = copy_readback(&device, &mut encoder, &output);
+    queue.submit([encoder.finish()]);
+    assert_eq!(read_rgba(&device, &reused_readback), current_rgba);
+
+    let resized = previous_rgba
+        .chunks_exact(WIDTH as usize * 4)
+        .take(HEIGHT as usize / 2)
+        .flat_map(|row| row[..WIDTH as usize * 2].iter().copied())
+        .collect::<Vec<_>>();
+    history.record_presented(&device, &queue, (WIDTH / 2, HEIGHT / 2), &bgra(&resized));
+    assert_eq!(history.frame_count(), 3);
+    let history_group = history.bind_group(&device, &history_layout, &sampler, &original.view);
+    let mut encoder = device.create_command_encoder(&Default::default());
+    draw(
+        &mut encoder,
+        &output_view,
+        &history_pass,
+        [&intermediate_group, &history_group, &previous_pass_group],
+    );
+    let resized_readback = copy_readback(&device, &mut encoder, &output);
+    queue.submit([encoder.finish()]);
+    let expected = current_rgba
+        .chunks_exact(4)
+        .enumerate()
+        .flat_map(|(index, current)| {
+            let (x, y) = (index as u32 % WIDTH, index as u32 / WIDTH);
+            let offset = ((y / 2) * (WIDTH / 2) + x / 2) as usize * 4;
+            if x < WIDTH / 2 {
+                &resized[offset..offset + 4]
+            } else {
+                current
+            }
+            .iter()
+            .copied()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(read_rgba(&device, &resized_readback), expected);
 }

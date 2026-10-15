@@ -68,6 +68,11 @@ clang $common_flags oracle/tile_map_oracle.c \
   -Wl,-rpath,@loader_path \
   -o build/c-oracle/tile_map_oracle
 
+clang $common_flags oracle/oam_allocator_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/oam_allocator_oracle
+
 clang $common_flags oracle/tile_detect_oracle.c src/tile_detect.o \
   -o build/c-oracle/tile_detect_oracle
 

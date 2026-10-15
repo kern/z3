@@ -29,6 +29,7 @@ pub mod position;
 pub mod ram;
 pub mod runtime;
 pub mod select_file;
+pub mod snapshot;
 pub mod sound;
 pub mod spc_player;
 pub mod sprite;

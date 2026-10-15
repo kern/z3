@@ -183,10 +183,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         .dispatch_prep(slot, kind);
     }
     fn current_oam_index(&self) -> usize {
-        let address = usize::from(self.r16(0x90));
-        assert!((oam::OAM_BUFFER..oam::EXTENDED_OAM).contains(&address));
-        assert_eq!((address - oam::OAM_BUFFER) & 3, 0);
-        (address - oam::OAM_BUFFER) / 4
+        oam::OamPointers::current_cursor(&self.ram).index()
     }
     fn set_oam_plain(&mut self, index: usize, x: u16, y: u16, charnum: u8, flags: u8, big: u8) {
         oam::set_plain(&mut self.ram, index, x as u8, y as u8, charnum, flags, big);
@@ -773,43 +770,33 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.ram.set_sprite_oam_flags(slot, flags & 15);
     }
     pub fn oam_get_buffer_position(&mut self, number: u8, region: u8) -> u8 {
-        let index = usize::from(region >> 1);
-        let mut position = self.r16(0xfe0 + index * 2);
-        let mut start = position;
-        position = position.wrapping_add(u16::from(number));
-        if position >= OAM_GET_BUFFER_POS_TAB0[index] {
-            let allocation = self.r16(0xfec + index * 2);
-            self.w16(0xfec + index * 2, allocation.wrapping_add(1));
-            start = OAM_GET_BUFFER_POS_TAB1[index * 8 + usize::from(allocation & 7)];
-        } else {
-            self.w16(0xfe0 + index * 2, position);
-        }
-        self.w16(0x92, 0xa20 + (start >> 2));
-        self.w16(0x90, 0x800 + start);
-        self.r8(0x90)
+        self.allocate_oam_bytes(number, oam::OamRegion::from_legacy_selector(region))
+    }
+    fn allocate_oam_bytes(&mut self, number: u8, region: oam::OamRegion) -> u8 {
+        oam::OamAllocator::new(&mut self.ram)
+            .allocate_bytes(region, number)
+            .legacy_low_byte()
     }
     pub fn oam_allocate_from_region_a(&mut self, n: u8) -> u8 {
-        self.oam_get_buffer_position(n, 0)
+        self.allocate_oam_bytes(n, oam::OamRegion::A)
     }
     pub fn oam_allocate_from_region_b(&mut self, n: u8) -> u8 {
-        self.oam_get_buffer_position(n, 2)
+        self.allocate_oam_bytes(n, oam::OamRegion::B)
     }
     pub fn oam_allocate_from_region_c(&mut self, n: u8) -> u8 {
-        self.oam_get_buffer_position(n, 4)
+        self.allocate_oam_bytes(n, oam::OamRegion::C)
     }
     pub fn oam_allocate_from_region_d(&mut self, n: u8) -> u8 {
-        self.oam_get_buffer_position(n, 6)
+        self.allocate_oam_bytes(n, oam::OamRegion::D)
     }
     pub fn oam_allocate_from_region_e(&mut self, n: u8) -> u8 {
-        self.oam_get_buffer_position(n, 8)
+        self.allocate_oam_bytes(n, oam::OamRegion::E)
     }
     pub fn oam_allocate_from_region_f(&mut self, n: u8) -> u8 {
-        self.oam_get_buffer_position(n, 10)
+        self.allocate_oam_bytes(n, oam::OamRegion::F)
     }
     pub fn oam_reset_region_bases(&mut self) {
-        for (i, value) in OAM_RESET_REGION_BASES.into_iter().enumerate() {
-            self.w16(0xfe0 + i * 2, value);
-        }
+        oam::OamAllocator::new(&mut self.ram).reset_region_bases();
     }
     pub fn sprite_convert_velocity_to_angle(mut x: u8, mut y: u8) -> u8 {
         const A: [u8; 32] = [
@@ -2408,8 +2395,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if self.ram.sprite(slot).kind() != 0x40 && self.ram.sprite(slot).main_delay() < 10 {
             return;
         }
-        self.w16(0x90, self.r16(0x90).wrapping_add(16));
-        self.w16(0x92, self.r16(0x92).wrapping_add(4));
+        oam::OamPointers::advance_entries(&mut self.ram, 4);
         let flags = self.ram.sprite(slot).flags2();
         self.ram.set_sprite_flags2(slot, flags.wrapping_sub(4));
         self.run_sprite_active_main(slot);
@@ -2439,8 +2425,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.hooks.flame_draw(&mut self.ram, slot);
         self.ram.set_sprite_oam_flags(slot, oam_flags);
         self.ram.set_sprite_graphics(slot, graphics);
-        self.w16(0x90, self.r16(0x90).wrapping_add(8));
-        self.w16(0x92, self.r16(0x92).wrapping_add(2));
+        oam::OamPointers::advance_entries(&mut self.ram, 2);
         if self.ram.sprite(slot).main_delay() >= 0x10 {
             let flags = self.ram.sprite(slot).flags2();
             self.ram.set_sprite_flags2(slot, flags.wrapping_sub(2));
@@ -5172,13 +5157,9 @@ pub const ABSORPTION_SFX: [u8; 15] = [
     0xb, 0xa, 0xa, 0xa, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0x2f, 0x2f, 0xb,
 ];
 
-pub const OAM_GET_BUFFER_POS_TAB0: [u16; 6] = [0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1];
-pub const OAM_GET_BUFFER_POS_TAB1: [u16; 48] = [
-    0x30, 0x50, 0x80, 0xb0, 0xe0, 0x110, 0x140, 0x170, 0x1d0, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec,
-    0x1f0, 0x1f8, 0, 4, 8, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x30, 0x38, 0x50, 0x68, 0x80, 0x98, 0xb0,
-    0xc8, 0x120, 0x124, 0x128, 0x12c, 0x130, 0x134, 0x138, 0x13c, 0x140, 0x150, 0x160, 0x170,
-    0x180, 0x190, 0x1a0, 0x1b8,
-];
+pub use crate::oam::{
+    REGION_FALLBACKS as OAM_GET_BUFFER_POS_TAB1, REGION_LIMITS as OAM_GET_BUFFER_POS_TAB0,
+};
 pub const SPRITE2_RETURN_IF_RECOILING_MASKS: [u8; 6] = [3, 1, 0, 0, 0xc, 3];
 pub const SPRITE_HITBOX_X_LO: [i8; 32] = [
     2, 3, 0, -3, -6, 0, 2, -8, 0, -4, -8, 0, -8, -16, 2, 2, 2, 2, 2, -8, 2, 2, -16, -8, -12, 4, -4,
@@ -5457,7 +5438,7 @@ pub const OVERWORLD_AREA_SPRCOLL_SIZES: [u8; 192] = [
     4, 4, 2, 4, 4, 4, 4, 2, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 2, 4, 4, 2, 4, 4,
     4, 4, 2, 4, 4, 2, 4, 4, 2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 2, 2, 2, 4, 4, 2, 4, 4, 2, 2, 2, 4, 4, 2,
 ];
-pub const OAM_RESET_REGION_BASES: [u16; 6] = [0x30, 0x1d0, 0, 0x30, 0x120, 0x140];
+pub use crate::oam::REGION_INITIAL_BASES as OAM_RESET_REGION_BASES;
 pub const GARNISH_OAM_MEM_SIZE: [u8; 23] = [
     0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 8, 16,
 ];

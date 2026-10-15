@@ -29,7 +29,6 @@ const Y_POSITION: SplitPosition<16> = SplitPosition::world(Y_SUBPIXEL, Y_LO, Y_H
 const HEIGHT: SplitPosition<8> = SplitPosition::height(Z_SUBPIXEL, Z);
 #[cfg(test)]
 const TYPE: usize = 0xc4a;
-const OAM_CUR_PTR: usize = 0x90;
 const FEATURES0: usize = 0x64c;
 const FEATURE_EXTEND_SCREEN_64: u32 = 1;
 
@@ -395,10 +394,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     #[must_use]
     pub(crate) fn current_oam_index(&self) -> usize {
-        let address = usize::from(self.ram.read_u16(OAM_CUR_PTR));
-        assert!((oam::OAM_BUFFER..oam::EXTENDED_OAM).contains(&address));
-        assert_eq!((address - oam::OAM_BUFFER) & 3, 0);
-        (address - oam::OAM_BUFFER) / 4
+        oam::OamPointers::current_cursor(self.ram).index()
     }
 
     pub fn empty(&mut self, _k: usize) {}

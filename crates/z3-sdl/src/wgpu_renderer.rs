@@ -1,14 +1,20 @@
+mod history;
 mod plan;
 mod preset;
 mod resources;
 mod source;
+mod surface;
+
+use history::FrameHistory;
+#[cfg(target_os = "macos")]
+use surface::MetalView;
+use surface::{SurfaceOwner, create_surface};
 
 use plan::{MAX_SHADER_PARAMETERS, PassScale, ShaderUniforms, referenced_slots, scaled_size};
 use preset::load_shader_plan;
 use resources::{
-    AuxTexture, MipmapGenerator, PassTarget, SourceTexture, downsample_rgba,
-    ensure_history_texture, ensure_pass_target, load_aux_texture, mip_level_count,
-    texture_pair_layout,
+    AuxTexture, MipmapGenerator, PassTarget, SourceTexture, downsample_rgba, ensure_pass_target,
+    load_aux_texture, mip_level_count, texture_pair_layout,
 };
 use source::DIM_SHADER;
 
@@ -20,10 +26,10 @@ use wgpu::util::DeviceExt;
 /// Cross-platform GPU presentation backend. SDL continues to own the native
 /// window while wgpu selects Metal, Vulkan, Direct3D, or GLES as appropriate.
 pub struct WgpuRenderer<'window> {
-    surface: wgpu::Surface<'window>,
+    // Declared first so its surface drops before the retained Metal view.
+    surface: SurfaceOwner<'window>,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
     passes: Vec<ShaderPass>,
     dim_pipeline: wgpu::RenderPipeline,
     mipmap_generator: MipmapGenerator,
@@ -33,14 +39,13 @@ pub struct WgpuRenderer<'window> {
     source: Option<SourceTexture>,
     pass_targets: Vec<Option<PassTarget>>,
     aux_textures: Vec<AuxTexture>,
-    history: Vec<Option<SourceTexture>>,
-    history_slots: usize,
+    history: FrameHistory,
     pass_slots: usize,
     pixels: Vec<u8>,
     draw_width: u32,
     draw_height: u32,
-    frame_count: u64,
     keep_aspect: bool,
+    // Keep the SDL layer alive until after the surface and GPU resources drop.
     #[cfg(target_os = "macos")]
     _metal_view: MetalView,
     _window: PhantomData<&'window Window>,
@@ -67,7 +72,15 @@ impl<'window> WgpuRenderer<'window> {
     ) -> Result<Self, Error> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         #[cfg(target_os = "macos")]
-        let (surface, metal_view) = create_surface(&instance, window)?;
+        let metal_view;
+        #[cfg(target_os = "macos")]
+        let surface = {
+            let (surface, view) = create_surface(&instance, window)?;
+            // Locals drop in reverse declaration order on constructor errors too:
+            // the surface must release its layer before SDL destroys the view.
+            metal_view = view;
+            surface
+        };
         #[cfg(not(target_os = "macos"))]
         let surface = create_surface(&instance, window)?;
 
@@ -85,11 +98,7 @@ impl<'window> WgpuRenderer<'window> {
         };
         let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor))
             .map_err(|error| Error::message(format!("wgpu device unavailable: {error}")))?;
-        let (width, height) = drawable_size(window);
-        let config = surface
-            .get_default_config(&adapter, width.max(1), height.max(1))
-            .ok_or_else(|| Error::message("wgpu surface is unsupported by the selected adapter"))?;
-        surface.configure(&device, &config);
+        let surface = SurfaceOwner::configure(surface, &adapter, &device, window)?;
 
         let pass_plans = load_shader_plan(shader_path)?;
         let pass_count = pass_plans.len();
@@ -266,7 +275,7 @@ impl<'window> WgpuRenderer<'window> {
                 // linear normalized RGBA target; only the final pass adopts
                 // the presentation surface's format/color space.
                 let target_format = if index + 1 == pass_count {
-                    config.format
+                    surface.format()
                 } else if plan.srgb_framebuffer {
                     wgpu::TextureFormat::Rgba8UnormSrgb
                 } else if plan.float_framebuffer {
@@ -378,7 +387,7 @@ impl<'window> WgpuRenderer<'window> {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format: surface.format(),
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -392,7 +401,6 @@ impl<'window> WgpuRenderer<'window> {
             surface,
             device,
             queue,
-            config,
             passes,
             dim_pipeline,
             mipmap_generator,
@@ -402,13 +410,11 @@ impl<'window> WgpuRenderer<'window> {
             source: None,
             pass_targets: (0..pass_count.saturating_sub(1)).map(|_| None).collect(),
             aux_textures,
-            history: (0..history_slots).map(|_| None).collect(),
-            history_slots,
+            history: FrameHistory::new(history_slots),
             pass_slots,
             pixels: Vec::new(),
             draw_width: 0,
             draw_height: 0,
-            frame_count: 0,
             keep_aspect,
             #[cfg(target_os = "macos")]
             _metal_view: metal_view,
@@ -445,7 +451,7 @@ impl<'window> WgpuRenderer<'window> {
     }
 
     fn present_inner(&mut self, window: &Window, dimmed: bool) -> Result<(), Error> {
-        self.reconfigure_surface(window);
+        self.surface.reconfigure(&self.device, window);
         self.ensure_source_texture();
         {
             let source = self.source.as_ref().expect("source texture was created");
@@ -495,23 +501,8 @@ impl<'window> WgpuRenderer<'window> {
             }
         }
 
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.config);
-                match self.surface.get_current_texture() {
-                    wgpu::CurrentSurfaceTexture::Success(frame)
-                    | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-                    wgpu::CurrentSurfaceTexture::Timeout
-                    | wgpu::CurrentSurfaceTexture::Occluded => return Ok(()),
-                    status => return Err(surface_error(&status)),
-                }
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            status => return Err(surface_error(&status)),
+        let Some(frame) = self.surface.acquire(&self.device)? else {
+            return Ok(());
         };
         let target = frame
             .texture
@@ -573,9 +564,10 @@ impl<'window> WgpuRenderer<'window> {
                 output_size: [output_size.0 as f32, output_size.1 as f32],
                 original_size: [self.draw_width as f32, self.draw_height as f32],
                 frame_count: if self.passes[index].frame_count_mod == 0 {
-                    self.frame_count as u32
+                    self.history.frame_count() as u32
                 } else {
-                    (self.frame_count % u64::from(self.passes[index].frame_count_mod)) as u32
+                    (self.history.frame_count() % u64::from(self.passes[index].frame_count_mod))
+                        as u32
                 },
                 frame_direction: 1,
                 pass_index: index as u32,
@@ -628,28 +620,12 @@ impl<'window> WgpuRenderer<'window> {
                 layout: &self.bind_group_layout,
                 entries: &bind_entries,
             });
-            let mut history_entries = Vec::with_capacity(self.history_slots * 2);
-            for history_index in 0..self.history_slots {
-                let view = self
-                    .frame_count
-                    .checked_sub(1 + history_index as u64)
-                    .and_then(|frame| self.history[frame as usize % self.history_slots].as_ref())
-                    .map(|texture| &texture.view)
-                    .unwrap_or(&original.view);
-                history_entries.push(wgpu::BindGroupEntry {
-                    binding: history_index as u32 * 2,
-                    resource: wgpu::BindingResource::TextureView(view),
-                });
-                history_entries.push(wgpu::BindGroupEntry {
-                    binding: history_index as u32 * 2 + 1,
-                    resource: wgpu::BindingResource::Sampler(&self.passes[index].sampler),
-                });
-            }
-            let history_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("z3 wgpu previous-frame bind group"),
-                layout: &self.history_bind_group_layout,
-                entries: &history_entries,
-            });
+            let history_bind_group = self.history.bind_group(
+                &self.device,
+                &self.history_bind_group_layout,
+                &self.passes[index].sampler,
+                &original.view,
+            );
             let mut pass_entries = Vec::with_capacity(self.pass_slots * 2);
             for pass_index in 0..self.pass_slots {
                 let view = self
@@ -735,41 +711,13 @@ impl<'window> WgpuRenderer<'window> {
         }
         self.queue.submit([encoder.finish()]);
         frame.present();
-        if self.history_slots != 0 {
-            let slot = self.frame_count as usize % self.history_slots;
-            ensure_history_texture(
-                &self.device,
-                &mut self.history[slot],
-                self.draw_width,
-                self.draw_height,
-            );
-            let history = self.history[slot].as_ref().expect("history was created");
-            self.queue.write_texture(
-                history.texture.as_image_copy(),
-                &self.pixels,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.draw_width * 4),
-                    rows_per_image: Some(self.draw_height),
-                },
-                wgpu::Extent3d {
-                    width: self.draw_width,
-                    height: self.draw_height,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-        self.frame_count = self.frame_count.wrapping_add(1);
+        self.history.record_presented(
+            &self.device,
+            &self.queue,
+            (self.draw_width, self.draw_height),
+            &self.pixels,
+        );
         Ok(())
-    }
-
-    fn reconfigure_surface(&mut self, window: &Window) {
-        let (width, height) = drawable_size(window);
-        if width != self.config.width || height != self.config.height {
-            self.config.width = width.max(1);
-            self.config.height = height.max(1);
-            self.surface.configure(&self.device, &self.config);
-        }
     }
 
     fn ensure_source_texture(&mut self) {
@@ -811,240 +759,9 @@ impl<'window> WgpuRenderer<'window> {
     }
 
     fn viewport(&self) -> (f32, f32, f32, f32) {
-        let surface_width = self.config.width as f32;
-        let surface_height = self.config.height as f32;
-        if !self.keep_aspect {
-            return (0.0, 0.0, surface_width, surface_height);
-        }
-        let source_ratio = self.draw_width as f32 / self.draw_height as f32;
-        let surface_ratio = surface_width / surface_height;
-        let (width, height) = if surface_ratio > source_ratio {
-            (surface_height * source_ratio, surface_height)
-        } else {
-            (surface_width, surface_width / source_ratio)
-        };
-        (
-            (surface_width - width) * 0.5,
-            (surface_height - height) * 0.5,
-            width,
-            height,
-        )
+        self.surface
+            .viewport((self.draw_width, self.draw_height), self.keep_aspect)
     }
-}
-
-fn surface_error(status: &wgpu::CurrentSurfaceTexture) -> Error {
-    Error::message(format!("wgpu surface error: {status:?}"))
-}
-
-fn drawable_size(window: &Window) -> (u32, u32) {
-    #[cfg(target_os = "macos")]
-    let size = window.metal_drawable_size();
-    #[cfg(not(target_os = "macos"))]
-    let size = window.size();
-    (size.0.max(1) as u32, size.1.max(1) as u32)
-}
-
-#[cfg(target_os = "macos")]
-struct MetalView(*mut std::ffi::c_void);
-
-#[cfg(target_os = "macos")]
-impl Drop for MetalView {
-    fn drop(&mut self) {
-        // SAFETY: this wrapper uniquely owns the SDL metal view.
-        unsafe { super::SDL_Metal_DestroyView(self.0) };
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn create_surface<'window>(
-    instance: &wgpu::Instance,
-    window: &'window Window,
-) -> Result<(wgpu::Surface<'window>, MetalView), Error> {
-    // SAFETY: the SDL window is live and remains borrowed for the surface's
-    // lifetime. The owned MetalView below retains the CAMetalLayer.
-    let view = unsafe { super::SDL_Metal_CreateView(window.0.as_ptr()) };
-    if view.is_null() {
-        return Err(Error::last());
-    }
-    let metal_view = MetalView(view);
-    // SAFETY: SDL documents this as the live CAMetalLayer backing metal_view.
-    let layer = unsafe { super::SDL_Metal_GetLayer(view) };
-    if layer.is_null() {
-        return Err(Error::message("SDL returned a null CAMetalLayer"));
-    }
-    // SAFETY: layer remains valid because metal_view is owned by the renderer,
-    // and window is borrowed for the returned surface lifetime.
-    let surface = unsafe {
-        instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer))
-    }
-    .map_err(|error| Error::message(format!("failed to create wgpu surface: {error}")))?;
-    Ok((surface, metal_view))
-}
-
-#[cfg(target_os = "windows")]
-fn create_surface<'window>(
-    instance: &wgpu::Instance,
-    window: &'window Window,
-) -> Result<wgpu::Surface<'window>, Error> {
-    use std::num::NonZeroIsize;
-
-    let info = syswm_info(window)?;
-    if info.subsystem != SYSWM_WINDOWS {
-        return Err(Error::message("SDL window is not using the Win32 backend"));
-    }
-    // SAFETY: the active union member is selected by subsystem above.
-    let win = unsafe { info.info.windows };
-    let hwnd = NonZeroIsize::new(win.window as isize)
-        .ok_or_else(|| Error::message("SDL returned a null HWND"))?;
-    let mut handle = wgpu::rwh::Win32WindowHandle::new(hwnd);
-    handle.hinstance = NonZeroIsize::new(win.hinstance as isize);
-    let target = wgpu::SurfaceTargetUnsafe::RawHandle {
-        raw_display_handle: Some(wgpu::rwh::WindowsDisplayHandle::new().into()),
-        raw_window_handle: handle.into(),
-    };
-    // SAFETY: SDL owns the HWND for the lifetime represented by window.
-    unsafe { instance.create_surface_unsafe(target) }
-        .map_err(|error| Error::message(format!("failed to create wgpu surface: {error}")))
-}
-
-#[cfg(target_os = "linux")]
-fn create_surface<'window>(
-    instance: &wgpu::Instance,
-    window: &'window Window,
-) -> Result<wgpu::Surface<'window>, Error> {
-    use std::ptr::NonNull;
-
-    let info = syswm_info(window)?;
-    let target = match info.subsystem {
-        SYSWM_X11 => {
-            // SAFETY: the active union member is selected by subsystem.
-            let x11 = unsafe { info.info.x11 };
-            let display = NonNull::new(x11.display)
-                .ok_or_else(|| Error::message("SDL returned a null X11 display"))?;
-            wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(
-                    wgpu::rwh::XlibDisplayHandle::new(Some(display), 0).into(),
-                ),
-                raw_window_handle: wgpu::rwh::XlibWindowHandle::new(x11.window).into(),
-            }
-        }
-        SYSWM_WAYLAND => {
-            // SAFETY: the active union member is selected by subsystem.
-            let wayland = unsafe { info.info.wayland };
-            let display = NonNull::new(wayland.display)
-                .ok_or_else(|| Error::message("SDL returned a null Wayland display"))?;
-            let surface = NonNull::new(wayland.surface)
-                .ok_or_else(|| Error::message("SDL returned a null Wayland surface"))?;
-            wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(wgpu::rwh::WaylandDisplayHandle::new(display).into()),
-                raw_window_handle: wgpu::rwh::WaylandWindowHandle::new(surface).into(),
-            }
-        }
-        subsystem => {
-            return Err(Error::message(format!(
-                "unsupported SDL window subsystem {subsystem} for wgpu"
-            )));
-        }
-    };
-    // SAFETY: SDL owns the native display/window handles for window's lifetime.
-    unsafe { instance.create_surface_unsafe(target) }
-        .map_err(|error| Error::message(format!("failed to create wgpu surface: {error}")))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-fn create_surface<'window>(
-    _instance: &wgpu::Instance,
-    _window: &'window Window,
-) -> Result<wgpu::Surface<'window>, Error> {
-    Err(Error::message("SDL/wgpu is unsupported on this platform"))
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct SdlVersion {
-    major: u8,
-    minor: u8,
-    patch: u8,
-}
-
-#[cfg(target_os = "windows")]
-const SYSWM_WINDOWS: i32 = 1;
-#[cfg(target_os = "linux")]
-const SYSWM_X11: i32 = 2;
-#[cfg(target_os = "linux")]
-const SYSWM_WAYLAND: i32 = 6;
-
-#[cfg(target_os = "windows")]
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct WindowsInfo {
-    window: *mut std::ffi::c_void,
-    hdc: *mut std::ffi::c_void,
-    hinstance: *mut std::ffi::c_void,
-}
-
-#[cfg(target_os = "linux")]
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct X11Info {
-    display: *mut std::ffi::c_void,
-    window: std::ffi::c_ulong,
-}
-
-#[cfg(target_os = "linux")]
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct WaylandInfo {
-    display: *mut std::ffi::c_void,
-    surface: *mut std::ffi::c_void,
-    shell_surface: *mut std::ffi::c_void,
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-#[repr(C)]
-#[derive(Clone, Copy)]
-union SysWmUnion {
-    #[cfg(target_os = "windows")]
-    windows: WindowsInfo,
-    #[cfg(target_os = "linux")]
-    x11: X11Info,
-    #[cfg(target_os = "linux")]
-    wayland: WaylandInfo,
-    padding: [usize; 8],
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-#[repr(C)]
-struct SysWmInfo {
-    version: SdlVersion,
-    subsystem: i32,
-    info: SysWmUnion,
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-fn syswm_info(window: &Window) -> Result<SysWmInfo, Error> {
-    let mut info = SysWmInfo {
-        version: SdlVersion::default(),
-        subsystem: 0,
-        info: SysWmUnion { padding: [0; 8] },
-    };
-    // SAFETY: SDL fills its version structure and then the ABI-compatible
-    // SDL_SysWMinfo storage while window remains live.
-    unsafe {
-        SDL_GetVersion(&mut info.version);
-        if SDL_GetWindowWMInfo(window.0.as_ptr(), &mut info) == 0 {
-            return Err(Error::last());
-        }
-    }
-    Ok(info)
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-#[link(name = "SDL2")]
-unsafe extern "C" {
-    fn SDL_GetVersion(version: *mut SdlVersion);
-    fn SDL_GetWindowWMInfo(window: *mut std::ffi::c_void, info: *mut SysWmInfo) -> i32;
 }
 
 #[cfg(test)]

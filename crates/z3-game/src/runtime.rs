@@ -2,20 +2,14 @@
 
 use crate::oam::{OAM_BUFFER, OAM_ENTRY_COUNT};
 use crate::ram::Ram;
+pub use crate::snapshot::{LEGACY_SNAPSHOT_LEN, LegacySnapshotError};
+use crate::snapshot::{Snapshot, SnapshotMut, SnapshotRegion, SnapshotTemplate};
 use z3_core::{CanonicalState, SRAM_SIZE, WRAM_SIZE};
 use z3_snes::{
     dma::{Dma, DmaChannel},
     ppu::{Ppu, RENDER_HEIGHT_240, RENDER_MODE7_4X},
-    saveload::SaveLoadError,
 };
 
-pub const LEGACY_SNAPSHOT_LEN: usize = 275_465;
-const SNAPSHOT_SPC_RAM: std::ops::Range<usize> = 27..65_563;
-const SNAPSHOT_DSP: std::ops::Range<usize> = 65_603..68_627;
-const SNAPSHOT_DMA: std::ops::Range<usize> = 68_642..68_834;
-const SNAPSHOT_PPU: std::ops::Range<usize> = 68_834..136_139;
-const SNAPSHOT_SRAM: std::ops::Range<usize> = 136_139..144_331;
-const SNAPSHOT_WRAM: std::ops::Range<usize> = 144_389..275_461;
 const HDMA_TABLE_OLD: usize = 0x1b00;
 const HDMA_TABLE_NEW: usize = 0x1dba0;
 const HDMA_TABLE_LEN: usize = 224 * 2;
@@ -80,7 +74,7 @@ pub struct NativeRuntime {
     pub recorder: StateRecorder,
     pub wanted_features: u32,
     pub debug_frame_counter: u32,
-    legacy_snapshot_template: Vec<u8>,
+    legacy_snapshot_template: SnapshotTemplate,
 }
 
 impl Default for NativeRuntime {
@@ -94,7 +88,7 @@ impl Default for NativeRuntime {
             recorder: StateRecorder::default(),
             wanted_features: 0,
             debug_frame_counter: 0,
-            legacy_snapshot_template: vec![0; LEGACY_SNAPSHOT_LEN],
+            legacy_snapshot_template: SnapshotTemplate::default(),
         }
     }
 }
@@ -270,43 +264,59 @@ impl NativeRuntime {
         snapshot: &mut [u8],
         loading: bool,
     ) -> Result<(), LegacySnapshotError> {
-        if snapshot.len() != LEGACY_SNAPSHOT_LEN {
-            return Err(LegacySnapshotError::WrongLength(snapshot.len()));
-        }
         if loading {
-            self.audio
-                .player
-                .ram
-                .copy_from_slice(&snapshot[SNAPSHOT_SPC_RAM]);
-            self.audio
-                .player
-                .dsp
-                .read_save_block(&snapshot[SNAPSHOT_DSP])?;
-            self.dma.read_save_block(&snapshot[SNAPSHOT_DMA])?;
-            self.ppu.read_save_block(&snapshot[SNAPSHOT_PPU])?;
-            self.sram.copy_from_slice(&snapshot[SNAPSHOT_SRAM]);
-            self.wram.copy_from_slice(&snapshot[SNAPSHOT_WRAM]);
-            self.legacy_snapshot_template.copy_from_slice(snapshot);
+            self.load_snapshot(snapshot)
         } else {
-            snapshot.copy_from_slice(&self.legacy_snapshot_template);
-            snapshot[SNAPSHOT_SPC_RAM].copy_from_slice(self.audio.player.ram.as_slice());
-            self.audio
-                .player
-                .dsp
-                .write_save_block(&mut snapshot[SNAPSHOT_DSP])?;
-            self.dma.write_save_block(&mut snapshot[SNAPSHOT_DMA])?;
-            self.ppu.write_save_block(&mut snapshot[SNAPSHOT_PPU])?;
-            snapshot[SNAPSHOT_SRAM].copy_from_slice(self.sram.as_slice());
-            snapshot[SNAPSHOT_WRAM].copy_from_slice(self.wram.as_slice());
+            self.write_snapshot(snapshot)
         }
+    }
+
+    fn write_snapshot(&mut self, bytes: &mut [u8]) -> Result<(), LegacySnapshotError> {
+        let mut snapshot = SnapshotMut::parse(bytes)?;
+        self.legacy_snapshot_template.restore_into(&mut snapshot);
+        snapshot
+            .region_mut(SnapshotRegion::SpcRam)
+            .copy_from_slice(self.audio.player.ram.as_slice());
+        self.audio
+            .player
+            .dsp
+            .write_save_block(snapshot.region_mut(SnapshotRegion::Dsp))?;
+        self.dma
+            .write_save_block(snapshot.region_mut(SnapshotRegion::Dma))?;
+        self.ppu
+            .write_save_block(snapshot.region_mut(SnapshotRegion::Ppu))?;
+        snapshot
+            .region_mut(SnapshotRegion::Sram)
+            .copy_from_slice(self.sram.as_slice());
+        snapshot
+            .region_mut(SnapshotRegion::Wram)
+            .copy_from_slice(self.wram.as_slice());
+        Ok(())
+    }
+
+    /// Install live regions in C transfer order. The borrowed input remains
+    /// immutable; opaque bytes are captured only after every device loads.
+    fn load_snapshot(&mut self, bytes: &[u8]) -> Result<(), LegacySnapshotError> {
+        let snapshot = Snapshot::parse(bytes)?;
+        self.audio.player.ram.copy_from_slice(snapshot.spc_ram());
+        self.audio
+            .player
+            .dsp
+            .read_save_block(snapshot.region(SnapshotRegion::Dsp))?;
+        self.dma
+            .read_save_block(snapshot.region(SnapshotRegion::Dma))?;
+        self.ppu
+            .read_save_block(snapshot.region(SnapshotRegion::Ppu))?;
+        self.sram.copy_from_slice(snapshot.sram());
+        self.wram.copy_from_slice(snapshot.wram());
+        self.legacy_snapshot_template.capture(snapshot);
         Ok(())
     }
 
     /// C `LoadSnesState`: restore every serialized device, repair the moved
     /// HDMA table, then reconstruct translated SPC state from its RAM image.
     pub fn load_snes_state(&mut self, snapshot: &[u8]) -> Result<(), LegacySnapshotError> {
-        let mut owned = snapshot.to_vec();
-        self.internal_save_load(&mut owned, true)?;
+        self.load_snapshot(snapshot)?;
         self.wram.copy_within(
             HDMA_TABLE_OLD..HDMA_TABLE_OLD + HDMA_TABLE_LEN,
             HDMA_TABLE_NEW,
@@ -335,34 +345,8 @@ impl NativeRuntime {
         self.audio
             .zelda_save_music_state_to_ram_locked(self.wram.as_mut_slice());
         let mut snapshot = vec![0; LEGACY_SNAPSHOT_LEN];
-        self.internal_save_load(&mut snapshot, false)?;
+        self.write_snapshot(&mut snapshot)?;
         Ok(snapshot)
-    }
-}
-
-#[derive(Debug)]
-pub enum LegacySnapshotError {
-    WrongLength(usize),
-    Device(SaveLoadError),
-}
-
-impl std::fmt::Display for LegacySnapshotError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::WrongLength(actual) => write!(
-                f,
-                "legacy snapshot has {actual} bytes; expected {LEGACY_SNAPSHOT_LEN}"
-            ),
-            Self::Device(error) => error.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for LegacySnapshotError {}
-
-impl From<SaveLoadError> for LegacySnapshotError {
-    fn from(value: SaveLoadError) -> Self {
-        Self::Device(value)
     }
 }
 

@@ -5,6 +5,7 @@ scripts/test-c-oracle.sh
 cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
 ruby scripts/test-replay-ranges.rb
+cargo run -q -p z3-verify --bin check_runtime_snapshots
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
@@ -33,6 +34,8 @@ cargo run -q -p z3-verify --bin check_sprite_state -- \
   build/c-oracle/sprite_state_oracle
 cargo run -q -p z3-verify --bin check_tile_maps -- \
   build/c-oracle/tile_map_oracle
+cargo run -q -p z3-verify --bin check_oam_allocator -- \
+  build/c-oracle/oam_allocator_oracle
 cargo run -q -p z3-verify --bin check_tile_detect -- \
   build/c-oracle/tile_detect_oracle
 cargo run -q -p z3-verify --bin check_overlord -- \
