@@ -100,6 +100,7 @@ int main(int argc, char **argv) {
   // audio without rendering, for a faster complete-recording audio sweep.
   // run_what == 0xf5 exports SPC RAM followed by the C DSP save block.
   // run_what == 0xf4 exports the 75-byte C APU write queue and input ports.
+  // run_what == 0xf3 exports mapped SPC RAM and live DSP without changing RAM.
   // run_what == 0xfc imports a complete legacy device snapshot prefixed by a
   // little-endian uint32 length and emits its canonical state.
   // record and emits the tightly packed ARGB buffer instead of core state.
@@ -113,6 +114,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "oracle could not load reference replay %d\n", chapter);
         return 1;
       }
+    } else if (command[2] == 0xf3) {
+      uint8_t audio_state[65536 + 3024];
+      z3c_export_audio_state_passive(audio_state);
+      if (fwrite(audio_state, sizeof(audio_state), 1, stdout) != 1 || fflush(stdout) != 0) {
+        fprintf(stderr, "oracle passive audio state export failed\n");
+        return 1;
+      }
+      continue;
     } else if (command[2] == 0xf4) {
       uint8_t queue[75];
       z3c_export_audio_queue(queue);

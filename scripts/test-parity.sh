@@ -4,9 +4,16 @@ set -eu
 scripts/test-c-oracle.sh
 cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
+ruby scripts/audit-spc-mapping.rb
 ruby scripts/test-replay-ranges.rb
+ruby scripts/test-recording-sweeps.rb
 cargo run -q -p z3-verify --bin check_runtime_snapshots
 cargo test --workspace
+cargo test -q -p z3-verify --lib \
+  passive_audio_protocol_preserves_queue_and_matches_legacy_snapshot -- --ignored
+cargo test -q -p z3-verify --bin check_full_replay \
+  passive_pcm_failure_details_preserve_live_state_and_legacy_still_maps -- --ignored
+build/c-oracle/audio_passive_oracle zelda3_assets.dat
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
   build/c-oracle/stream_oracle zelda3_assets.dat
@@ -36,6 +43,8 @@ cargo run -q -p z3-verify --bin check_tile_maps -- \
   build/c-oracle/tile_map_oracle
 cargo run -q -p z3-verify --bin check_oam_allocator -- \
   build/c-oracle/oam_allocator_oracle
+cargo run -q -p z3-verify --bin check_ancilla_oam -- \
+  build/c-oracle/ancilla_oam_oracle
 cargo run -q -p z3-verify --bin check_tile_detect -- \
   build/c-oracle/tile_detect_oracle
 cargo run -q -p z3-verify --bin check_overlord -- \
@@ -51,7 +60,7 @@ cargo run -q -p z3-verify --bin check_misc -- \
 cargo run -q -p z3-verify --bin check_overworld_decompress -- \
   build/c-oracle/overworld_decompress_oracle
 cargo run -q -p z3-verify --bin inspect_rom -- zelda3.sfc
-scripts/test-full-replay.sh
+scripts/test-recording-sweeps.sh
 cargo build -q -p z3-native --bin z3
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
   target/debug/z3 --config config/parity.ini --frames 600 zelda3.sfc

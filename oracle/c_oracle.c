@@ -209,6 +209,20 @@ void z3c_export_audio_state(uint8_t *destination) {
   memcpy(destination + 65536, g_zenv.player->dsp->ram, 3024);
 }
 
+void z3c_export_audio_state_passive(uint8_t *destination) {
+  if (!g_initialized || destination == NULL)
+    return;
+  _Static_assert(sizeof(Dsp) - offsetof(Dsp, ram) == 3024,
+                 "C DSP snapshot layout changed");
+  // Channels and RAM are inline, so mapping variables mutates only this copy.
+  // Its DSP/history pointers still alias the live player: never generate audio
+  // or otherwise use those pointers through the shallow copy.
+  SpcPlayer snapshot = *g_zenv.player;
+  SpcPlayer_CopyVariablesToRam(&snapshot);
+  memcpy(destination, snapshot.ram, 65536);
+  memcpy(destination + 65536, g_zenv.player->dsp->ram, 3024);
+}
+
 void z3c_export_audio_queue(uint8_t *destination) {
   if (g_initialized && destination != NULL)
     ZeldaExportApuQueueForTest(destination);

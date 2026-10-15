@@ -30,6 +30,11 @@ clang $common_flags oracle/stream_oracle.c \
   -Wl,-rpath,@loader_path \
   -o build/c-oracle/stream_oracle
 
+clang $common_flags oracle/audio_passive_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/audio_passive_oracle
+
 clang $common_flags oracle/spc_oracle.c snes/spc.o \
   -o build/c-oracle/spc_oracle
 
@@ -72,6 +77,11 @@ clang $common_flags oracle/oam_allocator_oracle.c \
   -Lbuild/c-oracle -lz3c_oracle \
   -Wl,-rpath,@loader_path \
   -o build/c-oracle/oam_allocator_oracle
+
+clang $common_flags oracle/ancilla_oam_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/ancilla_oam_oracle
 
 clang $common_flags oracle/tile_detect_oracle.c src/tile_detect.o \
   -o build/c-oracle/tile_detect_oracle

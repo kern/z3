@@ -36,6 +36,8 @@ void z3c_export_cgram(uint8_t *destination);
 void z3c_render_audio(int16_t *samples);
 // Diagnostic copies of the current SPC RAM and serialized DSP state.
 void z3c_export_audio_state(uint8_t *destination);
+// Same mapped snapshot, without changing the live player's RAM or DSP/queue.
+void z3c_export_audio_state_passive(uint8_t *destination);
 void z3c_export_audio_queue(uint8_t *destination);
 
 #ifdef __cplusplus

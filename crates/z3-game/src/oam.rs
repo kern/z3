@@ -63,6 +63,21 @@ pub struct OamPointers {
 }
 
 impl OamPointers {
+    /// Creates a newly selected allocation from a local entry cursor. Loading
+    /// existing global pointers uses [`Self::load`] to retain independent words.
+    #[must_use]
+    pub fn for_cursor(cursor: OamCursor) -> Self {
+        Self {
+            entry: (OAM_BUFFER + cursor.index * 4) as u16,
+            extended: (BYTEWISE_EXTENDED_OAM + cursor.index) as u16,
+        }
+    }
+
+    /// Reads the byte alias used by the ancilla's saved OAM index field.
+    #[must_use]
+    pub fn legacy_primary_low_byte(ram: &Ram<'_>) -> u8 {
+        ram.read_u8(CURRENT_ENTRY)
+    }
     #[must_use]
     pub fn load(ram: &Ram<'_>) -> Self {
         Self {
@@ -103,6 +118,65 @@ impl OamPointers {
             CURRENT_EXTENDED,
             ram.read_u16(CURRENT_EXTENDED).wrapping_add(entries),
         );
+    }
+}
+
+/// Effect-specific local cursor wrap policies. These do not reserve a new
+/// sprite region: they publish globals only when a local cursor must wrap.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EffectOamLayout {
+    Unsorted,
+    Sorted,
+}
+
+impl EffectOamLayout {
+    #[must_use]
+    pub const fn from_sort_setting(setting: u8) -> Self {
+        if setting == 0 {
+            Self::Unsorted
+        } else {
+            Self::Sorted
+        }
+    }
+
+    /// Implements `Ancilla_AllocateOamFromCustomRegion`. Keep all comparisons
+    /// in the original host-sized byte-address domain until selecting a wrap.
+    pub fn wrap_effect_cursor(self, ram: &mut Ram<'_>, cursor: OamCursor) -> OamCursor {
+        let address = OAM_BUFFER + cursor.index * 4;
+        let destination = match self {
+            Self::Sorted if address < 0x900 => {
+                if address < 0x8e0 {
+                    return cursor;
+                }
+                OamCursor::from_byte_offset(0x20)
+            }
+            Self::Sorted => {
+                if address < 0x9d0 {
+                    return cursor;
+                }
+                OamCursor::from_byte_offset(0x140)
+            }
+            Self::Unsorted => {
+                if address < 0x990 {
+                    return cursor;
+                }
+                OamCursor::from_byte_offset(0x20)
+            }
+        };
+        OamPointers::for_cursor(destination).publish_entry_first(ram);
+        destination
+    }
+
+    /// Hit stars have a different unsorted boundary and never wrap when sorted.
+    pub fn wrap_hit_stars_cursor(self, ram: &mut Ram<'_>, cursor: OamCursor) -> OamCursor {
+        let address = OAM_BUFFER + cursor.index * 4;
+        if self == Self::Unsorted && address >= 0x9d0 {
+            let destination = OamCursor::from_byte_offset(0x20);
+            OamPointers::for_cursor(destination).publish_entry_first(ram);
+            destination
+        } else {
+            cursor
+        }
     }
 }
 
@@ -346,6 +420,69 @@ pub fn set_plain(ram: &mut Ram<'_>, index: usize, x: u8, y: u8, charnum: u8, fla
 mod tests {
     use super::*;
     use z3_core::WRAM_SIZE;
+
+    #[test]
+    fn effect_wrap_boundaries_publish_globals_only_when_the_local_cursor_wraps() {
+        for (sorted, hit_stars, index, result, publishes) in [
+            (false, false, 99, 99, false),
+            (false, false, 100, 8, true),
+            (true, false, 55, 55, false),
+            (true, false, 56, 8, true),
+            (true, false, 63, 8, true),
+            (true, false, 64, 64, false),
+            (true, false, 115, 115, false),
+            (true, false, 116, 80, true),
+            (false, true, 115, 115, false),
+            (false, true, 116, 8, true),
+            (true, true, 128, 128, false),
+        ] {
+            let mut bytes = [0xa5; WRAM_SIZE];
+            let mut ram = Ram::new(&mut bytes);
+            OamPointers {
+                entry: 0x9fc,
+                extended: 0xa21,
+            }
+            .publish_entry_first(&mut ram);
+            let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+            let layout = EffectOamLayout::from_sort_setting(u8::from(sorted));
+            let cursor = OamCursor::from_index(index);
+            let actual = if hit_stars {
+                layout.wrap_hit_stars_cursor(&mut ram, cursor)
+            } else {
+                layout.wrap_effect_cursor(&mut ram, cursor)
+            };
+            assert_eq!(actual.index(), result);
+            if publishes {
+                let primary = 0x800 + (result as u16) * 4;
+                let extended = 0xa20 + result as u16;
+                expected[0x90..0x92].copy_from_slice(&primary.to_le_bytes());
+                expected[0x92..0x94].copy_from_slice(&extended.to_le_bytes());
+            }
+            assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+        }
+    }
+
+    #[test]
+    fn new_allocation_addresses_do_not_normalize_existing_independent_pointers() {
+        assert_eq!(
+            OamPointers::for_cursor(OamCursor::from_index(128)),
+            OamPointers {
+                entry: 0xa00,
+                extended: 0xaa0
+            }
+        );
+        for setting in [1, 2, 0xff] {
+            assert_eq!(
+                EffectOamLayout::from_sort_setting(setting),
+                EffectOamLayout::Sorted
+            );
+        }
+        let mut bytes = [0xa5; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        ram.write_u16(0x90, 0xfe80);
+        assert_eq!(OamPointers::legacy_primary_low_byte(&ram), 0x80);
+        assert_eq!(OamPointers::load(&ram).extended, 0xa5a5);
+    }
 
     #[test]
     fn region_reset_preserves_counters_global_pointers_and_staging_bytes() {

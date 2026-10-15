@@ -9,11 +9,11 @@ use z3_game::{
     runtime::{NativeRuntime, StateRecorder},
 };
 use z3_snes::{
-    dsp::DSP_SAVE_BLOCK_LEN,
+    dsp::{DSP_SAVE_BLOCK_LEN, Dsp},
     ppu::{RENDER_MODE7_4X, RENDER_NEW},
 };
 use z3_verify::{
-    c_oracle::{COracle, REPLAY_AUDIO_FRAMES},
+    c_oracle::{COracle, OracleAudioState, REPLAY_AUDIO_FRAMES},
     first_difference, legacy_snapshot,
 };
 
@@ -23,7 +23,18 @@ fn audio_state_detail(
 ) -> Result<Option<String>, Box<dyn Error>> {
     let reference = oracle.export_audio_state()?;
     native.audio.player.copy_variables_to_ram();
-    let rust_ram = &native.audio.player.ram;
+    audio_state_difference(
+        &reference,
+        native.audio.player.ram.as_slice(),
+        &native.audio.player.dsp,
+    )
+}
+
+fn audio_state_difference(
+    reference: &OracleAudioState,
+    rust_ram: &[u8],
+    dsp: &Dsp,
+) -> Result<Option<String>, Box<dyn Error>> {
     let ram_difference = reference
         .ram
         .iter()
@@ -36,7 +47,7 @@ fn audio_state_detail(
             )
         });
     let mut rust_dsp = [0; DSP_SAVE_BLOCK_LEN];
-    native.audio.player.dsp.write_save_block(&mut rust_dsp)?;
+    dsp.write_save_block(&mut rust_dsp)?;
     let dsp_difference = reference
         .dsp
         .iter()
@@ -55,6 +66,56 @@ fn audio_state_detail(
             "first SPC RAM difference={ram_difference:?}; first DSP save-block difference={dsp_difference:?}"
         )))
     }
+}
+
+fn passive_audio_state_detail(
+    oracle: &mut COracle,
+    native: &NativeRuntime,
+) -> Result<Option<String>, Box<dyn Error>> {
+    let reference = oracle.export_audio_state_passive()?;
+    let mapped_ram = native.audio.player.mapped_ram_snapshot();
+    audio_state_difference(&reference, mapped_ram.as_slice(), &native.audio.player.dsp)
+}
+
+fn pcm_failure_audio_state_detail(
+    oracle: &mut COracle,
+    native: &mut NativeRuntime,
+    passive: bool,
+) -> Result<Option<String>, Box<dyn Error>> {
+    if passive {
+        passive_audio_state_detail(oracle, native)
+    } else {
+        audio_state_detail(oracle, native)
+    }
+}
+
+/// This observer cannot mutate the Rust machine. Its C counterpart maps a
+/// temporary player copy rather than writing the live SPC/echo RAM.
+fn verify_passive_audio_state(
+    oracle: &mut COracle,
+    native: &NativeRuntime,
+    chapter: u16,
+    frame: u32,
+) -> Result<(), Box<dyn Error>> {
+    let c_queue = oracle.export_audio_queue()?;
+    let rust_queue = native
+        .audio
+        .queue
+        .oracle_snapshot(&native.audio.player.input_ports);
+    if let Some(index) = c_queue
+        .iter()
+        .zip(rust_queue.iter())
+        .position(|(c, r)| c != r)
+    {
+        return Err(format!("chapter {chapter} frame {frame}: passive APU queue byte {index} differs: C={:02x} Rust={:02x}", c_queue[index], rust_queue[index]).into());
+    }
+    if let Some(detail) = passive_audio_state_detail(oracle, native)? {
+        return Err(format!(
+            "chapter {chapter} frame {frame}: passive APU state differs after PCM output; {detail}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -99,6 +160,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(RENDER_NEW | RENDER_MODE7_4X);
     let audio_only = env::var_os("Z3_VERIFY_AUDIO_ONLY").is_some();
     let audio_state_check = env::var_os("Z3_VERIFY_AUDIO_STATE").is_some();
+    let passive_audio_state_check = env::var_os("Z3_VERIFY_PASSIVE_AUDIO_STATE").is_some();
+    if audio_state_check && passive_audio_state_check {
+        return Err("select either legacy or passive audio-state observation, not both".into());
+    }
     let mut audio_samples = [0i16; REPLAY_AUDIO_FRAMES * 2];
     for frame in 1..=save.header.total_frames {
         let prior_wram = native.wram.clone();
@@ -129,8 +194,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .into());
             }
             if let Some(sample) = comparison.audio.first_sample_difference {
-                let audio_state = audio_state_detail(&mut oracle, &mut native)?
-                    .unwrap_or_else(|| "SPC and DSP state match".to_owned());
+                let audio_state = pcm_failure_audio_state_detail(
+                    &mut oracle,
+                    &mut native,
+                    passive_audio_state_check,
+                )?
+                .unwrap_or_else(|| "SPC and DSP state match".to_owned());
                 return Err(format!(
                     "chapter {chapter} frame {frame}: audio sample {sample} differs: C={}, Rust={} (534 stereo samples per recorded frame); {audio_state}",
                     comparison.audio.expected_sample, comparison.audio.actual_sample,
@@ -172,6 +241,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     )
                     .into());
                 }
+            }
+            if passive_audio_state_check {
+                verify_passive_audio_state(&mut oracle, &native, chapter, frame)?;
             }
             if frame % 1_000 == 0 {
                 println!(
@@ -367,13 +439,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             .render_audio(&mut audio_samples, REPLAY_AUDIO_FRAMES, 2);
         let audio_comparison = oracle.compare_replay_audio(&audio_samples)?;
         if let Some(sample) = audio_comparison.first_sample_difference {
-            let audio_state = audio_state_detail(&mut oracle, &mut native)?
-                .unwrap_or_else(|| "SPC and DSP state match".to_owned());
+            let audio_state = pcm_failure_audio_state_detail(
+                &mut oracle,
+                &mut native,
+                passive_audio_state_check,
+            )?
+            .unwrap_or_else(|| "SPC and DSP state match".to_owned());
             return Err(format!(
                 "chapter {chapter} frame {frame}: audio sample {sample} differs: C={}, Rust={} (534 stereo samples per recorded frame); {audio_state}",
                 audio_comparison.expected_sample, audio_comparison.actual_sample,
             )
             .into());
+        }
+        if passive_audio_state_check {
+            verify_passive_audio_state(&mut oracle, &native, chapter, frame)?;
         }
         if frame % 1_000 == 0 {
             println!(
@@ -393,5 +472,43 @@ fn main() -> Result<(), Box<dyn Error>> {
             save.header.total_frames
         );
     }
+    if passive_audio_state_check {
+        println!(
+            "chapter {chapter}: passive queue/SPC/DSP observation matched every recorded frame without live RAM export"
+        );
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires the built C oracle and local assets"]
+    fn passive_pcm_failure_details_preserve_live_state_and_legacy_still_maps()
+    -> Result<(), Box<dyn Error>> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut oracle = COracle::spawn_command(
+            std::process::Command::new(root.join("build/c-oracle/stream_oracle"))
+                .arg(root.join("zelda3_assets.dat"))
+                .current_dir(&root),
+        )?;
+        let mut native = NativeRuntime::new();
+        native.audio.player.ram.fill(0xa5);
+        native.audio.player.master_volume = 0x1234;
+        let before = native.audio.player.clone();
+        let c_state = oracle.export_state()?;
+        let c_queue = oracle.export_audio_queue()?;
+        assert!(pcm_failure_audio_state_detail(&mut oracle, &mut native, true)?.is_some());
+        assert_eq!(native.audio.player, before);
+        assert_eq!(oracle.export_state()?, c_state);
+        assert_eq!(oracle.export_audio_queue()?, c_queue);
+        // The same failure helper must retain the old contract outside passive mode.
+        let expected = before.mapped_ram_snapshot();
+        assert!(pcm_failure_audio_state_detail(&mut oracle, &mut native, false)?.is_some());
+        assert_eq!(native.audio.player.ram, expected);
+        assert_ne!(native.audio.player.ram, before.ram);
+        Ok(())
+    }
 }

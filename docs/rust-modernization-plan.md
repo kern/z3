@@ -24,10 +24,11 @@ state. All converted views still access the single live compatibility image.
 | M07 sound | Named ambient/effect latches, lossless requests, lazy first-writer emitter resolution, player/world/tile pan constructors; migrated regression-sensitive effects, sprite service helpers and NMI | Remaining raw sound call sites and richer effect IDs |
 | M10 tile maps | Distinct word indices/byte offsets, live aliased dungeon/overworld maps and collision attributes; selected map callers migrated | Object raster cursors, map stream decoding, remaining map arithmetic and collision scratch/results |
 | M11 graphics uploads | Typed word destinations, immediate transfer operations, explicit clipping/strict policies; separate stripe, UVRAM and scroll decoders; borrowed NMI sources | Packet generation, gameplay-facing upload staging, palette/HDMA views and remaining address-based transfer profiles |
-| M12 OAM | Entry-unit local cursor/player drawing; typed live region allocator with raw byte counts and independent global pointer operations; hidden bytes, paired extended writes, overflow/fallback order and one-past results retained | Custom ancilla wrapping, handlers/native/bank pointer mutations and other entity draw paths |
+| M12 OAM | Entry-unit local cursor/player drawing; typed live region allocator, independent pointers and effect wrap policies; two Quake loops migrated; hidden bytes, publication order, overflow/fallback order and one-past results retained | Remaining local effect draw loops, ASCII region selection, native/bank pointer mutations and other entity draw paths |
 | M14 ending routing | 58 explicit `EndingCall` variants through immediate/deferred production dispatch; string routes removed | Other broad capability traits, default no-ops and borrow scaffolding |
 | M14/M15 graphics contexts | CPU scripts/callbacks cannot borrow VRAM; hook-free uploads borrow disjoint graphics storage; normal planar source/conversion temporaries removed | Snapshot/diff/flush bridge, remaining mixed service helpers and transient live-VRAM routing |
 | M17 snapshots | Validated legacy region views, explicit opaque template ownership, separate load/write operations and immutable borrowed loading; independent 25-image cross-check | Recording container/header and replay-log codecs, remaining device-specific layouts and patch API |
+| M18 SPC mapping | One typed ordered schema generates import/export and passive snapshots for 598 bytes; independent C-table audit; distinct passive C/Rust diagnostics retain legacy live-export checks | Typed pattern cursors, remaining voice/command semantics and broader codec/device separation |
 | M20 host commands | Lossless `HostCommand` including unknown values, typed dispatch and runtime patch keys | Host scheduling, audio ownership, RAII and application decomposition |
 | M23 renderer | Separate preset/source/plan/texture-mipmap modules; distinct sampling/attachment views; surface configuration/lifetime and frame-history owners; real Metal readback regression | Further draw-policy/pipeline decomposition and broader preset, surface-error and platform coverage |
 
@@ -35,7 +36,8 @@ Focused tests cover complete-memory equivalence, live aliases, signed movement
 boundaries, OAM visibility/adjacent bytes, sound latch priority and hook timing,
 asset padding/credits lookup, command round trips, and ending call ordering.
 See [batch 1](modernization-verification.md), [batch 2](modernization-batch-2.md),
-[batch 3](modernization-batch-3.md) and [batch 4](modernization-batch-4.md)
+[batch 3](modernization-batch-3.md), [batch 4](modernization-batch-4.md)
+and [batch 5](modernization-batch-5.md)
 for exact commands, completed gates and recording-sweep status. Counts describe
 source accesses, including migrated existing tests, not distinct state fields.
 

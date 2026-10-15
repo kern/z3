@@ -49,8 +49,13 @@ pub struct OracleAudioState {
 
 impl COracle {
     pub fn spawn(executable: &Path, assets: &Path) -> io::Result<Self> {
-        let mut child = Command::new(executable)
-            .arg(assets)
+        Self::spawn_command(Command::new(executable).arg(assets))
+    }
+
+    /// Connects a configured oracle process, retaining its explicit cwd/env.
+    /// Only stdin/stdout are overridden to establish the binary protocol.
+    pub fn spawn_command(command: &mut Command) -> io::Result<Self> {
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
@@ -70,10 +75,10 @@ impl COracle {
     }
 
     pub fn step(&mut self, input: u16, run_what: u8) -> io::Result<CanonicalState> {
-        if matches!(run_what, 0xf4..=0xff) {
+        if matches!(run_what, 0xf3..=0xff) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "0xf4..=0xff are reserved for oracle control commands",
+                "0xf3..=0xff are reserved for oracle control commands",
             ));
         }
         let [low, high] = input.to_le_bytes();
@@ -201,6 +206,20 @@ impl COracle {
         })
     }
 
+    /// Captures mapped SPC RAM and the live DSP save block without modifying
+    /// the C player's RAM, DSP, audio queue, or playback position. Unlike the
+    /// legacy diagnostic export, this is safe to observe between audio frames.
+    pub fn export_audio_state_passive(&mut self) -> io::Result<OracleAudioState> {
+        self.input.write_all(&[0, 0, 0xf3])?;
+        self.input.flush()?;
+        let mut bytes = vec![0; AUDIO_STATE_RAM_LEN + AUDIO_STATE_DSP_LEN];
+        self.output.read_exact(&mut bytes)?;
+        Ok(OracleAudioState {
+            ram: bytes[..AUDIO_STATE_RAM_LEN].to_vec(),
+            dsp: bytes[AUDIO_STATE_RAM_LEN..].to_vec(),
+        })
+    }
+
     /// Current C audio write queue: 4-byte pending ports, 16 four-byte ring
     /// entries, position/count/total, then four current SPC input ports.
     pub fn export_audio_queue(&mut self) -> io::Result<[u8; 75]> {
@@ -313,5 +332,44 @@ impl Drop for COracle {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires the built C oracle and local asset container"]
+    fn passive_audio_protocol_preserves_queue_and_matches_legacy_snapshot() -> io::Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        // The legacy dylib install name is relative to the repository root;
+        // cargo runs this test from the crate directory instead.
+        let mut oracle = COracle::spawn_command(
+            Command::new(root.join("build/c-oracle/stream_oracle"))
+                .arg(root.join("zelda3_assets.dat"))
+                .current_dir(&root),
+        )?;
+        assert_eq!(
+            oracle.step(0, 0xf3).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        for _ in 0..16 {
+            oracle.step(0, 1)?;
+        }
+        let state = oracle.export_state()?;
+        let queue = oracle.export_audio_queue()?;
+        let first = oracle.export_audio_state_passive()?;
+        let second = oracle.export_audio_state_passive()?;
+        assert_eq!(first.ram.len(), AUDIO_STATE_RAM_LEN);
+        assert_eq!(first.dsp.len(), AUDIO_STATE_DSP_LEN);
+        assert_eq!(first.ram, second.ram);
+        assert_eq!(first.dsp, second.dsp);
+        assert_eq!(queue, oracle.export_audio_queue()?);
+        assert_eq!(state, oracle.export_state()?);
+        let legacy = oracle.export_audio_state()?;
+        assert_eq!(first.ram, legacy.ram);
+        assert_eq!(first.dsp, legacy.dsp);
+        Ok(())
     }
 }

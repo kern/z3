@@ -1801,8 +1801,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0x40, 0x50, 0x41, 0x51, 0x42, 0x52, 0x43, 0x53, 0x44, 0x54, 0x45, 0x55, 0x43, 0x53,
             0x46, 0x56,
         ];
-        self.ram.write_u16(0x90, 0x800);
-        self.ram.write_u16(0x92, 0xa20);
+        oam::OamPointers::for_cursor(oam::OamCursor::from_index(0)).publish_entry_first(self.ram);
         let mut index = self.current_oam_index();
         let mut k = self.read(0x35f) as i8;
         loop {
@@ -3230,32 +3229,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
     }
 
-    fn allocate_oam_from_custom_region(&mut self, index: usize) -> usize {
-        let mut address = oam::OAM_BUFFER + index * 4;
-        if self.read(0xfb3) != 0 {
-            if address < 0x900 {
-                if address < 0x8e0 {
-                    return index;
-                }
-                address = 0x820;
-            } else {
-                if address < 0x9d0 {
-                    return index;
-                }
-                address = 0x940;
-            }
-        } else {
-            if address < 0x990 {
-                return index;
-            }
-            address = 0x820;
-        }
-        self.ram.write_u16(0x90, address as u16);
-        self.ram.write_u16(
-            0x92,
-            (((address - oam::OAM_BUFFER) >> 2) + oam::BYTEWISE_EXTENDED_OAM) as u16,
-        );
-        (address - oam::OAM_BUFFER) / 4
+    /// Compatibility entry point for `Ancilla_AllocateOamFromCustomRegion`.
+    pub fn allocate_oam_from_custom_region(&mut self, index: usize) -> usize {
+        self.wrap_custom_oam_cursor(oam::OamCursor::from_index(index))
+            .index()
+    }
+
+    fn wrap_custom_oam_cursor(&mut self, cursor: oam::OamCursor) -> oam::OamCursor {
+        oam::EffectOamLayout::from_sort_setting(self.read(0xfb3))
+            .wrap_effect_cursor(self.ram, cursor)
     }
 
     fn add_boomerang_wall_clink(&mut self, source: usize) {
@@ -3377,8 +3359,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let y = y0.wrapping_add(i16::from(XY[frame * 2]) as u16);
         if self.aux_timer(k) == 0 {
             let offset = [0x180_u16, 0xd0][usize::from(self.read(0xfb3))];
-            self.ram.write_u16(0x92, (offset >> 2) + 0xa20);
-            self.ram.write_u16(0x90, offset + 0x800);
+            oam::OamPointers::for_cursor(oam::OamCursor::from_byte_offset(usize::from(offset)))
+                .publish_extended_first(self.ram);
         }
         self.set_oam_safe(
             self.current_oam_index(),
@@ -4176,8 +4158,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             && self.floor(k) != 0
             && (self.read(0x35f) == 0 || self.read(0x1a) & 1 != 0)
         {
-            self.ram.write_u16(0x90, 0x8d0);
-            self.ram.write_u16(0x92, 0xa20 + (0xd0 >> 2));
+            oam::OamPointers::for_cursor(oam::OamCursor::from_byte_offset(0xd0))
+                .publish_entry_first(self.ram);
         }
         let (x, y) = self.prep_oam_coord(k);
         let frame = usize::from(self.item_to_link(k));
@@ -4341,7 +4323,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [4, 4, -13, 20];
         const PRIORITY: [u8; 4] = [0x20, 0x10, 0x30, 0x20];
         self.allocate_oam_from_region_a_d_f(k, 4);
-        self.set_oam_index(k, self.read(0x90));
+        self.set_oam_index(k, oam::OamPointers::legacy_primary_low_byte(self.ram));
         if self.timer(k) == 0 {
             self.clear(k);
             return;
@@ -5840,8 +5822,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             && self.floor(k) != 0
             && (self.state_l(k) != 0 || picked && self.read(0x308) & 0x80 != 0)
         {
-            self.ram.write_u16(0x90, 0x8d0);
-            self.ram.write_u16(0x92, 0xa54);
+            oam::OamPointers::for_cursor(oam::OamCursor::from_byte_offset(0xd0))
+                .publish_entry_first(self.ram);
         }
         let (x, mut y) = self.prep_adjusted_oam_coord(k);
         let z = self.height(k) as i8;
@@ -6968,8 +6950,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 && (self.state_l(k) != 0
                     || k + 1 == usize::from(self.read(0x2ec)) && self.read(0x308) & 0x80 != 0)
             {
-                self.ram.write_u16(0x90, 0x8d0);
-                self.ram.write_u16(0x92, 0xa54);
+                oam::OamPointers::for_cursor(oam::OamCursor::from_byte_offset(0xd0))
+                    .publish_entry_first(self.ram);
             }
         }
         let original = self.current_oam_index();
@@ -7387,15 +7369,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         );
     }
 
-    fn hit_stars_update_oam_buffer_position(&mut self, index: usize) -> usize {
-        let address = oam::OAM_BUFFER + index * 4;
-        if self.read(0xfb3) == 0 && address >= 0x9d0 {
-            self.ram.write_u16(0x90, 0x820);
-            self.ram.write_u16(0x92, 0xa28);
-            8
-        } else {
-            index
-        }
+    /// Compatibility entry point for `HitStars_UpdateOamBufferPosition`.
+    pub fn hit_stars_update_oam_buffer_position(&mut self, index: usize) -> usize {
+        oam::EffectOamLayout::from_sort_setting(self.read(0xfb3))
+            .wrap_hit_stars_cursor(self.ram, oam::OamCursor::from_index(index))
+            .index()
     }
 
     pub fn hit_stars(&mut self, k: usize) {
@@ -8266,7 +8244,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
     }
 
-    fn draw_quake_initial_bolts(&mut self, k: usize) {
+    /// Compatibility entry point for `AncillaDraw_QuakeInitialBolts`.
+    pub fn draw_quake_initial_bolts(&mut self, k: usize) {
         const OFFSET: [usize; 5] = [0, 0x18, 0, 0x18, 0x2f];
         const CHAR: [u8; 15] = [
             0x40, 0x42, 0x44, 0x46, 0x48, 0x4a, 0x4c, 0x4e, 0x60, 0x62, 0x64, 0x66, 0x68, 0x6a,
@@ -8275,7 +8254,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let table = usize::from(self.read(0x15805 + k)) + OFFSET[k];
         let start = usize::from(QUAKE_ITEM_POS[table]);
         let end = usize::from(QUAKE_ITEM_POS[table + 1]);
-        let mut index = self.current_oam_index();
+        let mut cursor = oam::OamPointers::current_cursor(self.ram);
         for &(x_offset, y_offset, flags) in &QUAKE_ITEMS[start..end] {
             let x = self
                 .ram
@@ -8287,7 +8266,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 .read_u16(0x1580b)
                 .wrapping_add(i16::from(y_offset) as u16)
                 .wrapping_sub(self.ram.read_u16(0xe8));
-            let old_x = oam::read(self.ram, index).x;
+            let old_x = cursor.read(self.ram).x;
             let mut visible_x = old_x;
             let mut visible_y = 0xf0;
             if x < 256 && y < 256 {
@@ -8298,18 +8277,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
             oam::set_plain(
                 self.ram,
-                index,
+                cursor.index(),
                 visible_x,
                 visible_y,
                 CHAR[usize::from(flags & 0x0f)],
                 flags & 0xc0 | 0x3c,
                 2,
             );
-            index += 1;
-            self.ram
-                .write_u16(0x90, self.ram.read_u16(0x90).wrapping_add(4));
-            self.ram
-                .write_u16(0x92, self.ram.read_u16(0x92).wrapping_add(1));
+            cursor.advance();
+            oam::OamPointers::advance_entries(self.ram, 1);
         }
     }
 
@@ -8378,22 +8354,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let frame = usize::from(self.item_to_link(k));
         let start = usize::from(QUAKE_ITEM_POS2[frame]);
         let end = usize::from(QUAKE_ITEM_POS2[frame + 1]);
-        let mut index = self.current_oam_index();
+        let mut cursor = oam::OamPointers::current_cursor(self.ram);
         for &(x, y, flags) in &QUAKE_ITEMS2[start..end] {
             oam::set_plain(
                 self.ram,
-                index,
+                cursor.index(),
                 x as u8,
                 y as u8,
                 CHAR[usize::from(flags & 0x0f)],
                 flags & 0xc0 | 0x3c,
                 flags >> 4 & 3,
             );
-            self.ram
-                .write_u16(0x90, self.ram.read_u16(0x90).wrapping_add(4));
-            self.ram
-                .write_u16(0x92, self.ram.read_u16(0x92).wrapping_add(1));
-            index = self.allocate_oam_from_custom_region(index + 1);
+            oam::OamPointers::advance_entries(self.ram, 1);
+            cursor = self.wrap_custom_oam_cursor(cursor.next());
         }
     }
 
@@ -9060,7 +9033,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         self.allocate_oam_from_region_a_d_f(k, 4);
-        self.set_oam_index(k, self.read(0x90));
+        self.set_oam_index(k, oam::OamPointers::legacy_primary_low_byte(self.ram));
         let (x, y) = self.prep_oam_coord(k);
         let frame = usize::from(self.item_to_link(k));
         self.set_oam(
@@ -9761,6 +9734,47 @@ mod tests {
             assert_eq!(ctx.step(0), 3);
             assert_eq!(ctx.item_to_link(0), 1);
             assert_eq!(ctx.read(0xc2c), 17);
+        });
+    }
+
+    #[test]
+    fn quake_hidden_piece_retains_x_and_advances_independent_extended_pointer() {
+        fixture(|ctx| {
+            oam::OamPointers {
+                entry: 0x80c,
+                extended: 0xffff,
+            }
+            .publish_entry_first(ctx.ram);
+            ctx.write(0x15805, 0);
+            ctx.ram.write_u16(0x1580b, 0);
+            ctx.ram.write_u16(0x1580d, 0x100);
+            ctx.write(0x80c, 0x47);
+            let mut expected = ctx.ram.slice(0, z3_core::WRAM_SIZE).to_vec();
+            ctx.draw_quake_initial_bolts(0);
+            expected[0x80c..0x810].copy_from_slice(&[0x47, 0xf0, 0x40, 0x3c]);
+            expected[0xa23] = 2;
+            expected[0x90..0x94].copy_from_slice(&[0x10, 8, 0, 0]);
+            assert_eq!(ctx.ram.slice(0, z3_core::WRAM_SIZE), expected);
+        });
+    }
+
+    #[test]
+    fn quake_spread_advances_globals_then_publishes_only_its_actual_local_wrap() {
+        fixture(|ctx| {
+            oam::OamPointers {
+                entry: 0x98c,
+                extended: 0xffff,
+            }
+            .publish_entry_first(ctx.ram);
+            ctx.set_step(2, 1);
+            ctx.set_timer(2, 1);
+            ctx.set_item_to_link(2, 0);
+            let mut expected = ctx.ram.slice(0, z3_core::WRAM_SIZE).to_vec();
+            ctx.quake_spell_spread_bolts(2);
+            expected[0x98c..0x990].copy_from_slice(&[160, 112, 0x40, 0x3c]);
+            expected[0xa83] = 2;
+            expected[0x90..0x94].copy_from_slice(&[0x20, 8, 0x28, 0xa]);
+            assert_eq!(ctx.ram.slice(0, z3_core::WRAM_SIZE), expected);
         });
     }
 
