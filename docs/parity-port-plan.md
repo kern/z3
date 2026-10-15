@@ -6,6 +6,10 @@ canonical-state, rendered-pixel, and PCM comparison, covering 1,073,092 frames.
 Full-recording APU queue and SPC/DSP state comparisons also pass across those recordings.
 Modernization remains separate from this compatibility baseline.
 
+The next-stage [Rust modernization inventory and plan](rust-modernization-plan.md)
+covers direct memory/pointer arithmetic, state representation, ownership,
+control flow, and ergonomic APIs while preserving these same parity gates.
+
 ## Integration rule
 
 The pinned C build remains the oracle. For each input frame, the differential

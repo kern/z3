@@ -3,8 +3,19 @@
 //! This module is a bounds-checked Rust port of `src/sprite.c`. The original
 //! WRAM layout is kept explicit so behavior can be compared address-for-address.
 
-use crate::{oam, ram::Ram};
+use crate::sound::{SoundPort, SoundRequest};
+use crate::{
+    oam,
+    position::{Height, SplitPosition},
+    ram::Ram,
+};
 use z3_core::WRAM_SIZE;
+
+const SPRITE_X_POSITION: SplitPosition<16> =
+    SplitPosition::world(SPRITE_X_SUBPIXEL, SPRITE_X_LO, SPRITE_X_HI);
+const SPRITE_Y_POSITION: SplitPosition<16> =
+    SplitPosition::world(SPRITE_Y_SUBPIXEL, SPRITE_Y_LO, SPRITE_Y_HI);
+const SPRITE_HEIGHT: SplitPosition<8> = SplitPosition::height(SPRITE_Z_SUBPOS, SPRITE_Z);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PrepOamCoordsRet {
@@ -192,19 +203,17 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     #[must_use]
     pub fn sprite_get_x(&self, slot: usize) -> u16 {
-        u16::from(self.arr(SPRITE_X_LO, slot)) | u16::from(self.arr(SPRITE_X_HI, slot)) << 8
+        SPRITE_X_POSITION.pixels(&self.ram, slot)
     }
     #[must_use]
     pub fn sprite_get_y(&self, slot: usize) -> u16 {
-        u16::from(self.arr(SPRITE_Y_LO, slot)) | u16::from(self.arr(SPRITE_Y_HI, slot)) << 8
+        SPRITE_Y_POSITION.pixels(&self.ram, slot)
     }
     pub fn sprite_set_x(&mut self, slot: usize, value: u16) {
-        self.set_arr(SPRITE_X_LO, slot, value as u8);
-        self.set_arr(SPRITE_X_HI, slot, (value >> 8) as u8);
+        SPRITE_X_POSITION.set_pixels(&mut self.ram, slot, value);
     }
     pub fn sprite_set_y(&mut self, slot: usize, value: u16) {
-        self.set_arr(SPRITE_Y_LO, slot, value as u8);
-        self.set_arr(SPRITE_Y_HI, slot, (value >> 8) as u8);
+        SPRITE_Y_POSITION.set_pixels(&mut self.ram, slot, value);
     }
     pub fn sprite_approach_target_speed(&mut self, slot: usize, x: u8, y: u8) {
         for (base, target) in [(SPRITE_X_VEL, x), (SPRITE_Y_VEL, y)] {
@@ -246,33 +255,25 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if velocity == 0 {
             return;
         }
-        let position = u32::from(self.arr(SPRITE_X_SUBPIXEL, slot))
-            | u32::from(self.arr(SPRITE_X_LO, slot)) << 8
-            | u32::from(self.arr(SPRITE_X_HI, slot)) << 16;
-        let next = position.wrapping_add_signed(i32::from(velocity) << 4);
-        self.set_arr(SPRITE_X_SUBPIXEL, slot, next as u8);
-        self.set_arr(SPRITE_X_LO, slot, (next >> 8) as u8);
-        self.set_arr(SPRITE_X_HI, slot, (next >> 16) as u8);
+        let position = SPRITE_X_POSITION.load(&self.ram, slot);
+        SPRITE_X_POSITION.store(&mut self.ram, slot, position.advanced(velocity));
     }
     pub fn sprite_move_y(&mut self, slot: usize) {
         let velocity = self.arr(SPRITE_Y_VEL, slot) as i8;
         if velocity == 0 {
             return;
         }
-        let position = u32::from(self.arr(SPRITE_Y_SUBPIXEL, slot))
-            | u32::from(self.arr(SPRITE_Y_LO, slot)) << 8
-            | u32::from(self.arr(SPRITE_Y_HI, slot)) << 16;
-        let next = position.wrapping_add_signed(i32::from(velocity) << 4);
-        self.set_arr(SPRITE_Y_SUBPIXEL, slot, next as u8);
-        self.set_arr(SPRITE_Y_LO, slot, (next >> 8) as u8);
-        self.set_arr(SPRITE_Y_HI, slot, (next >> 16) as u8);
+        let position = SPRITE_Y_POSITION.load(&self.ram, slot);
+        SPRITE_Y_POSITION.store(&mut self.ram, slot, position.advanced(velocity));
     }
     pub fn sprite_move_z(&mut self, slot: usize) {
-        let z =
-            u16::from(self.arr(SPRITE_Z, slot)) << 8 | u16::from(self.arr(SPRITE_Z_SUBPOS, slot));
-        let next = z.wrapping_add_signed(i16::from(self.arr(SPRITE_Z_VEL, slot) as i8) << 4);
-        self.set_arr(SPRITE_Z_SUBPOS, slot, next as u8);
-        self.set_arr(SPRITE_Z, slot, (next >> 8) as u8);
+        // The legacy Z helper reads whole pixels before the fractional byte.
+        let position = Height::from_parts(
+            u16::from(self.arr(SPRITE_Z, slot)),
+            self.arr(SPRITE_Z_SUBPOS, slot),
+        );
+        let velocity = self.arr(SPRITE_Z_VEL, slot) as i8;
+        SPRITE_HEIGHT.store(&mut self.ram, slot, position.advanced(velocity));
     }
     pub fn sprite_move_xy(&mut self, slot: usize) {
         self.sprite_move_x(slot);
@@ -967,8 +968,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_func22(&mut self, slot: usize) {
-        let sound = crate::misc::calculate_sfx_pan(&self.ram, self.sprite_get_x(slot)) | 0x28;
-        self.w8(0x12e, sound);
+        let sound = SoundRequest::at_world_x(&self.ram, 0x28, self.sprite_get_x(slot));
+        SoundPort::EffectsA.overwrite(&mut self.ram, sound);
         self.set_arr(SPRITE_STATE, slot, 3);
         self.set_arr(SPRITE_DELAY_MAIN, slot, 15);
         self.set_arr(SPRITE_AI_STATE, slot, 0);
@@ -4341,12 +4342,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 self.w8(0x46, 16);
                 self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x21);
                 self.set_arr(SPRITE_DELAY_AUX1, slot, 48);
-                let sfx = if self.hooks.enhanced_features0() & 4096 != 0 {
+                let effect = if self.hooks.enhanced_features0() & 4096 != 0 {
                     0x32
                 } else {
                     0
-                } | crate::misc::calculate_sfx_pan(&self.ram, self.sprite_get_x(slot));
-                self.w8(0x12f, sfx);
+                };
+                let sound = SoundRequest::at_world_x(&self.ram, effect, self.sprite_get_x(slot));
+                SoundPort::EffectsB.overwrite(&mut self.ram, sound);
                 self.link_place_weapon_tink();
                 return 1;
             }
@@ -4582,14 +4584,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         self.set_arr(SPRITE_HIT_TIMER, slot, hit_timer);
         if self.arr(SPRITE_TYPE, slot) != 0x92 || self.arr(SPRITE_C, slot) >= 3 {
-            let sfx = if self.arr(SPRITE_FLAGS, slot) & 2 != 0 {
+            let effect = if self.arr(SPRITE_FLAGS, slot) & 2 != 0 {
                 0x21
             } else if self.arr(SPRITE_FLAGS5, slot) & 0x10 != 0 {
                 0x1c
             } else {
                 8
-            } | crate::misc::calculate_sfx_pan(&self.ram, self.sprite_get_x(slot));
-            self.w8(0x12f, sfx);
+            };
+            let sound = SoundRequest::at_world_x(&self.ram, effect, self.sprite_get_x(slot));
+            SoundPort::EffectsB.overwrite(&mut self.ram, sound);
         }
         self.finish_sprite_damage(slot);
     }
@@ -5830,6 +5833,81 @@ mod tests {
         sprites.sprite_move_x(0);
         assert_eq!(sprites.sprite_get_x(0), 0x1235);
         assert_eq!(sprites.arr(SPRITE_X_SUBPIXEL, 0), 0x58);
+    }
+
+    #[test]
+    fn coordinate_setters_preserve_fractional_and_neighboring_bytes() {
+        let mut bytes = [0xa5; WRAM_SIZE];
+        let mut expected = bytes.to_vec();
+        let mut hooks = Hooks;
+        let mut sprites = Sprite::new(&mut bytes, &mut hooks);
+        sprites.sprite_set_x(15, 0xabcd);
+        sprites.sprite_set_y(15, 0x1234);
+        expected[SPRITE_X_LO + 15] = 0xcd;
+        expected[SPRITE_X_HI + 15] = 0xab;
+        expected[SPRITE_Y_LO + 15] = 0x34;
+        expected[SPRITE_Y_HI + 15] = 0x12;
+        assert_eq!(sprites.sprite_get_x(15), 0xabcd);
+        assert_eq!(sprites.sprite_get_y(15), 0x1234);
+        assert_eq!(sprites.ram.slice(0, WRAM_SIZE), expected);
+    }
+
+    #[test]
+    fn movement_preserves_all_bytes_outside_the_selected_coordinate() {
+        let mut bytes = [0xa5; WRAM_SIZE];
+        let mut hooks = Hooks;
+        let mut sprites = Sprite::new(&mut bytes, &mut hooks);
+        for axis in 0..3 {
+            let (fraction, low, high, velocity) = match axis {
+                0 => (
+                    SPRITE_X_SUBPIXEL,
+                    SPRITE_X_LO,
+                    Some(SPRITE_X_HI),
+                    SPRITE_X_VEL,
+                ),
+                1 => (
+                    SPRITE_Y_SUBPIXEL,
+                    SPRITE_Y_LO,
+                    Some(SPRITE_Y_HI),
+                    SPRITE_Y_VEL,
+                ),
+                _ => (SPRITE_Z_SUBPOS, SPRITE_Z, None, SPRITE_Z_VEL),
+            };
+            for slot in [0, 15] {
+                for pixels in [0u16, 0xff, 0xffff] {
+                    for subpixel in [0u8, 0xf8] {
+                        for speed in [-128i8, -1, 0, 1, 127] {
+                            sprites.ram.bytes_mut().fill(0xa5);
+                            sprites.set_arr(fraction, slot, subpixel);
+                            sprites.set_arr(low, slot, pixels as u8);
+                            if let Some(high) = high {
+                                sprites.set_arr(high, slot, (pixels >> 8) as u8);
+                            }
+                            sprites.set_arr(velocity, slot, speed as u8);
+                            let mut expected = sprites.ram.slice(0, WRAM_SIZE).to_vec();
+                            let integer = if high.is_some() {
+                                pixels
+                            } else {
+                                pixels & 0xff
+                            };
+                            let sum = ((u32::from(integer) << 8) | u32::from(subpixel))
+                                .wrapping_add((i32::from(speed) << 4) as u32);
+                            expected[fraction + slot] = sum as u8;
+                            expected[low + slot] = (sum >> 8) as u8;
+                            if let Some(high) = high {
+                                expected[high + slot] = (sum >> 16) as u8;
+                            }
+                            match axis {
+                                0 => sprites.sprite_move_x(slot),
+                                1 => sprites.sprite_move_y(slot),
+                                _ => sprites.sprite_move_z(slot),
+                            }
+                            assert_eq!(sprites.ram.slice(0, WRAM_SIZE), expected);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -378,9 +378,9 @@ impl OverworldAssets for RuntimeAssets<'_> {
         // beyond its declared 136-byte payload. Its asset pointers refer into
         // one contiguous file, so that byte comes from the following payload.
         // Keep the same packed-file view for this lookup.
-        let payload = self.bytes(109);
-        let start = payload.as_ptr() as usize - self.file.bytes().as_ptr() as usize;
-        &self.file.bytes()[start..]
+        self.file
+            .file_suffix(109)
+            .expect("background palette asset")
     }
     fn sprite_graphics(&self) -> &[u8] {
         self.bytes(161)
@@ -567,6 +567,30 @@ impl OverworldAssets for RuntimeAssets<'_> {
 mod tests {
     use super::*;
     use z3_core::assets::{ASSET_COUNT, ASSET_SIGNATURE, HEADER_SIZE};
+
+    #[test]
+    fn background_palette_lookup_includes_the_following_asset_for_credits() {
+        let mut bundle = vec![0; HEADER_SIZE + ASSET_COUNT * 4];
+        bundle[..ASSET_SIGNATURE.len()].copy_from_slice(&ASSET_SIGNATURE);
+        bundle[80..84].copy_from_slice(&(ASSET_COUNT as u32).to_le_bytes());
+        for index in 0..ASSET_COUNT {
+            bundle.resize((bundle.len() + 3) & !3, 0);
+            let payload = match index {
+                109 => vec![0x12; 136],
+                110 => vec![0x34, 0x56],
+                _ => vec![],
+            };
+            bundle[HEADER_SIZE + index * 4..HEADER_SIZE + index * 4 + 4]
+                .copy_from_slice(&(payload.len() as u32).to_le_bytes());
+            bundle.extend_from_slice(&payload);
+        }
+        bundle.extend_from_slice(&[0xde, 0xad]);
+        let assets = RuntimeAssets::parse(&bundle).unwrap();
+        assert_eq!(assets.bytes(109).len(), 136);
+        assert_eq!(assets.background_palettes()[0x88], 0x34);
+        assert_eq!(assets.background_palettes()[0x89], 0x56);
+        assert!(assets.background_palettes().ends_with(&[0xde, 0xad]));
+    }
 
     #[test]
     fn dungeon_door_offsets_address_exact_bytes() {

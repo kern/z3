@@ -3,6 +3,7 @@
 //! All addresses are offsets in the original `g_ram` WRAM image.  Operations
 //! owned by other C translation units are exposed through [`MiscHooks`].
 use crate::ram::Ram;
+use crate::sound::{SoundPort, SoundRequest};
 
 const MAIN: usize = 0x10;
 const SUB: usize = 0x11;
@@ -418,29 +419,29 @@ fn play_sfx_set_pan(r: &mut Ram<'_>, a: u8) -> u8 {
 
 pub fn ancilla_sfx2_near(r: &mut Ram<'_>, a: u8) -> u8 {
     let v = play_sfx_set_pan(r, a);
-    r.write_u8(SFX1, v);
+    SoundPort::EffectsA.overwrite(r, SoundRequest::from_raw(v));
     v
 }
 
 pub fn ancilla_sfx3_near(r: &mut Ram<'_>, a: u8) {
     let v = play_sfx_set_pan(r, a);
-    r.write_u8(SFX2, v);
+    SoundPort::EffectsB.overwrite(r, SoundRequest::from_raw(v));
 }
 
 pub fn sprite_sfx1_with_pan<H: MiscHooks>(r: &mut Ram<'_>, hooks: &H, k: usize, a: u8) {
-    if r.read_u8(SFX_AMBIENT) == 0 {
-        r.write_u8(SFX_AMBIENT, a | sprite_calculate_sfx_pan(r, hooks, k));
-    }
+    SoundPort::Ambient.queue_if_idle_with(r, |ram| {
+        SoundRequest::at_world_x(ram, a, hooks.sprite_x(ram, k))
+    });
 }
 pub fn sprite_sfx2_with_pan<H: MiscHooks>(r: &mut Ram<'_>, hooks: &H, k: usize, a: u8) {
-    if r.read_u8(SFX1) == 0 {
-        r.write_u8(SFX1, a | sprite_calculate_sfx_pan(r, hooks, k));
-    }
+    SoundPort::EffectsA.queue_if_idle_with(r, |ram| {
+        SoundRequest::at_world_x(ram, a, hooks.sprite_x(ram, k))
+    });
 }
 pub fn sprite_sfx3_with_pan<H: MiscHooks>(r: &mut Ram<'_>, hooks: &H, k: usize, a: u8) {
-    if r.read_u8(SFX2) == 0 {
-        r.write_u8(SFX2, a | sprite_calculate_sfx_pan(r, hooks, k));
-    }
+    SoundPort::EffectsB.queue_if_idle_with(r, |ram| {
+        SoundRequest::at_world_x(ram, a, hooks.sprite_x(ram, k))
+    });
 }
 
 pub fn item_receipt_give_bottled_item(r: &mut Ram<'_>, item: u8) {

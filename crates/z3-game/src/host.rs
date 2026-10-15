@@ -45,7 +45,99 @@ pub const COMMAND_LOAD_REF: u16 = 73;
 pub const COMMAND_LOAD_REF_LAST: u16 = 92;
 pub const COMMAND_REPLAY_REF: u16 = 93;
 pub const COMMAND_REPLAY_REF_LAST: u16 = 112;
-pub const COMMAND_TURBO: u16 = 123;
+
+/// Host policy decoded from the C configuration command numbers. Unknown
+/// values are retained so decoding never changes the legacy wire format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostCommand {
+    CheatLife,
+    CheatKeys,
+    CheatEquipment,
+    CheatWalkThroughWalls,
+    ClearKeyLog,
+    StopReplay,
+    Fullscreen,
+    Reset,
+    Pause,
+    PauseDimmed,
+    Turbo,
+    ReplayTurbo,
+    WindowBigger,
+    WindowSmaller,
+    DisplayPerf,
+    ToggleRenderer,
+    VolumeUp,
+    VolumeDown,
+    Unknown(u16),
+}
+
+impl HostCommand {
+    /// Encodes the unchanged configuration command number.
+    #[must_use]
+    pub const fn code(self) -> u16 {
+        match self {
+            Self::CheatLife => 113,
+            Self::CheatKeys => 114,
+            Self::CheatEquipment => 115,
+            Self::CheatWalkThroughWalls => 116,
+            Self::ClearKeyLog => 117,
+            Self::StopReplay => 118,
+            Self::Fullscreen => 119,
+            Self::Reset => 120,
+            Self::Pause => 121,
+            Self::PauseDimmed => 122,
+            Self::Turbo => 123,
+            Self::ReplayTurbo => 124,
+            Self::WindowBigger => 125,
+            Self::WindowSmaller => 126,
+            Self::DisplayPerf => 127,
+            Self::ToggleRenderer => 128,
+            Self::VolumeUp => 129,
+            Self::VolumeDown => 130,
+            Self::Unknown(code) => code,
+        }
+    }
+
+    /// Legacy recorder patch key, encoded only at the runtime boundary.
+    #[must_use]
+    pub const fn patch_key(self) -> Option<char> {
+        match self {
+            Self::CheatLife => Some('w'),
+            Self::CheatKeys => Some('o'),
+            Self::CheatEquipment => Some('W'),
+            Self::CheatWalkThroughWalls => Some('E'),
+            Self::ClearKeyLog => Some('k'),
+            Self::StopReplay => Some('l'),
+            _ => None,
+        }
+    }
+}
+
+impl From<u16> for HostCommand {
+    fn from(code: u16) -> Self {
+        match code {
+            113 => Self::CheatLife,
+            114 => Self::CheatKeys,
+            115 => Self::CheatEquipment,
+            116 => Self::CheatWalkThroughWalls,
+            117 => Self::ClearKeyLog,
+            118 => Self::StopReplay,
+            119 => Self::Fullscreen,
+            120 => Self::Reset,
+            121 => Self::Pause,
+            122 => Self::PauseDimmed,
+            123 => Self::Turbo,
+            124 => Self::ReplayTurbo,
+            125 => Self::WindowBigger,
+            126 => Self::WindowSmaller,
+            127 => Self::DisplayPerf,
+            128 => Self::ToggleRenderer,
+            129 => Self::VolumeUp,
+            130 => Self::VolumeDown,
+            _ => Self::Unknown(code),
+        }
+    }
+}
 
 pub const DEFAULT_AUDIO_FREQUENCY: u16 = 44_100;
 pub const DEFAULT_AUDIO_CHANNELS: u8 = 2;
@@ -74,7 +166,7 @@ pub enum SaveLoadKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostAction {
     SaveLoad { kind: SaveLoadKind, slot: u16 },
-    Command(u16),
+    Command(HostCommand),
 }
 
 /// Applies the exact startup range checks from `main.c` after configuration
@@ -182,7 +274,7 @@ impl InputState {
             }
             return None;
         }
-        if command == COMMAND_TURBO {
+        if HostCommand::from(command) == HostCommand::Turbo {
             self.turbo = pressed;
             return None;
         }
@@ -276,7 +368,7 @@ pub fn command_action(command: u16) -> HostAction {
             kind: SaveLoadKind::Replay,
             slot: 256 + command - COMMAND_REPLAY_REF,
         },
-        _ => HostAction::Command(command),
+        _ => HostAction::Command(command.into()),
     }
 }
 
@@ -432,6 +524,91 @@ mod tests {
         assert_eq!(input.keyboard_buttons, (1 << 4) | (1 << 8));
         input.handle_command(1, false);
         assert_eq!(input.keyboard_buttons, 1 << 8);
+    }
+
+    #[test]
+    fn host_command_codec_preserves_all_legacy_values() {
+        let commands = [
+            HostCommand::CheatLife,
+            HostCommand::CheatKeys,
+            HostCommand::CheatEquipment,
+            HostCommand::CheatWalkThroughWalls,
+            HostCommand::ClearKeyLog,
+            HostCommand::StopReplay,
+            HostCommand::Fullscreen,
+            HostCommand::Reset,
+            HostCommand::Pause,
+            HostCommand::PauseDimmed,
+            HostCommand::Turbo,
+            HostCommand::ReplayTurbo,
+            HostCommand::WindowBigger,
+            HostCommand::WindowSmaller,
+            HostCommand::DisplayPerf,
+            HostCommand::ToggleRenderer,
+            HostCommand::VolumeUp,
+            HostCommand::VolumeDown,
+        ];
+        for (code, command) in (113..=130).zip(commands) {
+            assert_eq!(HostCommand::from(code), command);
+            assert_eq!(command.code(), code);
+        }
+        for code in 0..=u16::MAX {
+            let command = HostCommand::from(code);
+            assert_eq!(command.code(), code);
+            if !(113..=130).contains(&code) {
+                assert_eq!(command, HostCommand::Unknown(code));
+            }
+        }
+    }
+
+    #[test]
+    fn patch_keys_keep_the_recording_command_protocol() {
+        for (command, key) in [
+            (HostCommand::CheatLife, 'w'),
+            (HostCommand::CheatKeys, 'o'),
+            (HostCommand::CheatEquipment, 'W'),
+            (HostCommand::CheatWalkThroughWalls, 'E'),
+            (HostCommand::ClearKeyLog, 'k'),
+            (HostCommand::StopReplay, 'l'),
+        ] {
+            assert_eq!(command.patch_key(), Some(key));
+        }
+        for code in 119..=u16::MAX {
+            assert_eq!(HostCommand::from(code).patch_key(), None);
+        }
+    }
+
+    #[test]
+    fn commands_fire_on_press_while_turbo_tracks_both_edges() {
+        let mut input = InputState::default();
+        assert_eq!(
+            input.handle_command(121, true),
+            Some(HostAction::Command(HostCommand::Pause))
+        );
+        assert_eq!(input.handle_command(121, false), None);
+        assert_eq!(input.handle_command(123, true), None);
+        assert!(input.turbo);
+        assert_eq!(input.handle_command(123, false), None);
+        assert!(!input.turbo);
+        assert_eq!(
+            input.handle_command(u16::MAX, true),
+            Some(HostAction::Command(HostCommand::Unknown(u16::MAX)))
+        );
+        assert_eq!(input.handle_command(u16::MAX, false), None);
+    }
+
+    #[test]
+    fn gamepad_release_uses_the_command_selected_on_press() {
+        let mut input = InputState::default();
+        assert_eq!(input.handle_gamepad_button(0, true, |_, _| 123), None);
+        assert!(input.turbo);
+        assert_eq!(
+            input.handle_gamepad_button(0, false, |_, _| {
+                panic!("release must retain the pressed command")
+            }),
+            None
+        );
+        assert!(!input.turbo);
     }
 
     #[test]

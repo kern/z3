@@ -5,6 +5,7 @@
 //! [`z3_snes::dma::Dma`] state that does not occur in the reference port.
 
 use crate::ram::Ram;
+use crate::sound::SoundPort;
 use core::fmt;
 use z3_snes::ppu::Ppu;
 
@@ -174,7 +175,7 @@ fn update_audio(ram: &mut Ram<'_>, audio: &mut impl NmiAudio) {
         }
         ram.write_u8(0x12c, 0);
     }
-    let ambient = ram.read_u8(0x12d);
+    let ambient = SoundPort::Ambient.pending(ram);
     if ambient == 0 {
         if audio.read_apu_port(1) == ram.read_u8(0x131) {
             audio.write_apu_port(1, 0);
@@ -182,12 +183,12 @@ fn update_audio(ram: &mut Ram<'_>, audio: &mut impl NmiAudio) {
     } else {
         ram.write_u8(0x131, ambient);
         audio.write_apu_port(1, ambient);
-        ram.write_u8(0x12d, 0);
+        SoundPort::Ambient.clear(ram);
     }
-    audio.write_apu_port(2, ram.read_u8(0x12e));
-    audio.write_apu_port(3, ram.read_u8(0x12f));
-    ram.write_u8(0x12e, 0);
-    ram.write_u8(0x12f, 0);
+    audio.write_apu_port(2, SoundPort::EffectsA.pending(ram));
+    audio.write_apu_port(3, SoundPort::EffectsB.pending(ram));
+    SoundPort::EffectsA.clear(ram);
+    SoundPort::EffectsB.clear(ram);
 }
 
 pub fn interrupt_nmi(

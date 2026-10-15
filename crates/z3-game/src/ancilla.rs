@@ -4,7 +4,7 @@
 //! All fixed-point movement is performed as a 24-bit wrapping operation, just
 //! like the 65816/C implementation.
 
-use crate::{oam, ram::Ram};
+use crate::{oam, position::SplitPosition, ram::Ram};
 
 #[path = "ancilla_handlers_0.rs"]
 mod handlers_0;
@@ -23,6 +23,9 @@ const Y_VEL: usize = 0xc22;
 const X_VEL: usize = 0xc2c;
 const Y_SUBPIXEL: usize = 0xc36;
 const X_SUBPIXEL: usize = 0xc40;
+const X_POSITION: SplitPosition<16> = SplitPosition::world(X_SUBPIXEL, X_LO, X_HI);
+const Y_POSITION: SplitPosition<16> = SplitPosition::world(Y_SUBPIXEL, Y_LO, Y_HI);
+const HEIGHT: SplitPosition<8> = SplitPosition::height(Z_SUBPIXEL, Z);
 const TYPE: usize = 0xc4a;
 const STEP: usize = 0xc54;
 const ITEM_TO_LINK: usize = 0xc5e;
@@ -251,24 +254,20 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     #[must_use]
     pub fn get_x(&self, k: usize) -> u16 {
-        u16::from_le_bytes([self.ram.read_u8(X_LO + k), self.ram.read_u8(X_HI + k)])
+        X_POSITION.pixels(self.ram, k)
     }
 
     #[must_use]
     pub fn get_y(&self, k: usize) -> u16 {
-        u16::from_le_bytes([self.ram.read_u8(Y_LO + k), self.ram.read_u8(Y_HI + k)])
+        Y_POSITION.pixels(self.ram, k)
     }
 
     pub fn set_x(&mut self, k: usize, value: u16) {
-        let [lo, hi] = value.to_le_bytes();
-        self.ram.write_u8(X_LO + k, lo);
-        self.ram.write_u8(X_HI + k, hi);
+        X_POSITION.set_pixels(self.ram, k, value);
     }
 
     pub fn set_y(&mut self, k: usize, value: u16) {
-        let [lo, hi] = value.to_le_bytes();
-        self.ram.write_u8(Y_LO + k, lo);
-        self.ram.write_u8(Y_HI + k, hi);
+        Y_POSITION.set_pixels(self.ram, k, value);
     }
 
     #[must_use]
@@ -279,31 +278,21 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn move_x(&mut self, k: usize) {
-        self.move_24(k, X_SUBPIXEL, X_LO, X_HI, X_VEL);
+        let position = X_POSITION.load(self.ram, k);
+        let velocity = self.ram.read_i8(X_VEL + k);
+        X_POSITION.store(self.ram, k, position.advanced(velocity));
     }
 
     pub fn move_y(&mut self, k: usize) {
-        self.move_24(k, Y_SUBPIXEL, Y_LO, Y_HI, Y_VEL);
-    }
-
-    fn move_24(&mut self, k: usize, sub: usize, lo: usize, hi: usize, vel: usize) {
-        let position = u32::from(self.ram.read_u8(sub + k))
-            | (u32::from(self.ram.read_u8(lo + k)) << 8)
-            | (u32::from(self.ram.read_u8(hi + k)) << 16);
-        let delta = i32::from(self.ram.read_i8(vel + k)) << 4;
-        let value = position.wrapping_add(delta as u32) & 0x00ff_ffff;
-        self.ram.write_u8(sub + k, value as u8);
-        self.ram.write_u8(lo + k, (value >> 8) as u8);
-        self.ram.write_u8(hi + k, (value >> 16) as u8);
+        let position = Y_POSITION.load(self.ram, k);
+        let velocity = self.ram.read_i8(Y_VEL + k);
+        Y_POSITION.store(self.ram, k, position.advanced(velocity));
     }
 
     pub fn move_z(&mut self, k: usize) {
-        let position =
-            u16::from_le_bytes([self.ram.read_u8(Z_SUBPIXEL + k), self.ram.read_u8(Z + k)]);
-        let delta = i16::from(self.ram.read_i8(Z_VEL + k)) << 4;
-        let value = position.wrapping_add(delta as u16);
-        self.ram.write_u8(Z_SUBPIXEL + k, value as u8);
-        self.ram.write_u8(Z + k, (value >> 8) as u8);
+        let position = HEIGHT.load(self.ram, k);
+        let velocity = self.ram.read_i8(Z_VEL + k);
+        HEIGHT.store(self.ram, k, position.advanced(velocity));
     }
 
     pub fn set_oam(&mut self, index: usize, x: u16, y: u16, charnum: u8, flags: u8, mut big: u8) {
@@ -509,6 +498,65 @@ mod tests {
             a.move_z(0);
             assert_eq!(a.ram.read_u8(Z), 0xff);
             assert_eq!(a.ram.read_u8(Z_SUBPIXEL), 0xf0);
+        });
+    }
+
+    #[test]
+    fn coordinate_setters_preserve_fractions_and_other_slots() {
+        fixture(|a| {
+            a.ram.bytes_mut().fill(0xa5);
+            let mut expected = a.ram.slice(0, WRAM_SIZE).to_vec();
+            a.set_x(4, 0xabcd);
+            a.set_y(4, 0x1234);
+            expected[X_LO + 4] = 0xcd;
+            expected[X_HI + 4] = 0xab;
+            expected[Y_LO + 4] = 0x34;
+            expected[Y_HI + 4] = 0x12;
+            assert_eq!(a.ram.slice(0, WRAM_SIZE), expected);
+        });
+    }
+
+    #[test]
+    fn movement_touches_only_the_selected_split_coordinate() {
+        fixture(|a| {
+            for axis in 0..3 {
+                let (fraction, low, high, velocity) = match axis {
+                    0 => (X_SUBPIXEL, X_LO, Some(X_HI), X_VEL),
+                    1 => (Y_SUBPIXEL, Y_LO, Some(Y_HI), Y_VEL),
+                    _ => (Z_SUBPIXEL, Z, None, Z_VEL),
+                };
+                for speed in [-128i8, -1, 0, 1, 127] {
+                    for pixels in [0u16, 0xff, 0xffff] {
+                        a.ram.bytes_mut().fill(0xa5);
+                        let slot = 4;
+                        a.ram.write_u8(fraction + slot, 0xf8);
+                        a.ram.write_u8(low + slot, pixels as u8);
+                        if let Some(high) = high {
+                            a.ram.write_u8(high + slot, (pixels >> 8) as u8);
+                        }
+                        a.ram.write_i8(velocity + slot, speed);
+                        let mut expected = a.ram.slice(0, WRAM_SIZE).to_vec();
+                        let integer = if high.is_some() {
+                            pixels
+                        } else {
+                            pixels & 0xff
+                        };
+                        let c_sum = (u32::from(integer) << 8 | 0xf8)
+                            .wrapping_add((i32::from(speed) << 4) as u32);
+                        expected[fraction + slot] = c_sum as u8;
+                        expected[low + slot] = (c_sum >> 8) as u8;
+                        if let Some(high) = high {
+                            expected[high + slot] = (c_sum >> 16) as u8;
+                        }
+                        match axis {
+                            0 => a.move_x(slot),
+                            1 => a.move_y(slot),
+                            _ => a.move_z(slot),
+                        }
+                        assert_eq!(a.ram.slice(0, WRAM_SIZE), expected);
+                    }
+                }
+            }
         });
     }
 

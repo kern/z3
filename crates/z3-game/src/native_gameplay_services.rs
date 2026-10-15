@@ -2721,16 +2721,16 @@ impl SpriteMainBank0Runtime for NativeGameServices<'_> {
 
     fn queue_sfx2_with_pan(&mut self, ram: &mut Ram<'_>, slot: usize, sound: u8) {
         let x = u16::from(ram.read_u8(0xd10 + slot)) | (u16::from(ram.read_u8(0xd30 + slot)) << 8);
-        if ram.read_u8(0x12e) == 0 {
-            ram.write_u8(0x12e, sound | crate::misc::calculate_sfx_pan(ram, x));
-        }
+        crate::sound::SoundPort::EffectsA.queue_if_idle_with(ram, |ram| {
+            crate::sound::SoundRequest::at_world_x(ram, sound, x)
+        });
     }
 
     fn queue_sfx3_with_pan(&mut self, ram: &mut Ram<'_>, slot: usize, sound: u8) {
         let x = u16::from(ram.read_u8(0xd10 + slot)) | (u16::from(ram.read_u8(0xd30 + slot)) << 8);
-        if ram.read_u8(0x12f) == 0 {
-            ram.write_u8(0x12f, sound | crate::misc::calculate_sfx_pan(ram, x));
-        }
+        crate::sound::SoundPort::EffectsB.queue_if_idle_with(ram, |ram| {
+            crate::sound::SoundRequest::at_world_x(ram, sound, x)
+        });
     }
 
     fn sprite_return_if_inactive(&mut self, ram: &mut Ram<'_>, slot: usize) -> bool {

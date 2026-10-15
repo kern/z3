@@ -5,6 +5,7 @@
 //! are exposed through [`DungeonHooks`].
 
 use crate::ram::Ram;
+use crate::sound::{SoundPort, SoundRequest};
 use z3_core::WRAM_SIZE;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -6551,12 +6552,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         }
         self.hooks
             .dungeon_prep_overlay_dma_next(&mut self.ram, 0, address);
-        self.w8(
-            0x12e,
-            30 | self
-                .hooks
-                .dungeon_calculate_sfx_pan(&self.ram, (address & 0x7f) * 2),
-        );
+        let pan = self
+            .hooks
+            .dungeon_calculate_sfx_pan(&self.ram, (address & 0x7f) * 2);
+        SoundPort::EffectsA.overwrite(&mut self.ram, SoundRequest::with_pan(30, pan));
         self.w8(0x18, 1);
     }
 

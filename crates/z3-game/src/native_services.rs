@@ -2,7 +2,7 @@
 
 use crate::attract::AttractRuntime;
 use crate::dungeon::DungeonHooks;
-use crate::ending::{Ending, EndingRuntime};
+use crate::ending::{Ending, EndingCall, EndingRuntime};
 use crate::hud::{Hud, HudRenderOp, HudRuntime};
 use crate::integration::{
     NativeGameServices, NativeHostAction, OverworldCall, OverworldServices, SpotlightServices,
@@ -957,29 +957,29 @@ impl AttractRuntime for NativeGameServices<'_> {
     }
 }
 impl EndingRuntime for NativeGameServices<'_> {
-    fn call(&mut self, name: &'static str, ram: &mut Ram<'_>) {
-        match name {
-            "ApplyPaletteFilter_bounce" => {
+    fn call(&mut self, call: EndingCall, ram: &mut Ram<'_>) {
+        match call {
+            EndingCall::ApplyPaletteFilterBounce => {
                 self.with_load_gfx(ram, |gfx| gfx.apply_palette_filter_bounce());
             }
-            "CallForDuckIndoors" => {
+            EndingCall::CallForDuckIndoors => {
                 crate::ancilla::Ancilla { ram, runtime: self }.call_for_duck_indoors();
             }
-            "ConditionalMosaicControl" => overworld::conditional_mosaic_control(ram),
-            "Dungeon_HandleLayerEffect" => {
+            EndingCall::ConditionalMosaicControl => overworld::conditional_mosaic_control(ram),
+            EndingCall::DungeonHandleLayerEffect => {
                 crate::dungeon::Dungeon::new(ram.bytes_mut(), self).dungeon_handle_layer_effect();
             }
-            "Dungeon_LoadAndDrawRoom" => {
+            EndingCall::DungeonLoadAndDrawRoom => {
                 crate::dungeon::Dungeon::new(ram.bytes_mut(), self).dungeon_load_and_draw_room();
             }
-            "Dungeon_LoadEntrance" => {
+            EndingCall::DungeonLoadEntrance => {
                 crate::dungeon::Dungeon::new(ram.bytes_mut(), self).dungeon_load_entrance();
             }
-            "Dungeon_LoadPalettes" => {
+            EndingCall::DungeonLoadPalettes => {
                 self.with_load_gfx(ram, |gfx| gfx.dungeon_load_palettes());
             }
-            "Hud_RebuildIndoor" => Hud { ram, runtime: self }.rebuild_indoor(),
-            "Link_HandleMovingAnimation_FullLongEntry" => {
+            EndingCall::HudRebuildIndoor => Hud { ram, runtime: self }.rebuild_indoor(),
+            EndingCall::LinkHandleMovingAnimationFullLongEntry => {
                 crate::player::Player {
                     ram,
                     runtime: self,
@@ -987,7 +987,7 @@ impl EndingRuntime for NativeGameServices<'_> {
                 }
                 .link_handle_moving_animation_full_long_entry();
             }
-            "Link_HandleVelocity" => {
+            EndingCall::LinkHandleVelocity => {
                 crate::player::Player {
                     ram,
                     runtime: self,
@@ -995,7 +995,7 @@ impl EndingRuntime for NativeGameServices<'_> {
                 }
                 .link_handle_velocity();
             }
-            "Link_ResetProperties_A" => {
+            EndingCall::LinkResetPropertiesA => {
                 crate::player::Player {
                     ram,
                     runtime: self,
@@ -1003,8 +1003,8 @@ impl EndingRuntime for NativeGameServices<'_> {
                 }
                 .link_reset_properties_a();
             }
-            "Main_ShowTextMessage" => crate::misc::main_show_text_message(ram),
-            "Module08_02_LoadAndAdvance" => {
+            EndingCall::MainShowTextMessage => crate::misc::main_show_text_message(ram),
+            EndingCall::Module0802LoadAndAdvance => {
                 overworld::module08_load_and_advance(ram, self.assets, |ram| {
                     overworld::draw_quadrants_and_overlays(
                         ram,
@@ -1013,8 +1013,8 @@ impl EndingRuntime for NativeGameServices<'_> {
                     );
                 });
             }
-            "OverworldHandleMapScroll" => overworld::handle_map_scroll(ram, self.assets),
-            "Overworld_LoadAndBuildScreen" => {
+            EndingCall::OverworldHandleMapScroll => overworld::handle_map_scroll(ram, self.assets),
+            EndingCall::OverworldLoadAndBuildScreen => {
                 overworld::load_and_build_screen(ram, self.assets, |ram| {
                     overworld::draw_quadrants_and_overlays(
                         ram,
@@ -1023,7 +1023,7 @@ impl EndingRuntime for NativeGameServices<'_> {
                     );
                 });
             }
-            "Overworld_LoadOverlayAndMap" => {
+            EndingCall::OverworldLoadOverlayAndMap => {
                 let module = ram.read_u16(0x10);
                 let map_state = ram.read_u16(0x200);
                 overworld::load_and_build_screen(ram, self.assets, |ram| {
@@ -1036,26 +1036,66 @@ impl EndingRuntime for NativeGameServices<'_> {
                 ram.write_u16(0x200, map_state.wrapping_add(1));
                 ram.write_u16(0x10, module);
             }
-            "Overworld_LoadOverlays2" => overworld::overworld_load_overlays2(ram, self.assets),
-            "Overworld_SetFixedColAndScroll" => overworld::overworld_set_fixed_col_and_scroll(ram),
-            "Palette_AnimGetMasterSword2" => overworld::palette_anim_get_master_sword2(ram),
-            "ResetTransitionPropsAndAdvance_ResetInterface" => {
+            EndingCall::OverworldLoadOverlays2 => {
+                overworld::overworld_load_overlays2(ram, self.assets)
+            }
+            EndingCall::OverworldSetFixedColAndScroll => {
+                overworld::overworld_set_fixed_col_and_scroll(ram)
+            }
+            EndingCall::PaletteAnimGetMasterSword2 => {
+                overworld::palette_anim_get_master_sword2(ram)
+            }
+            EndingCall::ResetTransitionPropsAndAdvanceResetInterface => {
                 crate::dungeon::Dungeon::new(ram.bytes_mut(), self)
                     .reset_transition_props_and_advance_reset_interface();
             }
-            "SaveDungeonKeys" => {
+            EndingCall::SaveDungeonKeys => {
                 crate::dungeon::Dungeon::new(ram.bytes_mut(), self).save_dungeon_keys();
             }
-            "Sprite_SpawnBatCrashCutscene" => {
+            EndingCall::SpriteSpawnBatCrashCutscene => {
                 crate::sprite_main_bank1::SpriteMainBank1 { ram, runtime: self }
                     .sprite_spawn_bat_crash_cutscene();
             }
-            "TriforceRoom_LinkApproachTriforce" => {
+            EndingCall::TriforceRoomLinkApproachTriforce => {
                 crate::misc::triforce_room_link_approach_triforce(ram);
             }
-            _ => self
+            EndingCall::BirdTravelFinishDoit
+            | EndingCall::EnableForceBlank
+            | EndingCall::EraseTileMapsNormal
+            | EndingCall::EraseTileMapsTriforce
+            | EndingCall::FluteMenuLoadSelectedScreen
+            | EndingCall::GraphicsLoadChrHalfSlot
+            | EndingCall::InitializeTilesets
+            | EndingCall::LinkOamMain
+            | EndingCall::LoadCommonSprites
+            | EndingCall::LoadCreditsSongs
+            | EndingCall::LoadDefaultGraphics
+            | EndingCall::LoadFollowerGraphics
+            | EndingCall::LoadItemGfxIntoWram4BppBuffer
+            | EndingCall::LoadOwMusicIfNeeded
+            | EndingCall::LoadOverworldFromDungeon
+            | EndingCall::OverworldLoadScreensPaletteSet
+            | EndingCall::OverworldCopyPalettesToCache
+            | EndingCall::OverworldEnterSpecialArea
+            | EndingCall::OverworldLoadAllPalettes
+            | EndingCall::OverworldLoadPalettesInner
+            | EndingCall::PaletteFilterBlindingWhiteTriforce
+            | EndingCall::PaletteFilterSp5F
+            | EndingCall::PaletteFilterWishPondsInner
+            | EndingCall::PaletteFadeIntro2
+            | EndingCall::PaletteFadeIntroOneStep
+            | EndingCall::PaletteLoadHud
+            | EndingCall::PaletteLoadOwbg2
+            | EndingCall::PaletteRevertTranslucencySwap
+            | EndingCall::PaletteSetOwBgColor
+            | EndingCall::RenderText
+            | EndingCall::SetBackdropcolorBlack
+            | EndingCall::SpecialOverworldCopyPalettesToCache
+            | EndingCall::SpriteMain
+            | EndingCall::TextGenerateMessagePointers
+            | EndingCall::TransferFontToVram => self
                 .pending_host_actions
-                .push(NativeHostAction::EndingExternal(name)),
+                .push(NativeHostAction::EndingExternal(call)),
         }
     }
 

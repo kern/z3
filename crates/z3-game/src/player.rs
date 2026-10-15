@@ -363,10 +363,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
     }
     pub fn check_ability_to_swim(&mut self) {
-        if self.ram.read_u8(0x2e0) == 0 && self.ram.read_u8(0xf356) != 0 {
+        if self.ram.read_u8(0x2e0) == 0 && self.ram.player().flippers() != 0 {
             return;
         }
-        if self.ram.read_u8(0xf357) != 0 {
+        if self.ram.player().moon_pearl() != 0 {
             self.ram.write_u8(0x56, 0)
         }
         self.ram.write_u8(0x4b, 0xc);
@@ -374,8 +374,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             .write_u8(0x11, if self.ram.read_u8(0x1b) != 0 { 20 } else { 42 })
     }
     pub fn link_main(&mut self) {
-        self.ram.write_u16(0xfc2, self.ram.read_u16(0x22));
-        self.ram.write_u16(0xfc4, self.ram.read_u16(0x20));
+        self.ram.write_u16(0xfc2, self.ram.player().x());
+        self.ram.write_u16(0xfc4, self.ram.player().y());
         self.ram.write_u8(0xfc1, 0);
         if self.ram.read_u8(0x2e4) == 0 {
             self.link_control_handler()
@@ -453,7 +453,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.ram
                         .write_u8(0xc72 + k, if input & 8 != 0 { 0 } else { 1 });
                 }
-                if self.ram.read_u8(0x27) == 0 || self.ram.read_u8(0x28) == 0 {
+                if self.ram.player().actual_velocity_y() == 0
+                    || self.ram.player().actual_velocity_x() == 0
+                {
                     if !self
                         .runtime
                         .ancilla_check_tile_collision_class2(self.ram, k)
@@ -477,7 +479,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
             self.link_cancel_dash();
             self.runtime.ancilla_sfx3_pan(self.ram, k, 0x32);
-            let d = usize::from(self.ram.read_u8(0x2f) >> 1);
+            let d = usize::from(self.ram.player().facing() >> 1);
             self.ram.write_u8(0xc72 + k, d as u8);
             self.ram.write_u8(0xc22 + k, YV[d] as u8);
             self.ram.write_u8(0xc2c + k, XV[d] as u8);
@@ -567,20 +569,22 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let y = u16::from_le_bytes([self.ram.read_u8(0xbfa + k), self.ram.read_u8(0xc0e + k)]);
         let right = x.wrapping_add(0x20);
         let bottom = y.wrapping_add(0x18);
-        let link_x = self.ram.read_u16(0x22).wrapping_add(8);
-        let link_y = self.ram.read_u16(0x20).wrapping_add(8);
+        let link_x = self.ram.player().x().wrapping_add(8);
+        let link_y = self.ram.player().y().wrapping_add(8);
         if link_y >= y && link_y < bottom && link_x >= x && link_x < right {
             let displacement = link_y.abs_diff(bottom);
             self.ram
-                .write_u16(0x20, self.ram.read_u16(0x20).wrapping_add(displacement));
-            self.ram.write_u8(
-                0x30,
-                self.ram.read_u8(0x30).wrapping_add(displacement as u8),
+                .set_player_y(self.ram.player().y().wrapping_add(displacement));
+            self.ram.set_player_velocity_y(
+                self.ram
+                    .player()
+                    .velocity_y()
+                    .wrapping_add(displacement as u8),
             );
             self.ram.write_u8(0x48, self.ram.read_u8(0x48) | 4)
         }
-        if self.ram.read_u8(0x2f) != 0 {
-            self.ram.write_u8(0x2f, self.ram.read_u8(0x2f) & !4)
+        if self.ram.player().facing() != 0 {
+            self.ram.set_player_facing(self.ram.player().facing() & !4)
         }
     }
 
@@ -593,7 +597,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x294 + k, 24);
         self.ram.write_u8(
             0xc2c + k,
-            if self.ram.read_u8(0x2f) == 4 {
+            if self.ram.player().facing() == 4 {
                 (-8i8) as u8
             } else {
                 8
@@ -622,8 +626,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if let Some(k) = self.runtime.ancilla_add(self.ram, type_, arg) {
             self.ram.write_u8(0xc5e + k, 0);
             self.ram.write_u8(0xc68 + k, 20);
-            let x = self.ram.read_u16(0x22);
-            let y = self.ram.read_u16(0x20);
+            let x = self.ram.player().x();
+            let y = self.ram.player().y();
             self.runtime.ancilla_set_xy(self.ram, k, x, y)
         }
     }
@@ -646,12 +650,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x394 + k, 0xff);
         self.ram.write_u8(0x3a4 + k, 0);
         self.ram.write_u8(0xc68 + k, 0);
-        let direction = usize::from(self.ram.read_u8(0x2f) >> 1);
+        let direction = usize::from(self.ram.player().facing() >> 1);
         self.ram.write_u8(0xc72 + k, direction as u8);
         self.ram.write_u8(0xc2c + k, X_VELOCITY[direction] as u8);
         self.ram.write_u8(0xc22 + k, Y_VELOCITY[direction] as u8);
-        let x = add_i8(self.ram.read_u16(0x22), X_OFFSET[direction]);
-        let y = add_i8(self.ram.read_u16(0x20), Y_OFFSET[direction]);
+        let x = add_i8(self.ram.player().x(), X_OFFSET[direction]);
+        let y = add_i8(self.ram.player().y(), Y_OFFSET[direction]);
         self.runtime.ancilla_set_xy(self.ram, k, x, y)
     }
 
@@ -697,10 +701,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         let fail = match contents {
             0..=2 => true,
-            3 if self.ram.read_u8(0xf36c) == self.ram.read_u8(0xf36d) => true,
-            4 if self.ram.read_u8(0xf36e) == 128 => true,
-            5 if self.ram.read_u8(0xf36c) == self.ram.read_u8(0xf36d)
-                && self.ram.read_u8(0xf36e) == 128 =>
+            3 if self.ram.player().max_health() == self.ram.player().health() => true,
+            4 if self.ram.player().magic() == 128 => true,
+            5 if self.ram.player().max_health() == self.ram.player().health()
+                && self.ram.player().magic() == 128 =>
             {
                 true
             }
@@ -853,8 +857,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
         }
         if self.ram.read_u8(0xf34c) == 2 {
-            let y = self.ram.read_u16(0x20);
-            let x = self.ram.read_u16(0x22);
+            let y = self.ram.player().y();
+            let x = self.ram.player().x();
             if self.ram.read_u16(0x8a) == 0x18
                 && (0x760..0x7e0).contains(&y)
                 && (0x1cf..0x230).contains(&x)
@@ -879,7 +883,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x3b, 0);
         self.ram.write_u8(0x374, 29);
         self.ram.write_u8(0x2f1, 64);
-        self.ram.write_u8(0x5d, PlayerState::StartDash as u8);
+        self.ram
+            .set_player_action_state(PlayerState::StartDash as u8);
         self.ram.write_u8(0x372, 1);
         self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & 0x80);
         for address in [0x308, 0x301, 0x48, 0x6b] {
@@ -905,7 +910,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn link_a_press_pull_object(&mut self) {
         self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
-        let index = usize::from(self.ram.read_u8(0x2f) >> 1);
+        let index = usize::from(self.ram.player().facing() >> 1);
         if self.ram.read_u8(0xf0) & GRAB_WALL_DIRS[index] == 0 {
             self.ram.write_u8(0x30d, 0);
             self.set_grab_animation()
@@ -944,13 +949,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn link_a_press_statue_drag(&mut self) {
         self.ram.write_u8(0x5e, 20);
-        let index = usize::from(self.ram.read_u8(0x2f) >> 1);
+        let index = usize::from(self.ram.player().facing() >> 1);
         let direction = self.ram.read_u8(0xf0) & GRAB_WALL_DIRS[index];
         let mut set_animation = true;
         if direction == 0 {
             self.ram.write_u8(0x67, 0);
-            self.ram.write_u8(0x31, 0);
-            self.ram.write_u8(0x30, 0);
+            self.ram.set_player_velocity_x(0);
+            self.ram.set_player_velocity_y(0);
             self.ram.write_u8(0x2e, 0);
             self.ram.write_u8(0x30d, 0)
         } else {
@@ -976,7 +981,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_perform_rupee_pull(&mut self) {
-        if self.ram.read_u8(0x2f) != 0 {
+        if self.ram.player().facing() != 0 {
             return;
         }
         self.link_reset_properties_a();
@@ -986,9 +991,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x30a, 0);
         self.ram.write_u8(0x30b, GRAB_WALL_ANIM_TIMER[0]);
         self.ram.write_u8(0x30d, 0);
-        self.ram.write_u8(0x5d, PlayerState::PullForRupees as u8);
-        self.ram.write_u8(0x27, 0);
-        self.ram.write_u8(0x28, 0);
+        self.ram
+            .set_player_action_state(PlayerState::PullForRupees as u8);
+        self.ram.set_player_actual_velocity_y(0);
+        self.ram.set_player_actual_velocity_x(0);
         self.ram.write_u8(0x3a, 0)
     }
 
@@ -1010,8 +1016,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn link_hop_hopping_south_ow(&mut self) {
         self.ram.write_u8(0x66, 1);
         self.ram.write_u8(0x50, 0);
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_y(0);
         self.ram.write_u8(0x351, 0);
         if self.ram.read_u8(0x46) == 0 && self.ram.read_u8(0x362) == 0 {
             self.runtime.ancilla_sfx2_near(self.ram, 32);
@@ -1020,24 +1026,26 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0xee, 2)
             }
         }
-        self.ram.write_u8(0x29, self.ram.read_u8(0x362));
-        self.ram.write_u8(0x2c7, self.ram.read_u8(0x363));
-        self.ram.write_u16(0x24, self.ram.read_u16(0x364));
         self.ram
-            .write_u8(0x29, self.ram.read_u8(0x29).wrapping_sub(2));
+            .set_player_actual_velocity_z(self.ram.read_u8(0x362));
+        self.ram.write_u8(0x2c7, self.ram.read_u8(0x363));
+        self.ram.set_player_z(self.ram.read_u16(0x364));
+        self.ram
+            .set_player_actual_velocity_z(self.ram.player().actual_velocity_z().wrapping_sub(2));
         self.link_move_position();
-        if (self.ram.read_u8(0x29) as i8) < 0 {
-            if self.ram.read_u8(0x29) < 0xa0 {
-                self.ram.write_u8(0x29, 0xa0)
+        if (self.ram.player().actual_velocity_z() as i8) < 0 {
+            if self.ram.player().actual_velocity_z() < 0xa0 {
+                self.ram.set_player_actual_velocity_z(0xa0)
             }
-            if self.ram.read_u16(0x24) >= 0xfff0 {
-                self.ram.write_u16(0x24, 0);
+            if self.ram.player().z() >= 0xfff0 {
+                self.ram.set_player_z(0);
                 self.link_splash_upon_landing();
                 if self.ram.read_u8(0x5b) != 0 {
-                    self.ram.write_u8(0x5d, PlayerState::FallingIntoHole as u8)
+                    self.ram
+                        .set_player_action_state(PlayerState::FallingIntoHole as u8)
                 }
-                if self.ram.read_u8(0x5d) != PlayerState::Swimming as u8
-                    && self.ram.read_u8(0x5d) != PlayerState::FallingIntoHole as u8
+                if self.ram.player().action_state() != PlayerState::Swimming as u8
+                    && self.ram.player().action_state() != PlayerState::FallingIntoHole as u8
                     && self.ram.read_u8(0x345) == 0
                 {
                     self.runtime.ancilla_sfx2_near(self.ram, 33);
@@ -1045,31 +1053,26 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x37b, 0);
                 self.ram.write_u8(0x78, 0);
                 self.ram.write_u8(0x4d, 0);
-                self.ram.write_u8(0x29, 0xff);
-                self.ram.write_u16(0x24, 0xffff);
+                self.ram.set_player_actual_velocity_z(0xff);
+                self.ram.set_player_z(0xffff);
                 self.ram.write_u8(0x46, 0);
                 if self.ram.read_u8(0x1b) == 0 {
                     self.ram.write_u8(0xee, 0)
                 }
             } else {
-                self.ram.write_u8(
-                    0x30,
-                    self.ram
-                        .read_u16(0x364)
-                        .wrapping_sub(self.ram.read_u16(0x24)) as u8,
+                self.ram.set_player_velocity_y(
+                    self.ram.read_u16(0x364).wrapping_sub(self.ram.player().z()) as u8,
                 )
             }
         } else {
-            self.ram.write_u8(
-                0x30,
-                self.ram
-                    .read_u16(0x364)
-                    .wrapping_sub(self.ram.read_u16(0x24)) as u8,
+            self.ram.set_player_velocity_y(
+                self.ram.read_u16(0x364).wrapping_sub(self.ram.player().z()) as u8,
             )
         }
-        self.ram.write_u8(0x362, self.ram.read_u8(0x29));
+        self.ram
+            .write_u8(0x362, self.ram.player().actual_velocity_z());
         self.ram.write_u8(0x363, self.ram.read_u8(0x2c7));
-        self.ram.write_u16(0x364, self.ram.read_u16(0x24))
+        self.ram.write_u16(0x364, self.ram.player().z())
     }
 
     pub fn link_state_crossing_worlds(&mut self) {
@@ -1082,11 +1085,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return;
         }
         if bit_sum4(self.ram.read_u8(0x341)) >= 2 {
-            if self.ram.read_u8(0xf356) != 0 {
+            if self.ram.player().flippers() != 0 {
                 self.ram.write_u8(0x345, 1);
                 self.ram.write_u8(0x340, self.ram.read_u8(0x26));
                 self.link_reset_swimming_state();
-                self.ram.write_u8(0x5d, PlayerState::Swimming as u8);
+                self.ram
+                    .set_player_action_state(PlayerState::Swimming as u8);
                 self.link_force_unequip_cape_quietly();
                 self.ram.write_u8(0x5e, 0);
                 return;
@@ -1108,9 +1112,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if changed_world {
             self.ram.write_u16(0x4ac, 0)
         }
-        self.ram.write_u8(
-            0x5d,
-            if self.ram.read_u8(0xf357) != 0 || self.ram.read_u16(0x8a) & 0x40 == 0 {
+        self.ram.set_player_action_state(
+            if self.ram.player().moon_pearl() != 0 || self.ram.read_u16(0x8a) & 0x40 == 0 {
                 PlayerState::Ground as u8
             } else {
                 PlayerState::PermaBunny as u8
@@ -1123,9 +1126,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x3f8, 0);
         self.ram.write_u8(0x2db, 1);
         self.ram.write_u8(0xb0, 0);
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x27, 0);
-        self.ram.write_u8(0x5d, PlayerState::Mirror as u8)
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_y(0);
+        self.ram.set_player_action_state(PlayerState::Mirror as u8)
     }
 
     pub fn handle_followers_after_mirroring(&mut self) {
@@ -1148,7 +1151,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.runtime.load_follower_graphics(self.ram);
             self.runtime.ancilla_add_dwarf_poof(self.ram, 0x40, 4)
         }
-        if self.ram.read_u8(0xf357) == 0 {
+        if self.ram.player().moon_pearl() == 0 {
             self.runtime.ancilla_add_bunny_poof(self.ram, 0x23, 4);
             self.link_force_unequip_cape_quietly();
             self.ram.write_u8(0x2e2, 0)
@@ -1223,9 +1226,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x3d, DELAYS[usize::from(phase)]);
             return;
         }
-        let direction = self.ram.read_u8(0x2f);
-        let x = self.ram.read_u16(0x22);
-        let y = self.ram.read_u16(0x20);
+        let direction = self.ram.player().facing();
+        let x = self.ram.player().x();
+        let y = self.ram.player().y();
         if let Some(object) = self
             .runtime
             .ancilla_add_arrow(self.ram, 9, direction, 2, x, y)
@@ -1347,9 +1350,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x11) | self.ram.read_u8(0x2e4) | self.ram.read_u8(0xfc1) != 0 {
             return;
         }
-        let direction = usize::from(self.ram.read_u8(0x2f) >> 1);
-        let x = add_i8(self.ram.read_u16(0x22), X_OFFSET[direction]);
-        let y = add_i8(self.ram.read_u16(0x20), Y_OFFSET[direction]);
+        let direction = usize::from(self.ram.player().facing() >> 1);
+        let x = add_i8(self.ram.player().x(), X_OFFSET[direction]);
+        let y = add_i8(self.ram.player().y(), Y_OFFSET[direction]);
         let tile = if self.ram.read_u8(0x1b) != 0 {
             let mut index = if self.ram.read_u8(0xee) >= 1 {
                 0x1000
@@ -1378,7 +1381,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x6c) != 0
             || self.ram.read_u8(0xffc) != 0
             || self.ram.read_u16(0x402) & 0x8000 != 0
-            || self.ram.read_u8(0xf359).wrapping_add(1) & !1 == 0
+            || self.ram.player().sword().wrapping_add(1) & !1 == 0
             || (self.ram.read_u8(0xf3d3) != 0 && self.ram.read_u8(0xf3cc) == 13)
         {
             self.runtime.ancilla_sfx2_near(self.ram, 60);
@@ -1398,7 +1401,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if !self.begin_medallion_cast() {
             return;
         }
-        self.ram.write_u8(0x5d, PlayerState::Ether as u8);
+        self.ram.set_player_action_state(PlayerState::Ether as u8);
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) | 1);
         self.ram.write_u8(0x3d, ETHER_ANIM_DELAYS[0]);
         self.ram.write_u8(0x31c, 0);
@@ -1450,7 +1453,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if !self.begin_medallion_cast() {
             return;
         }
-        self.ram.write_u8(0x5d, PlayerState::Bombos as u8);
+        self.ram.set_player_action_state(PlayerState::Bombos as u8);
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) | 1);
         self.ram.write_u8(0x3d, BOMBOS_ANIM_DELAYS[0]);
         self.ram.write_u8(0x31c, BOMBOS_ANIM_STATES[0]);
@@ -1498,7 +1501,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if !self.begin_medallion_cast() {
             return;
         }
-        self.ram.write_u8(0x5d, PlayerState::Quake as u8);
+        self.ram.set_player_action_state(PlayerState::Quake as u8);
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) | 1);
         self.ram.write_u8(0x3d, QUAKE_ANIM_DELAYS[0]);
         self.ram.write_u8(0x31c, QUAKE_ANIM_STATES[0]);
@@ -1512,23 +1515,25 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn link_state_using_quake(&mut self) {
         self.inc8(0xfc1);
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_y(0);
         let mut step = self.ram.read_u8(0x31d);
         if step == 10 {
-            self.ram.write_u8(0x29, self.ram.read_u8(0x362));
+            self.ram
+                .set_player_actual_velocity_z(self.ram.read_u8(0x362));
             self.ram.write_u8(0x2c7, self.ram.read_u8(0x363));
-            self.ram.write_u8(0x24, self.ram.read_u8(0x364));
+            self.ram.set_player_z_low(self.ram.read_u8(0x364));
             self.ram.write_u8(0x4d, 2);
             self.player_change_z(2);
             self.link_move_position();
-            self.ram.write_u8(0x362, self.ram.read_u8(0x29));
+            self.ram
+                .write_u8(0x362, self.ram.player().actual_velocity_z());
             self.ram.write_u8(0x363, self.ram.read_u8(0x2c7));
-            self.ram.write_u8(0x364, self.ram.read_u8(0x24));
-            if (self.ram.read_u8(0x24) as i8) >= 0 {
+            self.ram.write_u8(0x364, self.ram.player().z_low());
+            if (self.ram.player().z_low() as i8) >= 0 {
                 self.ram.write_u8(
                     0x31c,
-                    if (self.ram.read_u8(0x29) as i8) < 0 {
+                    if (self.ram.player().actual_velocity_z() as i8) < 0 {
                         21
                     } else {
                         20
@@ -1609,7 +1614,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x2e, 0);
         self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
         self.ram.write_u8(0x37a, 4);
-        self.ram.write_u8(0x5d, PlayerState::Hookshot as u8);
+        self.ram
+            .set_player_action_state(PlayerState::Hookshot as u8);
         self.ram.write_u8(0x37b, 1);
         self.ancilla_add_hookshot(31, 3)
     }
@@ -1724,7 +1730,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             11, 6, 7, 8, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 9, 4, 5, 6, 7, 8, 1, 2, 3,
             4, 10, 8, 1, 2, 3, 4, 5, 6, 7, 8,
         ];
-        let base = usize::from(self.ram.read_u8(0x2f) >> 1) * 10;
+        let base = usize::from(self.ram.player().facing() >> 1) * 10;
         if self.ram.read_u8(0x3a) & 0x40 == 0 {
             if self.ram.read_u8(0x6c) != 0 || !self.check_y_button_press() {
                 return;
@@ -1826,7 +1832,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const ITEMS: [u8; 4] = [0xdb, 0xda, 0xd9, 0xdf];
         self.ram
             .write_u8(0x1fe01, self.ram.read_u8(0x1fe01).wrapping_add(1));
-        if self.ram.read_u16(0x20) >= 0xb18 {
+        if self.ram.player().y() >= 0xb18 {
             return;
         }
         let roll = self.runtime.random_number(self.ram) & 7;
@@ -1847,14 +1853,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let Some(slot) = self.runtime.sprite_spawn_dynamically(self.ram, 4, item) else {
             return;
         };
-        let side = usize::from(self.ram.read_u8(0x2f) != 4);
+        let side = usize::from(self.ram.player().facing() != 4);
         self.ram.write_u8(0xd50 + slot, X_VEL[side] as u8);
         self.ram.write_u8(0xd40 + slot, 0);
         self.ram.write_u8(0xf80 + slot, 24);
         self.ram.write_u8(0xb58 + slot, 255);
         self.ram.write_u8(0xf10 + slot, 48);
-        let x = add_i8(self.ram.read_u16(0x22), X_OFF[side]) & !0xf;
-        let y = self.ram.read_u16(0x20).wrapping_add(22) & !0xf;
+        let x = add_i8(self.ram.player().x(), X_OFF[side]) & !0xf;
+        let y = self.ram.player().y().wrapping_add(22) & !0xf;
         self.runtime.sprite_set_x(self.ram, slot, x);
         self.runtime.sprite_set_y(self.ram, slot, y);
         self.ram.write_u8(0xf20 + slot, 0);
@@ -1940,8 +1946,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
         self.ram.write_u8(0x3c, 0);
         self.ram.write_u8(0x79, 0);
-        let sword = self.ram.read_u8(0xf359);
-        if self.ram.read_u8(0xf36c).wrapping_sub(4) < self.ram.read_u8(0xf36d)
+        let sword = self.ram.player().sword();
+        if self.ram.player().max_health().wrapping_sub(4) < self.ram.player().health()
             && sword.wrapping_add(1) & 0xfe != 0
             && sword >= 2
             && !(0..5).rev().any(|i| self.ram.read_u8(0xc4a + i) == 0x31)
@@ -2013,7 +2019,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram
                 .write_u8(0x3d, SPIN_ATTACK_DELAYS[usize::from(frame)]);
             if frame == 5 {
-                let sword = self.ram.read_u8(0xf359);
+                let sword = self.ram.player().sword();
                 if !matches!(sword, 0 | 1 | 0xff) {
                     self.runtime
                         .ancilla_add_sword_swing_sparkle(self.ram, 0x26, 4);
@@ -2052,8 +2058,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_animate_victory_spin(&mut self) {
-        self.ram.write_u8(0x5d, PlayerState::SpinAttacking as u8);
-        let offset = (self.ram.read_u8(0x2f) >> 1).wrapping_mul(12);
+        self.ram
+            .set_player_action_state(PlayerState::SpinAttacking as u8);
+        let offset = (self.ram.player().facing() >> 1).wrapping_mul(12);
         self.ram.write_u8(0x31e, offset);
         self.ram.write_u8(0x3d, 3);
         self.ram
@@ -2073,7 +2080,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.ram.write_u8(0xc4a + i, 0);
                 }
             }
-            self.ram.write_u16(0x24, self.ram.read_u16(0x24) & 0xff);
+            self.ram.set_player_z(self.ram.player().z() & 0xff);
             self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
             for address in [0x3d, 0x3c, 0x3a, 0x3b, 0x31c, 0x31d, 0x5e] {
                 self.ram.write_u8(address, 0);
@@ -2089,10 +2096,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x2e, 0);
                 self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
                 self.runtime.ancilla_sfx3_near(self.ram, 43);
-                self.ram.write_u8(0x5d, PlayerState::Electrocution as u8);
+                self.ram
+                    .set_player_action_state(PlayerState::Electrocution as u8);
                 self.link_state_zapped();
             } else {
-                self.ram.write_u8(0x5d, PlayerState::RecoilWall as u8);
+                self.ram
+                    .set_player_action_state(PlayerState::RecoilWall as u8);
                 self.link_state_recoil();
             }
             return;
@@ -2103,7 +2112,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x67, 0);
             self.link_handle_velocity();
             self.link_handle_cardinal_collision();
-            self.ram.write_u8(0x5d, PlayerState::SpinAttacking as u8);
+            self.ram
+                .set_player_action_state(PlayerState::SpinAttacking as u8);
             self.ram.write_u8(0x302, 0);
             self.handle_indoor_camera_and_doors();
         }
@@ -2121,10 +2131,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             for address in [0x3d, 0x3c, 0x31c, 0x31d] {
                 self.ram.write_u8(address, 0);
             }
-            if self.ram.read_u8(0x5d) != PlayerState::SpinAttackMotion as u8 {
+            if self.ram.player().action_state() != PlayerState::SpinAttackMotion as u8 {
                 self.ram.write_u8(0x3a, 0);
             }
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
         } else {
             let index = usize::from(step.wrapping_add(self.ram.read_u8(0x31e)));
             self.ram.write_u8(0x31c, LINK_SPIN_GRAPHICS_BY_DIR[index]);
@@ -2142,7 +2152,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x3d, 0);
             if !matches!(self.ram.read_u8(0x5e), 4 | 16) {
                 self.ram.write_u8(0x5e, 12);
-                if self.ram.read_u8(0xf359).wrapping_add(1) & !1 == 0 {
+                if self.ram.player().sword().wrapping_add(1) & !1 == 0 {
                     return;
                 }
                 if (0..5)
@@ -2176,7 +2186,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if (delay as i8) < 0 {
             let mut frame = self.ram.read_u8(0x3c).wrapping_add(1);
             if frame == 13 {
-                if self.ram.read_u8(0xf359).wrapping_add(1) & !1 != 0
+                if self.ram.player().sword().wrapping_add(1) & !1 != 0
                     && self.ram.read_u8(0x48) & 9 != 0
                 {
                     self.runtime.ancilla_add_wall_tap_spark(self.ram, 27, 1);
@@ -2202,13 +2212,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const TILE_KIND: [u8; 7] = [2, 3, 1, 4, 0, 5, 6];
         self.ram.write_u16(0x59, 0);
         self.runtime.tile_detect_reset_state(self.ram);
-        let direction = usize::from(self.ram.read_u8(0x2f) >> 1);
+        let direction = usize::from(self.ram.player().facing() >> 1);
         let (x_offset, y_offset) = self.runtime.liftable_probe_offset(direction);
         let mask = self.ram.read_u16(0xec);
-        let y0 = add_i8(self.ram.read_u16(0x20), y_offset) & mask;
-        let y1 = self.ram.read_u16(0x20).wrapping_add(20) & mask;
-        let x0 = (add_i8(self.ram.read_u16(0x22), x_offset) & mask) >> 3;
-        let x1 = (self.ram.read_u16(0x22).wrapping_add(8) & mask) >> 3;
+        let y0 = add_i8(self.ram.player().y(), y_offset) & mask;
+        let y1 = self.ram.player().y().wrapping_add(20) & mask;
+        let x0 = (add_i8(self.ram.player().x(), x_offset) & mask) >> 3;
+        let x1 = (self.ram.player().x().wrapping_add(8) & mask) >> 3;
         self.runtime.tile_detection_execute(self.ram, x0, y0, 1);
         self.runtime.tile_detection_execute(self.ram, x1, y1, 2);
         let mut action = if (self.ram.read_u16(0x0e) | u16::from(self.ram.read_u8(0x36d))) & 1 != 0
@@ -2223,7 +2233,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x368, TILE_KIND[usize::from(tile & 0xf)]);
             } else {
                 if self.ram.read_u16(0x366) & 1 != 0
-                    && self.ram.read_u8(0x2f) == 0
+                    && self.ram.player().facing() == 0
                     && self.ram.read_u8(0x36a) == 0
                 {
                     action = 4;
@@ -2240,7 +2250,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 }
                 return action;
             }
-            if self.ram.read_u8(0x2f) == 0 && self.ram.read_u8(0x36a) == 0 {
+            if self.ram.player().facing() == 0 && self.ram.read_u8(0x36a) == 0 {
                 action = 4;
                 if self.ram.read_u16(0x2e5) & 1 != 0 {
                     action = 5;
@@ -2250,7 +2260,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x368, self.ram.read_u8(0x36a) >> 1);
         }
         let kind = usize::from(self.ram.read_u8(0x368));
-        if REQUIRED_GLOVES[kind] <= self.ram.read_u8(0xf354) {
+        if REQUIRED_GLOVES[kind] <= self.ram.player().gloves() {
             action = 1;
         }
         if self.ram.read_u16(0x2e5) & 1 != 0 {
@@ -2260,7 +2270,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_perform_open_chest(&mut self) {
-        if self.ram.read_u8(0x2f) != 0
+        if self.ram.player().facing() != 0
             || self.ram.read_u8(0x2e9) != 0
             || self.ram.read_u8(0x4d) != 0
         {
@@ -2368,8 +2378,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x308, 0);
             self.ram.write_u8(0x48, 0);
             self.ram.write_u8(0x5e, 0);
-            if self.ram.read_u8(0x5d) == 24 {
-                self.ram.write_u8(0x5d, 0);
+            if self.ram.player().action_state() == 24 {
+                self.ram.set_player_action_state(0);
             }
         } else if self.ram.read_u8(0x300) != 0 {
             let phase = self.ram.read_u8(0x300);
@@ -2382,7 +2392,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.ram.write_u8(0xb9c, 0);
                     let indoors = self.ram.read_u8(0x1b) != 0;
                     let (kind, x, y) = self.runtime.lift_and_replace_tile(self.ram, indoors);
-                    self.ram.write_u8(0x5d, 24);
+                    self.ram.set_player_action_state(24);
                     self.ram.write_u8(0x314, 1);
                     self.runtime.sprite_spawn_throwable_terrain(
                         self.ram,
@@ -2428,7 +2438,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x3b, 0);
                 return;
             }
-            if self.ram.read_u8(0x3f8) != 0 && self.ram.read_u8(0x2f) == 0 {
+            if self.ram.read_u8(0x3f8) != 0 && self.ram.player().facing() == 0 {
                 action = 7;
             } else if self.ram.read_u8(0x2fa) != 0 {
                 action = 6;
@@ -2479,13 +2489,16 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.link_handle_change_in_z_velocity();
         self.ram.write_u8(0x50, 0);
         self.ram.write_u8(0x351, 0);
-        if (self.ram.read_u8(0x24) as i8) >= 0 || (self.ram.read_u8(0x29) as i8) >= 0 {
+        if (self.ram.player().z_low() as i8) >= 0
+            || (self.ram.player().actual_velocity_z() as i8) >= 0
+        {
             self.link_handle_recoil_and_timer(false);
             return;
         }
         self.tile_detect_main_handler(5);
         if self.ram.read_u16(0x341) & 1 != 0 {
-            self.ram.write_u8(0x5d, PlayerState::Swimming as u8);
+            self.ram
+                .set_player_action_state(PlayerState::Swimming as u8);
             self.link_set_to_deep_water();
             self.link_reset_sword_and_item_usage();
             self.runtime.ancilla_add_splash(self.ram, 21, 0);
@@ -2496,8 +2509,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 // Preserve C's unusual `do ... while (!--s)` exactly. It
                 // shifts twice only when the starting counter is one, and
                 // once for every other nonzero value.
-                self.ram
-                    .write_u8(0x29, recoil_z_velocity(self.ram.read_u8(0x2c7), recoil))
+                self.ram.set_player_actual_velocity_z(recoil_z_velocity(
+                    self.ram.read_u8(0x2c7),
+                    recoil,
+                ))
             } else {
                 self.ram.write_u8(0x2c6, 3)
             }
@@ -2516,11 +2531,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x46, timer);
             if timer == 0 {
                 self.ram.write_u8(0x46, 1);
-                let z = (self.ram.read_u8(0x24) & 0xfe) as i8;
-                if z <= 0 && (self.ram.read_u8(0x29) as i8) < 0 {
+                let z = (self.ram.player().z_low() & 0xfe) as i8;
+                if z <= 0 && (self.ram.player().actual_velocity_z() as i8) < 0 {
                     if self.ram.read_u8(0x4d) != 0 {
                         self.ram.write_u8(0x37b, 0);
-                        let previous = self.ram.read_u8(0x5d);
+                        let previous = self.ram.player().action_state();
                         self.ram.write_u16(0x72, u16::from(previous));
                         if previous != 6 {
                             for a in [0x3c, 0x3a, 0x3d, 0x79] {
@@ -2532,14 +2547,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                             if self.ram.read_u8(0x2f8) != 0 {
                                 self.ram.write_u8(0x2f8, 0);
                                 self.runtime.ancilla_sfx2_near(self.ram, 33);
-                            } else if previous != 2 && self.ram.read_u8(0x5d) != 4 {
+                            } else if previous != 2 && self.ram.player().action_state() != 4 {
                                 self.runtime.ancilla_sfx2_near(self.ram, 33);
                             }
-                            if self.ram.read_u8(0x5d) == 4 {
+                            if self.ram.player().action_state() == 4 {
                                 self.link_force_unequip_cape_quietly();
                                 if self.ram.read_u8(0x1b) != 0
                                     && previous != 2
-                                    && self.ram.read_u8(0xf356) != 0
+                                    && self.ram.player().flippers() != 0
                                 {
                                     self.ram.write_u8(0xee, 1);
                                 }
@@ -2553,7 +2568,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                                 self.runtime.ancilla_sfx2_near(self.ram, 28);
                             }
                             if self.ram.read_u16(0x341) & 1 != 0 {
-                                self.ram.write_u8(0x5d, 4);
+                                self.ram.set_player_action_state(4);
                                 self.link_set_to_deep_water();
                                 self.link_reset_sword_and_item_usage();
                                 self.runtime.ancilla_add_splash(self.ram, 21, 0);
@@ -2582,7 +2597,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x46, 0);
         }
         if finish_landing {
-            self.ram.write_u16(0x24, 0);
+            self.ram.set_player_z(0);
             self.ram.write_u8(0x4d, 0);
             self.ram.write_u8(0x5e, 0);
             self.ram.write_u8(0x50, 0);
@@ -2590,7 +2605,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(a, 0);
             }
         }
-        if self.ram.read_u8(0x5d) != 5 && self.ram.read_u8(0x46) >= 33 {
+        if self.ram.player().action_state() != 5 && self.ram.read_u8(0x46) >= 33 {
             let t = self.ram.read_u8(0x2c5).wrapping_sub(1);
             self.ram.write_u8(0x2c5, t);
             if (t as i8) >= 0 {
@@ -2600,13 +2615,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x2c5, self.ram.read_u8(0x46) >> 4);
         }
         self.flag67_with_directions();
-        if self.ram.read_u8(0x5d) != 6 {
+        if self.ram.player().action_state() != 6 {
             self.link_handle_diagonal_collision();
             if self.ram.read_u8(0x67) & 3 == 0 {
-                self.ram.write_u8(0x28, 0);
+                self.ram.set_player_actual_velocity_x(0);
             }
             if self.ram.read_u8(0x67) & 0xc == 0 {
-                self.ram.write_u8(0x27, 0);
+                self.ram.set_player_actual_velocity_y(0);
             }
         }
         self.link_move_position();
@@ -2614,25 +2629,25 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     fn link_recoil_finish(&mut self) {
-        if self.ram.read_u8(0x5d) != 6 {
+        if self.ram.player().action_state() != 6 {
             self.link_handle_cardinal_collision();
             self.ram.write_u8(0x302, 0);
         }
         self.handle_indoor_camera_and_doors();
-        if matches!(self.ram.read_u8(0x24), 0 | 0xe0..=0xff) {
+        if matches!(self.ram.player().z_low(), 0 | 0xe0..=0xff) {
             self.runtime.player_tile_detect_nearby(self.ram);
             if self.ram.read_u16(0x59) & 0xf == 0xf {
-                self.ram.write_u8(0x5d, 1);
+                self.ram.set_player_action_state(1);
                 self.ram.write_u8(0x5e, 4);
             }
         }
-        self.ram.write_u8(0x25, 0)
+        self.ram.set_player_z_high(0)
     }
 
     pub fn link_state_default(&mut self) {
         self.cache_camera_properties_if_outdoors();
         if self.link_handle_bunny_transformation() {
-            if self.ram.read_u8(0x5d) == PlayerState::PermaBunny as u8 {
+            if self.ram.player().action_state() == PlayerState::PermaBunny as u8 {
                 self.player_handler_17_bunny();
             }
             return;
@@ -2646,29 +2661,29 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn player_handler_00_ground_3(&mut self) {
-        self.ram.write_u16(0x24, 0xffff);
-        self.ram.write_u8(0x29, 0xff);
+        self.ram.set_player_z(0xffff);
+        self.ram.set_player_actual_velocity_z(0xff);
         self.ram.write_u8(0x2c6, 0);
         if !self.link_handle_toss() {
             self.link_handle_a_press();
             if self.ram.read_u8(0x308) | self.ram.read_u8(0x376) == 0
                 && self.ram.read_u8(0x377) == 0
-                && self.ram.read_u8(0x5d) != PlayerState::StartDash as u8
+                && self.ram.player().action_state() != PlayerState::StartDash as u8
             {
                 self.link_handle_y_item();
                 if self.runtime.enhanced_features0() & 4096 != 0
                     && ((self.ram.read_u8(0x10) == 14 && self.ram.read_u8(0x11) != 2)
-                        || matches!(self.ram.read_u8(0x5d), 8..=10))
+                        || matches!(self.ram.player().action_state(), 8..=10))
                 {
-                    self.ram.write_u8(0x27, 0);
-                    self.ram.write_u8(0x28, 0);
+                    self.ram.set_player_actual_velocity_y(0);
+                    self.ram.set_player_actual_velocity_x(0);
                     return;
                 }
                 if self.ram.read_u8(0xf3c5) != 0 {
                     self.link_handle_sword_cooldown();
-                    if self.ram.read_u8(0x5d) == PlayerState::SpinAttacking as u8 {
-                        self.ram.write_u8(0x27, 0);
-                        self.ram.write_u8(0x28, 0);
+                    if self.ram.player().action_state() == PlayerState::SpinAttacking as u8 {
+                        self.ram.set_player_actual_velocity_y(0);
+                        self.ram.set_player_actual_velocity_x(0);
                         return;
                     }
                 }
@@ -2735,8 +2750,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.link_handle_cardinal_collision();
         self.link_handle_moving_animation_full_long_entry();
         if self.ram.read_u8(0x377) != 0 {
-            self.ram.write_u8(0x27, 0);
-            self.ram.write_u8(0x28, 0);
+            self.ram.set_player_actual_velocity_y(0);
+            self.ram.set_player_actual_velocity_x(0);
         }
         self.ram.write_u8(0x302, 0);
         self.handle_indoor_camera_and_doors();
@@ -2751,7 +2766,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x40);
         self.link_reset_swimming_state();
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
-        self.ram.write_u16(0x24, self.ram.read_u16(0x24) & 0xff);
+        self.ram.set_player_z(self.ram.player().z() & 0xff);
         if self.ram.read_u8(0x360) != 0 {
             if self.ram.read_u8(0x55) != 0 {
                 self.link_force_unequip_cape_quietly();
@@ -2763,11 +2778,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x2e, 0);
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
             self.runtime.ancilla_sfx3_near(self.ram, 43);
-            self.ram.write_u8(0x5d, PlayerState::Electrocution as u8);
+            self.ram
+                .set_player_action_state(PlayerState::Electrocution as u8);
             self.link_state_zapped();
         } else {
             self.ram.write_u8(0x6b, 0);
-            self.ram.write_u8(0x5d, PlayerState::RecoilWall as u8);
+            self.ram
+                .set_player_action_state(PlayerState::RecoilWall as u8);
             self.link_state_recoil();
         }
     }
@@ -2778,7 +2795,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.runtime.ancilla_add_cape_poof(self.ram, 0x23, 4);
             self.runtime.ancilla_sfx2_near(self.ram, 0x15);
             self.ram.write_u8(0x2e2, 32);
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             self.link_reset_properties_c();
             self.ram.write_u8(0x3f7, 0);
             self.ram.write_u8(0x56, 0);
@@ -2800,7 +2817,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.link_temp_bunny_func2();
                 return;
             }
-            if self.ram.read_u8(0xf357) != 0 {
+            if self.ram.player().moon_pearl() != 0 {
                 self.ram.write_u8(0x2e0, 0);
             }
         }
@@ -2812,8 +2829,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.link_handle_recoil_and_timer(false);
             return;
         }
-        self.ram.write_u16(0x24, 0xffff);
-        self.ram.write_u8(0x29, 0xff);
+        self.ram.set_player_z(0xffff);
+        self.ram.set_player_actual_velocity_z(0xff);
         self.ram.write_u8(0x2c6, 0);
         if self.ram.read_u8(0x34a) != 0 {
             self.ram.write_u16(0x334, 0x180);
@@ -2861,7 +2878,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(address, 0);
             }
             self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
-            self.ram.write_u16(0x24, self.ram.read_u16(0x24) & 0xff00);
+            self.ram.set_player_z(self.ram.player().z() & 0xff00);
             if self.ram.read_u8(0x360) != 0 {
                 self.link_reset_sword_and_item_usage();
                 self.ram.write_u8(0x37b, 1);
@@ -2870,16 +2887,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x2e, 0);
                 self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
                 self.runtime.ancilla_sfx3_near(self.ram, 43);
-                self.ram.write_u8(0x5d, PlayerState::Electrocution as u8);
+                self.ram
+                    .set_player_action_state(PlayerState::Electrocution as u8);
                 self.link_state_zapped();
             } else {
-                self.ram.write_u8(0x5d, PlayerState::RecoilWall as u8);
+                self.ram
+                    .set_player_action_state(PlayerState::RecoilWall as u8);
                 self.link_state_recoil();
             }
             return;
         }
-        self.ram.write_u16(0x24, 0xffff);
-        self.ram.write_u8(0x29, 0xff);
+        self.ram.set_player_z(0xffff);
+        self.ram.set_player_actual_velocity_z(0xff);
         self.ram.write_u8(0x2c6, 0);
         if self.ram.read_u8(0x46) != 0 {
             for address in [0x30d, 0x30e, 0x30a, 0x3b, 0x308, 0x309, 0x376] {
@@ -2918,8 +2937,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn player_handler_04_swimming(&mut self) {
         if self.ram.read_u8(0x4d) != 0 {
-            self.ram.write_u8(0x5d, PlayerState::RecoilWall as u8);
-            self.ram.write_u16(0x24, self.ram.read_u16(0x24) & 0xff);
+            self.ram
+                .set_player_action_state(PlayerState::RecoilWall as u8);
+            self.ram.set_player_z(self.ram.player().z() & 0xff);
             self.reset_all_acceleration();
             self.ram.write_u8(0x32a, 0);
             self.ram.write_u8(0x34f, 0);
@@ -2930,7 +2950,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         for address in [0x3a, 0x3c, 0x3d, 0x79, 0x308, 0x309] {
             self.ram.write_u8(address, 0);
         }
-        if self.ram.read_u8(0xf356) == 0 {
+        if self.ram.player().flippers() == 0 {
             return;
         }
         if self.ram.read_u16(0x33c) | self.ram.read_u16(0x33e) == 0 {
@@ -2978,7 +2998,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0xf0) & 0xf != 0 || self.ram.read_u8(0x374) >= 16 {
             self.ram.write_u8(0x374, 0);
             self.ram.write_u8(0x5e, 0);
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             self.ram.write_u8(0x372, 0);
             self.ram.write_u16(0x32b, self.ram.read_u16(0x32b) & 0xff00);
             if self.ram.read_u8(0x3c) < 9 {
@@ -3005,7 +3025,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.ram.write_u8(0x30b, 2);
                     self.ram.write_u8(0x30a, 0);
                     self.ram.write_u8(0x50, 0);
-                    self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+                    self.ram.set_player_action_state(PlayerState::Ground as u8);
                     self.link_state_default();
                     return;
                 }
@@ -3062,15 +3082,15 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
         }
         if self.ram.read_u8(0x48) & 9 != 0 {
-            self.ram.write_u8(0x2f, 0);
+            self.ram.set_player_facing(0);
             self.ram.write_u8(0x308, 0);
             self.ram.write_u8(0x50, 0);
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             return;
         }
         if self.ram.read_u8(0x30d) == 9 {
             if self.ram.read_u8(0xf4) & 0xf != 0 {
-                self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+                self.ram.set_player_action_state(PlayerState::Ground as u8);
                 self.link_state_default();
                 return;
             }
@@ -3082,21 +3102,21 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 let step = self.inc8(0x30d);
                 self.ram.write_u8(0x30a, STEPS2[usize::from(step)]);
                 self.ram.write_u8(0x30b, 2);
-                self.ram.write_u8(0x27, 48);
+                self.ram.set_player_actual_velocity_y(48);
                 if step == 9 {
-                    self.ram.write_u8(0x2f, 0);
+                    self.ram.set_player_facing(0);
                     self.ram.write_u8(0x308, 0);
                     self.ram.write_u8(0x50, 0);
-                    self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+                    self.ram.set_player_action_state(PlayerState::Ground as u8);
                     return;
                 }
             }
             self.flag67_with_directions();
             if self.ram.read_u8(0x67) & 3 == 0 {
-                self.ram.write_u8(0x28, 0);
+                self.ram.set_player_actual_velocity_x(0);
             }
             if self.ram.read_u8(0x67) & 0xc == 0 {
-                self.ram.write_u8(0x27, 0);
+                self.ram.set_player_actual_velocity_y(0);
             }
             self.link_move_position();
         }
@@ -3105,22 +3125,24 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_state_handling_jump(&mut self) {
-        self.ram.write_u8(0x29, self.ram.read_u8(0x362));
+        self.ram
+            .set_player_actual_velocity_z(self.ram.read_u8(0x362));
         self.ram.write_u8(0x2c7, self.ram.read_u8(0x363));
-        self.ram.write_u8(0x24, self.ram.read_u8(0x364));
-        let vz = self.ram.read_u8(0x29).wrapping_sub(2);
-        self.ram.write_u8(0x29, vz);
+        self.ram.set_player_z_low(self.ram.read_u8(0x364));
+        let vz = self.ram.player().actual_velocity_z().wrapping_sub(2);
+        self.ram.set_player_actual_velocity_z(vz);
         self.link_move_position();
         if (vz as i8) < 0 {
             if vz < 0xa0 {
-                self.ram.write_u8(0x29, 0xa0);
+                self.ram.set_player_actual_velocity_z(0xa0);
             }
-            if self.ram.read_u8(0x24) >= 0xf0 {
-                self.ram.write_u16(0x24, 0);
-                if matches!(self.ram.read_u8(0x5d), 12 | 14) {
+            if self.ram.player().z_low() >= 0xf0 {
+                self.ram.set_player_z(0);
+                if matches!(self.ram.player().action_state(), 12 | 14) {
                     self.tile_detect_main_handler(0);
                     if self.ram.read_u16(0x341) & 1 != 0 {
-                        self.ram.write_u8(0x5d, PlayerState::Swimming as u8);
+                        self.ram
+                            .set_player_action_state(PlayerState::Swimming as u8);
                         self.link_set_to_deep_water();
                         self.link_reset_sword_and_item_usage();
                         self.runtime.ancilla_add_splash(self.ram, 21, 0);
@@ -3128,13 +3150,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                         self.ram.write_u8(0x5c, 9);
                         self.ram.write_u8(0x5a, 0);
                         self.ram.write_u8(0x5b, 1);
-                        self.ram.write_u8(0x5d, PlayerState::FallingIntoHole as u8);
+                        self.ram
+                            .set_player_action_state(PlayerState::FallingIntoHole as u8);
                         self.link_finish_jump_landing();
                         return;
                     }
                 }
                 self.link_splash_upon_landing();
-                if self.ram.read_u8(0x5d) != PlayerState::Swimming as u8
+                if self.ram.player().action_state() != PlayerState::Swimming as u8
                     && self.ram.read_u8(0x345) == 0
                 {
                     self.runtime.ancilla_sfx2_near(self.ram, 33);
@@ -3143,43 +3166,48 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 return;
             }
         }
-        self.ram.write_u8(
-            0x30,
-            self.ram.read_u8(0x364).wrapping_sub(self.ram.read_u8(0x24)),
+        self.ram.set_player_velocity_y(
+            self.ram
+                .read_u8(0x364)
+                .wrapping_sub(self.ram.player().z_low()),
         );
-        self.ram.write_u8(0x362, self.ram.read_u8(0x29));
+        self.ram
+            .write_u8(0x362, self.ram.player().actual_velocity_z());
         self.ram.write_u8(0x363, self.ram.read_u8(0x2c7));
-        self.ram.write_u8(0x364, self.ram.read_u8(0x24));
+        self.ram.write_u8(0x364, self.ram.player().z_low());
     }
 
     fn link_finish_jump_landing(&mut self) {
-        if self.ram.read_u8(0x5d) != PlayerState::Swimming as u8 || self.ram.read_u8(0x2e0) == 0 {
+        if self.ram.player().action_state() != PlayerState::Swimming as u8
+            || self.ram.read_u8(0x2e0) == 0
+        {
             self.ram.write_u8(0x37b, 0);
         }
         self.ram.write_u8(0x78, 0);
         self.ram.write_u8(0x4d, 0);
-        self.ram.write_u8(0x29, 0xff);
-        self.ram.write_u16(0x24, 0xffff);
+        self.ram.set_player_actual_velocity_z(0xff);
+        self.ram.set_player_z(0xffff);
         self.ram.write_u8(0x46, 0);
         if self.ram.read_u8(0x1b) == 0 {
             self.ram.write_u8(0xee, 0);
         }
-        self.ram.write_u8(0x362, self.ram.read_u8(0x29));
+        self.ram
+            .write_u8(0x362, self.ram.player().actual_velocity_z());
         self.ram.write_u8(0x363, self.ram.read_u8(0x2c7));
-        self.ram.write_u8(0x364, self.ram.read_u8(0x24));
+        self.ram.write_u8(0x364, self.ram.player().z_low());
     }
 
     pub fn link_state_hopping_horizontally_ow(&mut self) {
         self.ram.write_u8(
             0x67,
-            if (self.ram.read_u8(0x28) as i8) < 0 {
+            if (self.ram.player().actual_velocity_x() as i8) < 0 {
                 6
             } else {
                 5
             },
         );
         self.ram.write_u8(0x50, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_y(0);
         self.ram.write_u8(0x351, 0);
         self.link_state_handling_jump();
     }
@@ -3192,16 +3220,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x351, 0);
         self.player_change_z(2);
         self.link_move_position();
-        if (self.ram.read_u8(0x24) as i8) < 0 {
+        if (self.ram.player().z_low() as i8) < 0 {
             self.link_splash_upon_landing();
-            if self.ram.read_u8(0x5d) != PlayerState::Swimming as u8 && self.ram.read_u8(0x345) == 0
+            if self.ram.player().action_state() != PlayerState::Swimming as u8
+                && self.ram.read_u8(0x345) == 0
             {
                 self.runtime.ancilla_sfx2_near(self.ram, 33);
             }
             self.ram.write_u8(0x37b, 0);
             self.ram.write_u8(0x4d, 0);
-            self.ram.write_u8(0x29, 0xff);
-            self.ram.write_u16(0x24, 0xffff);
+            self.ram.set_player_actual_velocity_z(0xff);
+            self.ram.set_player_z(0xffff);
             self.ram.write_u8(0x46, 0);
             self.ram.write_u8(0x50, 0);
         }
@@ -3212,34 +3241,28 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             4, 4, 4, 10, 10, 10, 11, 18, 18, 18, 20, 20, 20, 20, 22, 22, 26, 26, 26, 26, 28, 28,
             28, 28,
         ];
-        let direction = if (self.ram.read_u8(0x28) as i8) < 0 {
+        let direction = if (self.ram.player().actual_velocity_x() as i8) < 0 {
             2
         } else {
             3
         };
         self.ram.write_u8(0x66, direction);
         self.ram.write_u8(0x50, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_y(0);
         self.ram.write_u8(0x351, 0);
         if self.ram.read_u8(0x46) == 0 && self.ram.read_u8(0x362) == 0 {
             self.ram.write_u8(0x66, 1);
-            let old_x = self.ram.read_u16(0x22);
+            let old_x = self.ram.player().x();
             self.runtime.ancilla_sfx2_near(self.ram, 32);
             self.link_hop_find_landing_spot_diagonally_down();
-            self.ram.write_u16(0x22, old_x);
-            let distance = self
-                .ram
-                .read_u16(0x20)
-                .wrapping_sub(self.ram.read_u16(0x32));
+            self.ram.set_player_x(old_x);
+            let distance = self.ram.player().y().wrapping_sub(self.ram.read_u16(0x32));
             let velocity = VX[usize::from(((distance >> 3).min(23)) as u8)];
-            self.ram.write_u8(
-                0x28,
-                if direction != 2 {
-                    velocity
-                } else {
-                    0u8.wrapping_sub(velocity)
-                },
-            );
+            self.ram.set_player_actual_velocity_x(if direction != 2 {
+                velocity
+            } else {
+                0u8.wrapping_sub(velocity)
+            });
             if self.ram.read_u8(0x1b) == 0 {
                 self.ram.write_u8(0xee, 2);
             }
@@ -3267,7 +3290,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x40);
             self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
             self.ram.write_u8(0x37a, self.ram.read_u8(0x37a) & !4);
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             if self.ram.read_u8(0x3c) >= 9 {
                 self.ram.write_u8(0x3c, 9);
             }
@@ -3278,8 +3301,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             .write_u8(0x3d, if (delay as i8) < 0 { 0 } else { delay });
         if self.ram.read_u8(0x37e) == 0 {
             self.save_safe_return_coordinates();
-            self.ram.write_u8(0x27, 0);
-            self.ram.write_u8(0x28, 0);
+            self.ram.set_player_actual_velocity_y(0);
+            self.ram.set_player_actual_velocity_x(0);
             self.link_handle_cardinal_collision();
             return;
         }
@@ -3297,17 +3320,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.read_u8(0xbfa + effect),
                 self.ram.read_u8(0xc0e + effect),
             ]);
-            self.ram.write_u8(0x27, 0);
-            self.ram.write_u8(0x28, 0);
-            let yd = add_i8(y, YA[direction]).wrapping_sub(self.ram.read_u16(0x20)) as i16;
+            self.ram.set_player_actual_velocity_y(0);
+            self.ram.set_player_actual_velocity_x(0);
+            let yd = add_i8(y, YA[direction]).wrapping_sub(self.ram.player().y()) as i16;
             if yd.unsigned_abs() >= 2 {
-                self.ram.write_u8(0x27, YV[direction] as u8);
+                self.ram.set_player_actual_velocity_y(YV[direction] as u8);
             }
-            let xd = add_i8(x, XA[direction]).wrapping_sub(self.ram.read_u16(0x22)) as i16;
+            let xd = add_i8(x, XA[direction]).wrapping_sub(self.ram.player().x()) as i16;
             if xd.unsigned_abs() >= 2 {
-                self.ram.write_u8(0x28, XV[direction] as u8);
+                self.ram.set_player_actual_velocity_x(XV[direction] as u8);
             }
-            if self.ram.read_u8(0x27) | self.ram.read_u8(0x28) != 0 {
+            if self.ram.player().actual_velocity_y() | self.ram.player().actual_velocity_x() != 0 {
                 self.link_move_position();
                 self.tile_detect_main_handler(5);
                 if self.ram.read_u8(0x1b) != 0 {
@@ -3353,7 +3376,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         for address in [0x300, 0x3d, 0x37e, 0x37b] {
             self.ram.write_u8(address, 0);
         }
-        self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+        self.ram.set_player_action_state(PlayerState::Ground as u8);
         self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x40);
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
         self.ram.write_u8(0x37a, self.ram.read_u8(0x37a) & !4);
@@ -3377,7 +3400,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x340, self.ram.read_u8(0x26));
             self.link_reset_swimming_state();
             self.runtime.ancilla_add_splash(self.ram, 21, 0);
-            self.ram.write_u8(0x5d, PlayerState::Swimming as u8);
+            self.ram
+                .set_player_action_state(PlayerState::Swimming as u8);
             self.link_force_unequip_cape_quietly();
             for address in [0x308, 0x309, 0x376, 0x5e] {
                 self.ram.write_u8(address, 0);
@@ -3392,7 +3416,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x5c, 9);
             self.ram.write_u8(0x5a, 0);
             self.ram.write_u8(0x5b, 1);
-            self.ram.write_u8(0x5d, PlayerState::FallingIntoHole as u8);
+            self.ram
+                .set_player_action_state(PlayerState::FallingIntoHole as u8);
             if self.ram.read_u8(0x3c) >= 9 {
                 self.ram.write_u8(0x3c, 9);
             }
@@ -3409,7 +3434,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const TURN: [u8; 16] = [0, 1, 2, 0, 4, 4, 4, 0, 8, 8, 8, 0, 0, 0, 0, 0];
         self.cache_camera_properties_if_outdoors();
         if self.link_handle_bunny_transformation() {
-            if self.ram.read_u8(0x5d) == 23 {
+            if self.ram.player().action_state() == 23 {
                 self.player_handler_17_bunny();
             }
             return;
@@ -3418,7 +3443,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             for a in [0x37b, 0x374, 0x5e, 0x50] {
                 self.ram.write_u8(a, 0);
             }
-            self.ram.write_u8(0x5d, 0);
+            self.ram.set_player_action_state(0);
             return;
         }
         if self.ram.read_u8(0x3a) & 0x80 != 0 && self.ram.read_u8(0x3c) >= 9 {
@@ -3440,10 +3465,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x2e, 0);
                 self.ram.write_u8(0x67, self.ram.read_u8(0x67) & !0xf);
                 self.runtime.ancilla_sfx3_near(self.ram, 43);
-                self.ram.write_u8(0x5d, 7);
+                self.ram.set_player_action_state(7);
                 self.link_state_zapped();
             } else {
-                self.ram.write_u8(0x5d, 2);
+                self.ram.set_player_action_state(2);
                 self.link_state_recoil();
             }
             return;
@@ -3465,20 +3490,20 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 for a in [0x2e, 0x374, 0x5e, 0x372] {
                     self.ram.write_u8(a, 0);
                 }
-                self.ram.write_u8(0x5d, 0);
+                self.ram.set_player_action_state(0);
                 if self.ram.read_u8(0x3a) & 0x80 == 0 {
                     self.ram.write_u8(0x50, 0);
                 }
                 return;
             }
             self.runtime.ancilla_add_dash_dust(self.ram, true, 30, 0);
-            self.ram.write_u8(0x30, 0);
-            self.ram.write_u8(0x31, 0);
+            self.ram.set_player_velocity_y(0);
+            self.ram.set_player_velocity_x(0);
             self.ram.write_u8(0x2f1, 64);
             self.ram.write_u8(0x5e, 16);
             let mut d = self.ram.read_u8(0xf0) & 0xf;
             if self.ram.read_u8(0x3a) & 0x80 != 0 || self.ram.read_u8(0x6c) != 0 || d == 0 {
-                d = FACING[usize::from(self.ram.read_u8(0x2f) >> 1)];
+                d = FACING[usize::from(self.ram.player().facing() >> 1)];
             }
             self.ram.write_u8(0x340, d);
             self.ram.write_u8(0x67, d);
@@ -3486,24 +3511,24 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x6b, 0);
             self.ram.write_u8(0x2e9, 0);
             self.link_handle_moving_animation_full_long_entry();
-            let ox = self.ram.read_u16(0x22);
-            let oy = self.ram.read_u16(0x20);
+            let ox = self.ram.player().x();
+            let oy = self.ram.player().y();
             self.save_safe_return_coordinates();
             self.link_handle_moving_floor();
             self.link_apply_conveyor();
             if self.ram.read_u8(0x2f5) != 0 {
                 self.link_handle_velocity_and_sand_drag(ox, oy);
             }
-            self.ram.write_u8(
-                0x30,
+            self.ram.set_player_velocity_y(
                 self.ram
-                    .read_u16(0x20)
+                    .player()
+                    .y()
                     .wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8,
             );
-            self.ram.write_u8(
-                0x31,
+            self.ram.set_player_velocity_x(
                 self.ram
-                    .read_u16(0x22)
+                    .player()
+                    .x()
                     .wrapping_sub(u16::from(self.ram.read_u8(0x3f))) as u8,
             );
             self.link_handle_cardinal_collision();
@@ -3522,7 +3547,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x2f1, dash.max(32));
         self.runtime.ancilla_add_dash_dust(self.ram, false, 30, 0);
         self.ram.write_u8(0x79, 0);
-        if self.ram.read_u8(0xf359).wrapping_add(1) & 0xfe != 0 {
+        if self.ram.player().sword().wrapping_add(1) & 0xfe != 0 {
             self.tile_detect_main_handler(7);
         }
         if self.ram.read_u8(0xf3c5) != 0 {
@@ -3547,10 +3572,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
         } else {
             let d = self.ram.read_u8(0xf0) & 0xf;
-            d != 0 && d != FACING[usize::from(self.ram.read_u8(0x2f) >> 1)]
+            d != 0 && d != FACING[usize::from(self.ram.player().facing() >> 1)]
         };
         if stop {
-            self.ram.write_u8(0x5d, 18);
+            self.ram.set_player_action_state(18);
             self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x80);
             self.ram.write_u8(0x3c, 0);
             self.ram.write_u8(0x3d, 0);
@@ -3562,7 +3587,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         let mut d = self.ram.read_u16(0x49) as u8 & 0xf;
         if d == 0 {
-            d = FACING[usize::from(self.ram.read_u8(0x2f) >> 1)];
+            d = FACING[usize::from(self.ram.player().facing() >> 1)];
         }
         self.ram.write_u8(0x67, d);
         self.ram.write_u8(0x26, d);
@@ -3616,12 +3641,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x5b, 0);
             let state = if self.ram.read_u8(0x2e0) == 0 {
                 0
-            } else if self.ram.read_u8(0xf357) != 0 {
+            } else if self.ram.player().moon_pearl() != 0 {
                 28
             } else {
                 23
             };
-            self.ram.write_u8(0x5d, state);
+            self.ram.set_player_action_state(state);
             match state {
                 23 => self.player_handler_17_bunny(),
                 28 => self.link_state_temporary_bunny(),
@@ -3635,16 +3660,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if pit == 0 {
             self.ram.write_u8(0x5b, 0);
             self.ram.write_u8(0x5e, 0);
-            self.ram.write_u8(
-                0x5d,
-                if self.ram.read_u8(0x2e0) == 0 {
+            self.ram
+                .set_player_action_state(if self.ram.read_u8(0x2e0) == 0 {
                     0
-                } else if self.ram.read_u8(0xf357) != 0 {
+                } else if self.ram.player().moon_pearl() != 0 {
                     28
                 } else {
                     23
-                },
-            );
+                });
             self.link_cancel_dash();
             if self.ram.read_u8(0x3a) & 0x80 == 0 {
                 self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
@@ -3684,7 +3707,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return;
         }
         if self.ram.read_u8(0x5b) != 2 {
-            if self.ram.read_u8(0xf357) != 0 {
+            if self.ram.player().moon_pearl() != 0 {
                 for a in [0x3f7, 0x56, 0x2e0] {
                     self.ram.write_u8(a, 0);
                 }
@@ -3720,10 +3743,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x5b, 3);
             self.ram.write_u8(0x4b, 12);
             self.ram.write_u8(0x57, 16);
-            let y = (self
-                .ram
-                .read_u16(0x20)
-                .wrapping_sub(self.ram.read_u16(0xe8))) as u8;
+            let y = (self.ram.player().y().wrapping_sub(self.ram.read_u16(0xe8))) as u8;
             for a in [0x308, 0x309, 0x376, 0x30b] {
                 self.ram.write_u8(a, 0);
             }
@@ -3732,18 +3752,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.runtime.dungeon_flag_room_data_quadrants(self.ram);
                 if self.runtime.dungeon_is_pit_that_hurts_player(self.ram) {
                     self.ram.write_u8(0x11, 20);
-                    let hp = self.ram.read_u8(0xf36d).wrapping_sub(8);
-                    self.ram.write_u8(0xf36d, if hp >= 0xa8 { 0 } else { hp });
+                    let hp = self.ram.player().health().wrapping_sub(8);
+                    self.ram.set_player_health(if hp >= 0xa8 { 0 } else { hp });
                     return;
                 }
             }
             self.ram.write_u8(0xa2, self.ram.read_u8(0xa0));
             self.ram.write_u8(0xa0, self.ram.read_u8(0xc000));
-            self.ram.write_u16(0x51, self.ram.read_u16(0x20));
-            self.ram.write_u16(
-                0x20,
+            self.ram.write_u16(0x51, self.ram.player().y());
+            self.ram.set_player_y(
                 self.ram
-                    .read_u16(0x20)
+                    .player()
+                    .y()
                     .wrapping_sub(u16::from(y))
                     .wrapping_sub(0x10),
             );
@@ -3762,8 +3782,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn handle_dungeon_landing_from_pit(&mut self) {
         self.runtime.link_oam_main(self.ram);
-        self.ram.write_u16(0xfc2, self.ram.read_u16(0x22));
-        self.ram.write_u16(0xfc4, self.ram.read_u16(0x20));
+        self.ram.write_u16(0xfc2, self.ram.player().x());
+        self.ram.write_u16(0xfc4, self.ram.player().y());
         if self.ram.read_u8(0x11) == 7 {
             self.ram.write_u8(0x4b, 0);
         }
@@ -3772,7 +3792,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         self.ram.write_u8(0x67, 4);
         self.link_handle_velocity();
-        let y = self.ram.read_u16(0x20);
+        let y = self.ram.player().y();
         let target = self.ram.read_u16(0x51);
         let landed = if (y as i16) < 0 && (target as i16) >= 0 {
             (target.wrapping_sub(y) as i16) < 0
@@ -3785,7 +3805,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.runtime.enhanced_features0() & 4096 != 0 {
             self.ram.write_u8(0x47a, 0);
         }
-        self.ram.write_u16(0x20, target);
+        self.ram.set_player_y(target);
         for a in [0x2e, 0x57, 0x5a, 0x5b, 0x5e, 0xb0, 0x11, 0x37b] {
             self.ram.write_u8(a, 0);
         }
@@ -3817,20 +3837,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.link_reset_swimming_state();
             self.ram.write_u8(0xee, 1);
             self.runtime.ancilla_add_splash(self.ram, 0x15, 1);
-            self.ram.write_u8(0x5d, 4);
+            self.ram.set_player_action_state(4);
             self.link_force_unequip_cape_quietly();
             for a in [0x308, 0x309, 0x376, 0x5e] {
                 self.ram.write_u8(a, 0);
             }
         } else {
-            self.ram.write_u8(
-                0x5d,
-                if self.ram.read_u16(0x59) & 0xf != 0 {
+            self.ram
+                .set_player_action_state(if self.ram.read_u16(0x59) & 0xf != 0 {
                     1
                 } else {
                     0
-                },
-            );
+                });
         }
     }
 
@@ -3926,7 +3944,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x6a) == 2 {
             self.ram.write_u8(
                 0x6a,
-                if self.ram.read_u8(0x2f) & 4 != 0 {
+                if self.ram.player().facing() & 4 != 0 {
                     2
                 } else {
                     1
@@ -3942,49 +3960,39 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return false;
         }
         if c >= 2 {
-            self.ram.write_u16(
-                0x20,
-                self.ram.read_u16(0x20).wrapping_add(
+            self.ram.set_player_y(
+                self.ram.player().y().wrapping_add(
                     self.ram
                         .read_u16(0xe6)
                         .wrapping_sub(self.ram.read_u16(0xe8)),
                 ),
             );
-            self.ram.write_u16(0x318, self.ram.read_u16(0x20));
-            self.ram.write_u16(
-                0x22,
-                self.ram.read_u16(0x22).wrapping_add(
+            self.ram.write_u16(0x318, self.ram.player().y());
+            self.ram.set_player_x(
+                self.ram.player().x().wrapping_add(
                     self.ram
                         .read_u16(0xe0)
                         .wrapping_sub(self.ram.read_u16(0xe2)),
                 ),
             );
-            self.ram.write_u16(0x31a, self.ram.read_u16(0x22))
+            self.ram.write_u16(0x31a, self.ram.player().x())
         }
         self.ram.write_u8(0xee, 1);
         true
     }
     pub fn create_velocity_from_moving_background(&mut self) {
         if self.ram.read_u8(0x46c) != 1 {
-            let x = self
-                .ram
-                .read_u16(0x22)
-                .wrapping_sub(self.ram.read_u16(0x31a));
-            let y = self
-                .ram
-                .read_u16(0x20)
-                .wrapping_sub(self.ram.read_u16(0x318));
-            self.ram.write_u16(
-                0x20,
-                self.ram.read_u16(0x20).wrapping_add(
+            let x = self.ram.player().x().wrapping_sub(self.ram.read_u16(0x31a));
+            let y = self.ram.player().y().wrapping_sub(self.ram.read_u16(0x318));
+            self.ram.set_player_y(
+                self.ram.player().y().wrapping_add(
                     self.ram
                         .read_u16(0xe8)
                         .wrapping_sub(self.ram.read_u16(0xe6)),
                 ),
             );
-            self.ram.write_u16(
-                0x22,
-                self.ram.read_u16(0x22).wrapping_add(
+            self.ram.set_player_x(
+                self.ram.player().x().wrapping_add(
                     self.ram
                         .read_u16(0xe2)
                         .wrapping_sub(self.ram.read_u16(0xe0)),
@@ -3992,9 +4000,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             );
             if self.ram.read_u8(0x67) != 0 {
                 self.ram
-                    .write_u8(0x31, self.ram.read_u8(0x31).wrapping_add(x as u8));
+                    .set_player_velocity_x(self.ram.player().velocity_x().wrapping_add(x as u8));
                 self.ram
-                    .write_u8(0x30, self.ram.read_u8(0x30).wrapping_add(y as u8))
+                    .set_player_velocity_y(self.ram.player().velocity_y().wrapping_add(y as u8))
             }
         }
         self.ram.write_u8(0xee, 0)
@@ -4004,26 +4012,29 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_handle_change_in_z_velocity(&mut self) {
-        self.player_change_z(if self.ram.read_u8(0x5d) == PlayerState::TurtleRock as u8 {
-            1
-        } else {
-            2
-        })
+        self.player_change_z(
+            if self.ram.player().action_state() == PlayerState::TurtleRock as u8 {
+                1
+            } else {
+                2
+            },
+        )
     }
 
     pub fn player_change_z(&mut self, amount: u8) {
-        let velocity = self.ram.read_u8(0x29);
+        let velocity = self.ram.player().actual_velocity_z();
         if (velocity as i8) < 0 {
-            if self.ram.read_u8(0x24) == 0 {
+            if self.ram.player().z_low() == 0 {
                 return;
             }
-            if (self.ram.read_u8(0x24) as i8) < 0 {
-                self.ram.write_u16(0x24, 0xffff);
-                self.ram.write_u8(0x29, 0xff);
+            if (self.ram.player().z_low() as i8) < 0 {
+                self.ram.set_player_z(0xffff);
+                self.ram.set_player_actual_velocity_z(0xff);
                 return;
             }
         }
-        self.ram.write_u8(0x29, velocity.wrapping_sub(amount))
+        self.ram
+            .set_player_actual_velocity_z(velocity.wrapping_sub(amount))
     }
 
     pub fn link_set_to_deep_water(&mut self) {
@@ -4037,7 +4048,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn ether_tablet_start_cutscene(&mut self) {
         self.ram.write_u8(0x3c, 0xc0);
         self.ram.write_u8(0x3d, 0);
-        self.ram.write_u8(0x5d, PlayerState::ReceivingEther as u8);
+        self.ram
+            .set_player_action_state(PlayerState::ReceivingEther as u8);
         self.ram.write_u8(0x37b, 1);
         self.ram.write_u8(0xffc, 1)
     }
@@ -4054,13 +4066,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else if timer == 0xbf {
             self.ram.write_u8(0x3ef, 1)
         } else if timer == 160 {
-            let x = self.ram.read_u16(0x22);
-            let y = self.ram.read_u16(0x20);
-            self.ram.write_u16(0x22, 0x6b0);
-            self.ram.write_u16(0x20, 0x37);
+            let x = self.ram.player().x();
+            let y = self.ram.player().y();
+            self.ram.set_player_x(0x6b0);
+            self.ram.set_player_y(0x37);
             self.runtime.ancilla_add_ether_spell(self.ram, 0x18, 0);
-            self.ram.write_u16(0x22, x);
-            self.ram.write_u16(0x20, y)
+            self.ram.set_player_x(x);
+            self.ram.set_player_y(y)
         } else if timer == 0 {
             self.runtime.ancilla_add_falling_prize(self.ram, 0x29, 0, 4);
             self.ram.write_u8(0x2e4, 1);
@@ -4071,7 +4083,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn bombos_tablet_start_cutscene(&mut self) {
         self.ram.write_u8(0x3c, 0xe0);
         self.ram.write_u8(0x3d, 0);
-        self.ram.write_u8(0x5d, PlayerState::ReceivingBombos as u8);
+        self.ram
+            .set_player_action_state(PlayerState::ReceivingBombos as u8);
         self.ram.write_u8(0x37b, 1);
         self.ram.write_u8(0x112, 1)
     }
@@ -4088,13 +4101,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else if timer == 223 {
             self.ram.write_u8(0x3ef, 1)
         } else if timer == 160 {
-            let x = self.ram.read_u16(0x22);
-            let y = self.ram.read_u16(0x20);
-            self.ram.write_u16(0x22, 0x378);
-            self.ram.write_u16(0x20, 0xeb0);
+            let x = self.ram.player().x();
+            let y = self.ram.player().y();
+            self.ram.set_player_x(0x378);
+            self.ram.set_player_y(0xeb0);
             self.runtime.ancilla_add_bombos_spell(self.ram, 0x19, 0);
-            self.ram.write_u16(0x22, x);
-            self.ram.write_u16(0x20, y)
+            self.ram.set_player_x(x);
+            self.ram.set_player_y(y)
         } else if timer == 0 {
             self.runtime.ancilla_add_falling_prize(self.ram, 0x29, 5, 4);
             self.ram.write_u8(0x2e4, 1)
@@ -4105,7 +4118,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let timer = self.ram.read_u8(0x3c).wrapping_sub(1);
         self.ram.write_u8(0x3c, timer);
         if timer == 0 {
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             self.link_perform_desert_prayer()
         }
     }
@@ -4128,7 +4141,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn link_state_bunny_recache(&mut self) {
         self.ram.write_u8(0x3f7, 0);
         self.ram.write_u16(0x3f5, 0);
-        if self.ram.read_u8(0xf357) != 0 {
+        if self.ram.player().moon_pearl() != 0 {
             self.ram.write_u8(0x56, 0);
             self.ram.write_u8(0x4d, 0)
         }
@@ -4136,9 +4149,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x2e1, 0);
         self.ram.write_u8(0x50, 0);
         self.link_reset_swimming_state();
-        self.ram.write_u8(0x5d, PlayerState::RecoilWall as u8);
-        if self.ram.read_u8(0xf357) != 0 {
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+        self.ram
+            .set_player_action_state(PlayerState::RecoilWall as u8);
+        if self.ram.player().moon_pearl() != 0 {
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             self.runtime.load_actual_gear_palettes(self.ram)
         }
     }
@@ -4150,37 +4164,36 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.link_state_bunny_recache();
                 return;
             }
-            self.ram.write_u8(
-                0x5d,
-                if self.ram.read_u8(0xf357) != 0 {
+            self.ram
+                .set_player_action_state(if self.ram.player().moon_pearl() != 0 {
                     PlayerState::TempBunny as u8
                 } else {
                     PlayerState::PermaBunny as u8
-                },
-            )
+                })
         } else if self.ram.read_u8(0x345) != 0 {
-            if self.ram.read_u8(0x5d) != PlayerState::RecoilOther as u8 {
+            if self.ram.player().action_state() != PlayerState::RecoilOther as u8 {
                 self.runtime.ancilla_add_splash(self.ram, 21, 0);
             }
             self.link_force_unequip_cape_quietly();
-            self.ram.write_u8(0x5d, PlayerState::Swimming as u8)
+            self.ram
+                .set_player_action_state(PlayerState::Swimming as u8)
         } else {
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8)
+            self.ram.set_player_action_state(PlayerState::Ground as u8)
         }
     }
 
     pub fn sprite_repel_dash(&mut self) {
-        self.ram.write_u8(0x66, self.ram.read_u8(0x2f) >> 1);
+        self.ram.write_u8(0x66, self.ram.player().facing() >> 1);
         self.repel_dash()
     }
 
     pub fn flag67_with_directions(&mut self) {
         let mut direction = 0;
-        let y = self.ram.read_u8(0x27);
+        let y = self.ram.player().actual_velocity_y();
         if y != 0 {
             direction |= if (y as i8) < 0 { 8 } else { 4 }
         }
-        let x = self.ram.read_u8(0x28);
+        let x = self.ram.player().actual_velocity_x();
         if x != 0 {
             direction |= if (x as i8) < 0 { 2 } else { 1 }
         }
@@ -4189,9 +4202,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn dungeon_pit_do_damage(&mut self) {
         self.ram.write_u8(0x11, 20);
-        let health = self.ram.read_u8(0xf36d).wrapping_sub(8);
+        let health = self.ram.player().health().wrapping_sub(8);
         self.ram
-            .write_u8(0xf36d, if health >= 0xa8 { 0 } else { health })
+            .set_player_health(if health >= 0xa8 { 0 } else { health })
     }
 
     pub fn link_flag_max_accels(&mut self) {
@@ -4250,8 +4263,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             direction = self.ram.read_u8(0xf0) & 0xf
         }
         if direction == 0 {
-            self.ram.write_u8(0x31, 0);
-            self.ram.write_u8(0x30, 0);
+            self.ram.set_player_velocity_x(0);
+            self.ram.set_player_velocity_y(0);
             self.link_flag_max_accels();
             if self.ram.read_u8(0x34a) != 0 {
                 if self.ram.read_u8(0x372) != 0 {
@@ -4265,7 +4278,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     return;
                 }
             } else {
-                if self.ram.read_u8(0x5d) != PlayerState::Swimming as u8 {
+                if self.ram.player().action_state() != PlayerState::Swimming as u8 {
                     self.ram.write_u8(0x2e, 0)
                 }
                 self.link_handle_swim_movements_finish();
@@ -4274,8 +4287,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         if direction != self.ram.read_u8(0x340) {
             self.ram.write_u8(0x340, direction);
-            self.ram.write_u8(0x2b, 0);
-            self.ram.write_u8(0x2a, 0);
+            self.ram.set_player_subpixel_x(0);
+            self.ram.set_player_subpixel_y(0);
             self.ram.write_u8(0x6b, 0);
             self.ram.write_u8(0x48, 0)
         }
@@ -4356,9 +4369,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn link_reset_state_after_damaging_pit(&mut self) {
         self.link_reset_swimming_state();
-        self.ram.write_u8(
-            0x5d,
-            if self.ram.read_u8(0x56) != 0 && self.ram.read_u8(0xf357) == 0 {
+        self.ram.set_player_action_state(
+            if self.ram.read_u8(0x56) != 0 && self.ram.player().moon_pearl() == 0 {
                 PlayerState::PermaBunny as u8
             } else {
                 PlayerState::Ground as u8
@@ -4396,11 +4408,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn link_check_magic_cost(&mut self, item: u8) -> bool {
         let cost =
             LINK_ITEM_MAGIC_COSTS[usize::from(item) * 3 + usize::from(self.ram.read_u8(0xf37b))];
-        let magic = self.ram.read_u8(0xf36e);
+        let magic = self.ram.player().magic();
         if magic != 0 {
             let remaining = magic.wrapping_sub(cost);
             if remaining < 0x80 {
-                self.ram.write_u8(0xf36e, remaining);
+                self.ram.set_player_magic(remaining);
                 return true;
             }
         }
@@ -4415,11 +4427,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn refund_magic(&mut self, item: u8) {
         let cost =
             LINK_ITEM_MAGIC_COSTS[usize::from(item) * 3 + usize::from(self.ram.read_u8(0xf37b))];
-        let mut magic = u16::from(self.ram.read_u8(0xf36e)) + u16::from(cost);
+        let mut magic = u16::from(self.ram.player().magic()) + u16::from(cost);
         if self.runtime.enhanced_features0() & 4096 != 0 && magic >= 128 {
             magic = 128
         }
-        self.ram.write_u8(0xf36e, magic as u8)
+        self.ram.set_player_magic(magic as u8)
     }
 
     pub fn link_item_reset_from_overworld_things(&mut self) {
@@ -4459,50 +4471,34 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_handle_velocity_and_sand_drag(&mut self, old_x: u16, old_y: u16) {
-        self.ram.write_u16(
-            0x20,
-            self.ram
-                .read_u16(0x20)
-                .wrapping_add(self.ram.read_u16(0xb7e)),
-        );
-        self.ram.write_u16(
-            0x22,
-            self.ram
-                .read_u16(0x22)
-                .wrapping_add(self.ram.read_u16(0xb7c)),
-        );
         self.ram
-            .write_u8(0x30, self.ram.read_u16(0x20).wrapping_sub(old_y) as u8);
+            .set_player_y(self.ram.player().y().wrapping_add(self.ram.read_u16(0xb7e)));
         self.ram
-            .write_u8(0x31, self.ram.read_u16(0x22).wrapping_sub(old_x) as u8)
+            .set_player_x(self.ram.player().x().wrapping_add(self.ram.read_u16(0xb7c)));
+        self.ram
+            .set_player_velocity_y(self.ram.player().y().wrapping_sub(old_y) as u8);
+        self.ram
+            .set_player_velocity_x(self.ram.player().x().wrapping_sub(old_x) as u8)
     }
 
     pub fn link_apply_moving_floor_velocity(&mut self) {
         self.ram.write_u8(0x6a, 0);
-        self.ram.write_u16(
-            0x20,
-            self.ram
-                .read_u16(0x20)
-                .wrapping_add(self.ram.read_u16(0x310)),
-        );
-        self.ram.write_u16(
-            0x22,
-            self.ram
-                .read_u16(0x22)
-                .wrapping_add(self.ram.read_u16(0x312)),
-        )
+        self.ram
+            .set_player_y(self.ram.player().y().wrapping_add(self.ram.read_u16(0x310)));
+        self.ram
+            .set_player_x(self.ram.player().x().wrapping_add(self.ram.read_u16(0x312)))
     }
 
     pub fn link_handle_recoiling(&mut self) {
         self.ram.write_u8(0x67, 0);
-        let y = self.ram.read_u8(0x27);
+        let y = self.ram.player().actual_velocity_y();
         if y != 0 {
             let direction = if (y as i8) < 0 { 8 } else { 4 };
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) | direction);
             self.ram.write_u8(0x26, self.ram.read_u8(0x67));
             self.player_handle_incapacitated_inner2()
         }
-        let x = self.ram.read_u8(0x28);
+        let x = self.ram.player().actual_velocity_x();
         if x != 0 {
             let direction = if (x as i8) < 0 { 2 } else { 1 };
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) | direction);
@@ -4515,27 +4511,29 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let diagonal = self.ram.read_u8(0x6b);
         if diagonal & 0xc != 0
             && diagonal & 3 != 0
-            && self.ram.read_u8(0x5d) == PlayerState::RecoilWall as u8
+            && self.ram.player().action_state() == PlayerState::RecoilWall as u8
         {
-            self.ram
-                .write_u8(0x28, 0u8.wrapping_sub(self.ram.read_u8(0x28)));
-            self.ram
-                .write_u8(0x27, 0u8.wrapping_sub(self.ram.read_u8(0x27)))
+            self.ram.set_player_actual_velocity_x(
+                0u8.wrapping_sub(self.ram.player().actual_velocity_x()),
+            );
+            self.ram.set_player_actual_velocity_y(
+                0u8.wrapping_sub(self.ram.player().actual_velocity_y()),
+            )
         }
         if self.ram.read_u8(0x6c) == 1 {
             self.ram.write_u8(0x26, self.ram.read_u8(0x26) & 0xc);
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) & 0xc);
-            self.ram.write_u8(0x28, 0)
+            self.ram.set_player_actual_velocity_x(0)
         } else if self.ram.read_u8(0x6c) == 2 {
             self.ram.write_u8(0x26, self.ram.read_u8(0x26) & 3);
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) & 3);
-            self.ram.write_u8(0x27, 0)
+            self.ram.set_player_actual_velocity_y(0)
         }
     }
 
     fn save_safe_return_coordinates(&mut self) {
-        let y = self.ram.read_u16(0x20);
-        let x = self.ram.read_u16(0x22);
+        let y = self.ram.player().y();
+        let x = self.ram.player().x();
         self.ram.write_u8(0x3e, y as u8);
         self.ram.write_u8(0x40, (y >> 8) as u8);
         self.ram.write_u8(0x3f, x as u8);
@@ -4551,13 +4549,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if (self.ram.read_u8(0x11) == 2 && self.ram.read_u8(0x10) == 14)
             || self.ram.read_u8(0xb7b) != 0
         {
-            let x = self.ram.read_u16(0x22);
-            let y = self.ram.read_u16(0x20);
+            let x = self.ram.player().x();
+            let y = self.ram.player().y();
             self.save_safe_return_coordinates();
             self.link_handle_velocity_and_sand_drag(x, y);
             return;
         }
-        if self.ram.read_u8(0x5d) == PlayerState::Swimming as u8 {
+        if self.ram.player().action_state() == PlayerState::Swimming as u8 {
             self.handle_swim_stroke_and_subpixels();
             return;
         }
@@ -4587,8 +4585,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
         }
 
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_y(0);
         self.ram.write_u8(0x68, 0);
         self.ram.write_u8(0x69, 0);
         if self.ram.read_u8(0x67) & 0xc != 0 && self.ram.read_u8(0x67) & 3 != 0 {
@@ -4631,56 +4629,54 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             .wrapping_add(SPEED_MOD[speed_index as usize]);
         let direction = self.ram.read_u8(0x67);
         if direction & 3 != 0 {
-            self.ram.write_u8(
-                0x28,
-                if direction & 2 != 0 {
+            self.ram
+                .set_player_actual_velocity_x(if direction & 2 != 0 {
                     0u8.wrapping_sub(velocity)
                 } else {
                     velocity
-                },
-            )
+                })
         }
         if direction & 0xc != 0 {
-            self.ram.write_u8(
-                0x27,
-                if direction & 8 != 0 {
+            self.ram
+                .set_player_actual_velocity_y(if direction & 8 != 0 {
                     0u8.wrapping_sub(velocity)
                 } else {
                     velocity
-                },
-            )
+                })
         }
-        self.ram.write_u8(0x29, 0xff);
-        self.ram.write_u16(0x24, 0xffff);
-        self.ram.write_u8(0x2c, 0);
+        self.ram.set_player_actual_velocity_z(0xff);
+        self.ram.set_player_z(0xffff);
+        self.ram.set_player_subpixel_z(0);
         self.link_move_position()
     }
 
     pub fn link_move_position(&mut self) {
-        let old_x = self.ram.read_u16(0x22);
-        let old_y = self.ram.read_u16(0x20);
+        let old_x = self.ram.player().x();
+        let old_y = self.ram.player().y();
         self.save_safe_return_coordinates();
-        if self.ram.read_u8(0x5d) != PlayerState::Quake as u8 && self.ram.read_u8(0x2f5) == 2 {
+        if self.ram.player().action_state() != PlayerState::Quake as u8
+            && self.ram.read_u8(0x2f5) == 2
+        {
             self.link_handle_velocity_and_sand_drag(old_x, old_y);
             return;
         }
 
-        let x_fixed = i32::from(self.ram.read_u16(0x22)) * 256
-            + i32::from(self.ram.read_u8(0x2b))
-            + i32::from(self.ram.read_u8(0x28) as i8) * 16;
-        self.ram.write_u8(0x2b, x_fixed as u8);
-        self.ram.write_u16(0x22, ((x_fixed as u32) >> 8) as u16);
-        let y_fixed = i32::from(self.ram.read_u16(0x20)) * 256
-            + i32::from(self.ram.read_u8(0x2a))
-            + i32::from(self.ram.read_u8(0x27) as i8) * 16;
-        self.ram.write_u8(0x2a, y_fixed as u8);
-        self.ram.write_u16(0x20, ((y_fixed as u32) >> 8) as u16);
+        let x_fixed = i32::from(self.ram.player().x()) * 256
+            + i32::from(self.ram.player().subpixel_x())
+            + i32::from(self.ram.player().actual_velocity_x() as i8) * 16;
+        self.ram.set_player_subpixel_x(x_fixed as u8);
+        self.ram.set_player_x(((x_fixed as u32) >> 8) as u16);
+        let y_fixed = i32::from(self.ram.player().y()) * 256
+            + i32::from(self.ram.player().subpixel_y())
+            + i32::from(self.ram.player().actual_velocity_y() as i8) * 16;
+        self.ram.set_player_subpixel_y(y_fixed as u8);
+        self.ram.set_player_y(((y_fixed as u32) >> 8) as u16);
         if self.ram.read_u8(0x4d) != 0 {
-            let z_fixed = i32::from(self.ram.read_u16(0x24)) * 256
-                + i32::from(self.ram.read_u8(0x2c))
-                + i32::from(self.ram.read_u8(0x29) as i8) * 16;
-            self.ram.write_u8(0x2c, z_fixed as u8);
-            self.ram.write_u16(0x24, ((z_fixed as u32) >> 8) as u16)
+            let z_fixed = i32::from(self.ram.player().z()) * 256
+                + i32::from(self.ram.player().subpixel_z())
+                + i32::from(self.ram.player().actual_velocity_z() as i8) * 16;
+            self.ram.set_player_subpixel_z(z_fixed as u8);
+            self.ram.set_player_z(((z_fixed as u32) >> 8) as u16)
         }
         self.link_handle_moving_floor();
         self.link_apply_conveyor();
@@ -4692,8 +4688,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const DIRECTION_MASK: [u8; 2] = [!0xc, !3];
         const DIRECTION_BIT: [u8; 4] = [8, 4, 2, 1];
 
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_y(0);
         let mut velocity = [0u16; 2];
         for i in (0..2).rev() {
             let var3_addr = 0x326 + i * 2;
@@ -4756,18 +4752,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         x_velocity: u16,
         y_velocity: u16,
     ) {
-        let old_x = self.ram.read_u16(0x22);
-        let old_y = self.ram.read_u16(0x20);
+        let old_x = self.ram.player().x();
+        let old_y = self.ram.player().y();
         self.save_safe_return_coordinates();
 
         let x_fixed = i32::from(old_x) * 256
-            + i32::from(self.ram.read_u8(0x2b))
+            + i32::from(self.ram.player().subpixel_x())
             + i32::from(x_velocity as i16);
-        self.ram.write_u8(0x2b, x_fixed as u8);
-        self.ram.write_u16(0x22, ((x_fixed as u32) >> 8) as u16);
+        self.ram.set_player_subpixel_x(x_fixed as u8);
+        self.ram.set_player_x(((x_fixed as u32) >> 8) as u16);
         let x_high = (x_velocity >> 8) as u8;
-        self.ram.write_u8(
-            0x28,
+        self.ram.set_player_actual_velocity_x(
             (if (x_high as i8) < 0 {
                 0u8.wrapping_sub(x_high)
             } else {
@@ -4778,13 +4773,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         );
 
         let y_fixed = i32::from(old_y) * 256
-            + i32::from(self.ram.read_u8(0x2a))
+            + i32::from(self.ram.player().subpixel_y())
             + i32::from(y_velocity as i16);
-        self.ram.write_u8(0x2a, y_fixed as u8);
-        self.ram.write_u16(0x20, ((y_fixed as u32) >> 8) as u16);
+        self.ram.set_player_subpixel_y(y_fixed as u8);
+        self.ram.set_player_y(((y_fixed as u32) >> 8) as u16);
         let y_high = (y_velocity >> 8) as u8;
-        self.ram.write_u8(
-            0x27,
+        self.ram.set_player_actual_velocity_y(
             (if (y_high as i8) < 0 {
                 0u8.wrapping_sub(y_high)
             } else {
@@ -4804,9 +4798,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     pub fn link_handle_moving_floor(&mut self) {
         if self.ram.read_u8(0x46c) == 0
-            || !matches!(self.ram.read_u8(0x24), 0 | 0xff)
+            || !matches!(self.ram.player().z_low(), 0 | 0xff)
             || self.ram.read_u8(0x322) & 3 != 3
-            || self.ram.read_u8(0x5d) == PlayerState::Hookshot as u8
+            || self.ram.player().action_state() == PlayerState::Hookshot as u8
         {
             return;
         }
@@ -4834,9 +4828,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
         let conveyor = self.ram.read_u8(0x3f3);
         if conveyor == 0
-            || !matches!(self.ram.read_u8(0x24), 0 | 0xff)
+            || !matches!(self.ram.player().z_low(), 0 | 0xff)
             || self.ram.read_u8(0x376) & 1 != 0
-            || self.ram.read_u8(0x5d) == PlayerState::Hookshot as u8
+            || self.ram.player().action_state() == PlayerState::Hookshot as u8
             || self.ram.read_u8(0x4d) != 0
         {
             return;
@@ -4851,21 +4845,21 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x6a, 0);
         self.ram
             .write_u8(0x67, self.ram.read_u8(0x67) | DIRECTION_FLAG[index]);
-        let y_fixed = i32::from(self.ram.read_u16(0x20)) * 256
+        let y_fixed = i32::from(self.ram.player().y()) * 256
             + i32::from(self.ram.read_u8(0x41c))
             + i32::from(BELT_Y[index]) * 16;
         self.ram.write_u8(0x41c, y_fixed as u8);
-        self.ram.write_u16(0x20, ((y_fixed as u32) >> 8) as u16);
-        let x_fixed = i32::from(self.ram.read_u16(0x22)) * 256
+        self.ram.set_player_y(((y_fixed as u32) >> 8) as u16);
+        let x_fixed = i32::from(self.ram.player().x()) * 256
             + i32::from(self.ram.read_u8(0x41d))
             + i32::from(BELT_X[index]) * 16;
         self.ram.write_u8(0x41d, x_fixed as u8);
-        self.ram.write_u16(0x22, ((x_fixed as u32) >> 8) as u16)
+        self.ram.set_player_x(((x_fixed as u32) >> 8) as u16)
     }
 
     pub fn link_handle_moving_animation_full_long_entry(&mut self) {
         const FACING_BITS: [u8; 4] = [8, 4, 2, 1];
-        if self.ram.read_u8(0x5d) == PlayerState::Swimming as u8 {
+        if self.ram.player().action_state() == PlayerState::Swimming as u8 {
             self.link_handle_moving_animation_swimming();
             return;
         }
@@ -4882,7 +4876,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             } else if self.ram.read_u8(0x6c) != 0 {
                 self.ram.read_u8(0x6c).wrapping_mul(2) & !3
             } else {
-                if direction & FACING_BITS[usize::from(self.ram.read_u8(0x2f) >> 1)] != 0 {
+                if direction & FACING_BITS[usize::from(self.ram.player().facing() >> 1)] != 0 {
                     self.link_handle_moving_animation_start_with_dash();
                     return;
                 }
@@ -4893,7 +4887,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             } else {
                 facing + if direction & 1 != 0 { 2 } else { 0 }
             };
-            self.ram.write_u8(0x2f, facing)
+            self.ram.set_player_facing(facing)
         }
         self.link_handle_moving_animation_start_with_dash()
     }
@@ -4907,7 +4901,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.link_handle_moving_animation_dash();
             return;
         }
-        let mut delay_index = self.ram.read_u8(0x2f) >> 1;
+        let mut delay_index = self.ram.player().facing() >> 1;
         if self.ram.read_u8(0x5e) == 6 {
             delay_index = delay_index.wrapping_add(4)
         } else if self.ram.read_u8(0x34a) != 0 {
@@ -4918,7 +4912,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             delay_index = delay_index.wrapping_add(4)
         }
 
-        let state = self.ram.read_u8(0x5d);
+        let state = self.ram.player().action_state();
         if state == PlayerState::PermaBunny as u8
             || (self.runtime.enhanced_features0() & 4096 != 0
                 && state == PlayerState::TempBunny as u8)
@@ -4988,7 +4982,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if self.ram.read_u8(0x6c) != 0 {
                 facing = self.ram.read_u8(0x6c).wrapping_mul(2) & !3
             } else {
-                if direction & FACING_BITS[usize::from(self.ram.read_u8(0x2f) >> 1)] != 0 {
+                if direction & FACING_BITS[usize::from(self.ram.player().facing() >> 1)] != 0 {
                     return;
                 }
                 facing = if direction & 0xc != 0 { 0 } else { 4 }
@@ -5001,7 +4995,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else {
             facing = facing.wrapping_add(if direction & 1 != 0 { 2 } else { 0 })
         }
-        self.ram.write_u8(0x2f, facing)
+        self.ram.set_player_facing(facing)
     }
 
     pub fn link_handle_moving_animation_dash(&mut self) {
@@ -5052,7 +5046,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let last_direction = self.ram.read_u8(0x26);
         if last_direction & 0xc != 0 && self.ram.read_u8(0x6c) == 1 {
             if last_direction & 4 != 0 {
-                let position = self.ram.read_u16(0x20).wrapping_add(28);
+                let position = self.ram.player().y().wrapping_add(28);
                 if position & 0xfc == 0 {
                     self.ram.write_u8(
                         0x68,
@@ -5060,7 +5054,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     )
                 }
             } else {
-                let position = self.ram.read_u16(0x20).wrapping_sub(18);
+                let position = self.ram.player().y().wrapping_sub(18);
                 self.ram.write_u8(
                     0x68,
                     (position >> 8).wrapping_sub(u16::from(self.ram.read_u8(0x40))) as u8,
@@ -5069,7 +5063,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         if last_direction & 3 != 0 && self.ram.read_u8(0x6c) == 2 {
             if last_direction & 1 != 0 {
-                let position = self.ram.read_u16(0x22).wrapping_add(21);
+                let position = self.ram.player().x().wrapping_add(21);
                 if position & 0xfc == 0 {
                     self.ram.write_u8(
                         0x69,
@@ -5077,7 +5071,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     )
                 }
             } else {
-                let position = self.ram.read_u16(0x22).wrapping_sub(8);
+                let position = self.ram.player().x().wrapping_sub(8);
                 self.ram.write_u8(
                     0x69,
                     (position >> 8).wrapping_sub(u16::from(self.ram.read_u8(0x41))) as u8,
@@ -5110,11 +5104,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.applied_movement_to_camera = true;
         self.ram.write_u8(
             0x68,
-            (self.ram.read_u16(0x20) >> 8).wrapping_sub(u16::from(self.ram.read_u8(0x40))) as u8,
+            (self.ram.player().y() >> 8).wrapping_sub(u16::from(self.ram.read_u8(0x40))) as u8,
         );
         self.ram.write_u8(
             0x69,
-            (self.ram.read_u16(0x22) >> 8).wrapping_sub(u16::from(self.ram.read_u8(0x41))) as u8,
+            (self.ram.player().x() >> 8).wrapping_sub(u16::from(self.ram.read_u8(0x41))) as u8,
         );
         let x_delta = self.ram.read_u8(0x69);
         if x_delta != 0 {
@@ -5129,7 +5123,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_initialize(&mut self) {
-        self.ram.write_u8(0x2f, 2);
+        self.ram.set_player_facing(2);
         for address in [
             0x26, 0x301, 0x37a, 0x20b, 0x350, 0x30d, 0x30e, 0x30a, 0x2e1, 0x3b, 0x308, 0x309, 0x376,
         ] {
@@ -5138,7 +5132,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x40);
         self.link_reset_swimming_state();
         self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !1);
-        self.ram.write_u16(0x24, self.ram.read_u16(0x24) & 0xff);
+        self.ram.set_player_z(self.ram.player().z() & 0xff);
         for address in [0x4d, 0x46, 0x31f, 0x360, 0x2da, 0x55] {
             self.ram.write_u8(address, 0)
         }
@@ -5157,8 +5151,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x34a, 0);
             self.ram.write_u16(0x11c, 0);
             self.ram.write_u16(0x11a, 0);
-            if self.ram.read_u8(0xf357) == 0 && self.ram.read_u8(0xf3ca) != 0 {
-                self.ram.write_u8(0x5d, PlayerState::PermaBunny as u8);
+            if self.ram.player().moon_pearl() == 0 && self.ram.read_u8(0xf3ca) != 0 {
+                self.ram
+                    .set_player_action_state(PlayerState::PermaBunny as u8);
                 self.ram.write_u8(0x56, 1);
                 self.ram.write_u8(0x2e0, 1);
                 self.runtime.load_gear_palettes_bunny(self.ram)
@@ -5210,7 +5205,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         if self.ram.read_u8(0x3f7) == 0 {
             if matches!(
-                self.ram.read_u8(0x5d),
+                self.ram.player().action_state(),
                 x if x == PlayerState::PermaBunny as u8 || x == PlayerState::TempBunny as u8
             ) {
                 self.ram.write_u16(0x3f5, 0);
@@ -5238,7 +5233,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let timer = self.ram.read_u8(0x2e2).wrapping_sub(1);
         self.ram.write_u8(0x2e2, timer);
         if (timer as i8) < 0 {
-            self.ram.write_u8(0x5d, PlayerState::TempBunny as u8);
+            self.ram
+                .set_player_action_state(PlayerState::TempBunny as u8);
             self.ram.write_u8(0x2e0, 1);
             self.ram.write_u8(0x56, 1);
             self.runtime.load_gear_palettes_bunny(self.ram);
@@ -5266,7 +5262,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         if phase == 8 {
             self.ram.write_u8(0x300, 0);
-            self.ram.write_u8(0x5d, PlayerState::Ground as u8);
+            self.ram.set_player_action_state(PlayerState::Ground as u8);
             self.ram.write_u8(0x37b, 0);
             self.ram.write_u8(0x360, 0);
             self.ram.write_u8(0x4d, 0);
@@ -5292,7 +5288,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             for address in [0x308, 0x3a, 0x3b, 0x3c, 0x5e, 0x50, 0x301, 0x37a, 0x300] {
                 self.ram.write_u8(address, 0)
             }
-            self.ram.write_u8(0x5d, PlayerState::HoldUpItem as u8);
+            self.ram
+                .set_player_action_state(PlayerState::HoldUpItem as u8);
             self.ram.write_u8(0x2da, if item == 0x20 { 2 } else { 1 });
             self.ram.write_u8(0x37b, 1)
         }
@@ -5305,9 +5302,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_tuck_into_bed(&mut self) {
-        self.ram.write_u16(0x20, 0x215a);
-        self.ram.write_u16(0x22, 0x940);
-        self.ram.write_u8(0x5d, PlayerState::AsleepInBed as u8);
+        self.ram.set_player_y(0x215a);
+        self.ram.set_player_x(0x940);
+        self.ram
+            .set_player_action_state(PlayerState::AsleepInBed as u8);
         self.ram.write_u8(0x37c, 0);
         self.ram.write_u8(0x37d, 0);
         self.ram.write_u8(0x374, 3);
@@ -5332,7 +5330,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     let high = self.ram.read_u8(0xf4);
                     if ((high & 0xe0) | high.wrapping_shl(4) | self.ram.read_u8(0xf6)) & 0xf0 != 0 {
                         self.inc8(0x37d);
-                        self.ram.write_u8(0x2f, 6);
+                        self.ram.set_player_facing(6);
                         self.inc8(0x37c);
                         self.ram.write_u8(0x374, 4)
                     }
@@ -5342,13 +5340,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 let countdown = self.ram.read_u8(0x374).wrapping_sub(1);
                 self.ram.write_u8(0x374, countdown);
                 if (countdown as i8) < 0 {
-                    self.ram.write_u8(0x27, 4);
-                    self.ram.write_u8(0x28, 21);
-                    self.ram.write_u8(0x29, 24);
+                    self.ram.set_player_actual_velocity_y(4);
+                    self.ram.set_player_actual_velocity_x(21);
+                    self.ram.set_player_actual_velocity_z(24);
                     self.ram.write_u8(0x2c7, 24);
                     self.ram.write_u8(0x46, 16);
                     self.ram.write_u8(0x4d, 2);
-                    self.ram.write_u8(0x5d, PlayerState::RecoilOther as u8)
+                    self.ram
+                        .set_player_action_state(PlayerState::RecoilOther as u8)
                 }
             }
             _ => {}
@@ -5369,7 +5368,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 return;
             }
             self.ram.write_u8(0x3a, self.ram.read_u8(0x3a) & !0x40);
-            if self.ram.read_u8(0xf36e) == 0 {
+            if self.ram.player().magic() == 0 {
                 self.runtime.ancilla_sfx2_near(self.ram, 60);
                 self.ram.write_u16(0x1cf0, 123);
                 self.runtime.main_show_text_message(self.ram);
@@ -5395,10 +5394,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     0x4c,
                     CAPE_DEPLETION_TIMERS[usize::from(self.ram.read_u8(0xf37b))],
                 );
-                let magic = self.ram.read_u8(0xf36e);
+                let magic = self.ram.player().magic();
                 if (magic == 0 && self.runtime.enhanced_features0() & 4096 != 0) || {
                     let decremented = magic.wrapping_sub(1);
-                    self.ram.write_u8(0xf36e, decremented);
+                    self.ram.set_player_magic(decremented);
                     decremented == 0
                 } {
                     self.link_force_unequip_cape();
@@ -5455,12 +5454,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 0x4c,
                 CAPE_DEPLETION_TIMERS[usize::from(self.ram.read_u8(0xf37b))],
             );
-            let magic = self.ram.read_u8(0xf36e);
+            let magic = self.ram.player().magic();
             if magic == 0 {
                 return;
             }
             let magic = magic.wrapping_sub(1);
-            self.ram.write_u8(0xf36e, magic);
+            self.ram.set_player_magic(magic);
             if magic != 0 {
                 return;
             }
@@ -5469,15 +5468,15 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     pub fn link_check_for_edge_screen_transition(&mut self) -> bool {
-        let state = self.ram.read_u8(0x5d);
+        let state = self.ram.player().action_state();
         if matches!(state, 3 | 8 | 9 | 10) || self.ram.read_u8(0x46) == 0 {
             return false;
         }
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x27, 0);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_y(0);
         self.ram.write_u8(0x2c6, 3);
-        self.ram.write_u16(0x22, self.ram.read_u16(0xfc2));
-        self.ram.write_u16(0x20, self.ram.read_u16(0xfc4));
+        self.ram.set_player_x(self.ram.read_u16(0xfc2));
+        self.ram.set_player_y(self.ram.read_u16(0xfc4));
         true
     }
 
@@ -5508,20 +5507,24 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 if nearby == 0 {
                     true
                 } else {
-                    self.ram.write_u8(
-                        0x30,
-                        self.ram.read_u8(0x30).wrapping_add(self.ram.read_u8(0x310)),
+                    self.ram.set_player_velocity_y(
+                        self.ram
+                            .player()
+                            .velocity_y()
+                            .wrapping_add(self.ram.read_u8(0x310)),
                     );
-                    self.ram.write_u8(
-                        0x31,
-                        self.ram.read_u8(0x31).wrapping_add(self.ram.read_u8(0x312)),
+                    self.ram.set_player_velocity_x(
+                        self.ram
+                            .player()
+                            .velocity_x()
+                            .wrapping_add(self.ram.read_u8(0x312)),
                     );
                     match self.ram.read_u8(0x0e) {
                         12 | 3 => true,
                         10 | 5 => false,
                         a if a & 0xc == 0 && a & 3 == 0 => true,
-                        _ if self.ram.read_u8(0x30) != 0 => false,
-                        _ if self.ram.read_u8(0x31) == 0 => true,
+                        _ if self.ram.player().velocity_y() != 0 => false,
+                        _ if self.ram.player().velocity_x() == 0 => true,
                         _ => (self.ram.read_u8(0x310) as i8) < 0,
                     }
                 }
@@ -5543,12 +5546,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     }
                     if self.ram.read_u8(0x67) == 0 {
                         if self.ram.read_u8(0x310) != 0 {
-                            self.ram
-                                .write_u8(0x30, 0u8.wrapping_sub(self.ram.read_u8(0x30)))
+                            self.ram.set_player_velocity_y(
+                                0u8.wrapping_sub(self.ram.player().velocity_y()),
+                            )
                         }
                         if self.ram.read_u8(0x312) != 0 {
-                            self.ram
-                                .write_u8(0x31, 0u8.wrapping_sub(self.ram.read_u8(0x31)))
+                            self.ram.set_player_velocity_x(
+                                0u8.wrapping_sub(self.ram.player().velocity_x()),
+                            )
                         }
                     }
                 }
@@ -5563,16 +5568,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.ram.write_u8(0x315, 1);
                 self.run_slope_collision_checks_vertical_first()
             }
-            _ if self.ram.read_u8(0x31) | self.ram.read_u8(0x30) != 0 => {
+            _ if self.ram.player().velocity_x() | self.ram.player().velocity_y() != 0 => {
                 self.ram.write_u8(0x315, 1);
                 self.run_slope_collision_checks_vertical_first()
             }
             _ => {
-                let state = self.ram.read_u8(0x5d);
+                let state = self.ram.player().action_state();
                 if !matches!(state, 19 | 8 | 9 | 10 | 3) {
                     self.runtime.player_tile_detect_nearby(self.ram);
                     if self.ram.read_u8(0x59) & 0xf != 0 {
-                        self.ram.write_u8(0x5d, PlayerState::FallingIntoHole as u8);
+                        self.ram
+                            .set_player_action_state(PlayerState::FallingIntoHole as u8);
                         if self.ram.read_u8(0x372) == 0 {
                             self.ram.write_u8(0x5e, 4)
                         }
@@ -5585,12 +5591,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x6a) != 0 {
             self.ram.write_u8(0x6b, 0)
         }
-        if self.ram.read_u8(0x5d) != 11 {
+        if self.ram.player().action_state() != 11 {
             let vel = self
                 .ram
-                .read_u16(0x20)
+                .player()
+                .y()
                 .wrapping_sub(self.ram.read_u8(0x3e) as u16) as u8;
-            self.ram.write_u8(0x30, vel);
+            self.ram.set_player_velocity_y(vel);
             if vel != 0 {
                 self.ram.write_u8(
                     0x67,
@@ -5600,9 +5607,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         let vel = self
             .ram
-            .read_u16(0x22)
+            .player()
+            .x()
             .wrapping_sub(self.ram.read_u8(0x3f) as u16) as u8;
-        self.ram.write_u8(0x31, vel);
+        self.ram.set_player_velocity_x(vel);
         if vel != 0 {
             self.ram.write_u8(
                 0x67,
@@ -5612,17 +5620,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
         if self.ram.read_u8(0x1b) == 0
             || self.ram.read_u8(0x46c) != 4
-            || self.ram.read_u8(0x5d) != PlayerState::Swimming as u8
+            || self.ram.player().action_state() != PlayerState::Swimming as u8
         {
             return;
         }
         let floor_y = self.ram.read_u8(0x310);
-        if floor_y != 0 && self.ram.read_u8(0x30).wrapping_sub(floor_y) == 0 {
+        if floor_y != 0 && self.ram.player().velocity_y().wrapping_sub(floor_y) == 0 {
             let mask = if (floor_y as i8) < 0 { !8 } else { !4 };
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) & mask)
         }
         let floor_x = self.ram.read_u8(0x312);
-        if floor_x != 0 && self.ram.read_u8(0x31).wrapping_sub(floor_x) == 0 {
+        if floor_x != 0 && self.ram.player().velocity_x().wrapping_sub(floor_x) == 0 {
             let mask = if (floor_x as i8) < 0 { !2 } else { !1 };
             self.ram.write_u8(0x67, self.ram.read_u8(0x67) & mask)
         }
@@ -5647,12 +5655,16 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     fn start_movement_collision_checks_y(&mut self) {
-        let vel = self.ram.read_u8(0x30);
+        let vel = self.ram.player().velocity_y();
         if vel == 0 {
             return;
         }
         let direction = if self.ram.read_u8(0x6c) == 1 {
-            if self.ram.read_u8(0x20) < 0x80 { 0 } else { 1 }
+            if self.ram.player().y_low() < 0x80 {
+                0
+            } else {
+                1
+            }
         } else if (vel as i8) < 0 {
             0
         } else {
@@ -5668,12 +5680,16 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     fn start_movement_collision_checks_x(&mut self) {
-        let vel = self.ram.read_u8(0x31);
+        let vel = self.ram.player().velocity_x();
         if vel == 0 {
             return;
         }
         let direction = if self.ram.read_u8(0x6c) == 2 {
-            if self.ram.read_u8(0x22) < 0x80 { 2 } else { 3 }
+            if self.ram.player().x_low() < 0x80 {
+                2
+            } else {
+                3
+            }
         } else if (vel as i8) < 0 {
             2
         } else {
@@ -5715,7 +5731,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 if r14 >> 8 & 7 != 0 {
                     self.ram.write_u16(
                         0x49,
-                        if (self.ram.read_u8(0x30) as i8) < 0 {
+                        if (self.ram.player().velocity_y() as i8) < 0 {
                             8
                         } else {
                             4
@@ -5730,8 +5746,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                         self.link_add_in_velocity_y_falling();
                         self.calculate_snap_scratch_y();
                         self.ram.write_u8(0x6c, 0);
-                        if r14 & 0x20 != 0 && r14 & 1 == 0 && self.ram.read_u16(0x22) & 7 == 1 {
-                            self.ram.write_u16(0x22, self.ram.read_u16(0x22) & !7)
+                        if r14 & 0x20 != 0 && r14 & 1 == 0 && self.ram.player().x() & 7 == 1 {
+                            self.ram.set_player_x(self.ram.player().x() & !7)
                         }
                         if self.ram.read_u8(0x315) & 2 == 0 {
                             self.ram.write_u8(0x50, self.ram.read_u8(0x50) & !2)
@@ -5854,7 +5870,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 if r14 >> 8 & 7 != 0 {
                     self.ram.write_u16(
                         0x49,
-                        if (self.ram.read_u8(0x31) as i8) < 0 {
+                        if (self.ram.player().velocity_x() as i8) < 0 {
                             2
                         } else {
                             1
@@ -5901,16 +5917,16 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             hopped = true;
         } else if self.ram.read_u16(0x341) & 7 == 7
             && self.ram.read_u8(0x345) == 0
-            && self.ram.read_u8(0x5d) != PlayerState::RecoilOther as u8
+            && self.ram.player().action_state() != PlayerState::RecoilOther as u8
         {
-            self.ram.write_u16(
-                0x20,
-                u16::from_le_bytes([self.ram.read_u8(0x3e), self.ram.read_u8(0x40)]),
-            );
-            self.ram.write_u16(
-                0x22,
-                u16::from_le_bytes([self.ram.read_u8(0x3f), self.ram.read_u8(0x41)]),
-            );
+            self.ram.set_player_y(u16::from_le_bytes([
+                self.ram.read_u8(0x3e),
+                self.ram.read_u8(0x40),
+            ]));
+            self.ram.set_player_x(u16::from_le_bytes([
+                self.ram.read_u8(0x3f),
+                self.ram.read_u8(0x41),
+            ]));
             self.link_cancel_dash();
             if self.ram.read_u8(0x1d) == 0 {
                 self.dungeon_handle_layer_change()
@@ -5961,13 +5977,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             const DY: [u16; 4] = [8, 24, 16, 16];
             let direction = self.ram.read_u8(0x66) as usize;
             self.ram
-                .write_u16(0xf360, self.ram.read_u16(0xf360).wrapping_add(5));
+                .set_player_rupees_goal(self.ram.player().rupees_goal().wrapping_add(5));
             let y = self
                 .ram
-                .read_u16(0x20)
+                .player()
+                .y()
                 .wrapping_add(DY[direction])
                 .wrapping_sub(if misc & 0x2000 != 0 { 8 } else { 0 });
-            let x = self.ram.read_u16(0x22).wrapping_add(DX[direction]);
+            let x = self.ram.player().x().wrapping_add(DX[direction]);
             self.runtime.dungeon_delete_rupee_tile(self.ram, x, y);
             self.runtime.ancilla_sfx3_near(self.ram, 10)
         }
@@ -6030,11 +6047,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     fn handle_pit(&mut self) -> bool {
         if self.ram.read_u8(0x59) & 5 != 0 && self.ram.read_u16(0x0e) & 2 == 0 {
-            if !matches!(self.ram.read_u8(0x5d), 5 | 2) {
+            if !matches!(self.ram.player().action_state(), 5 | 2) {
                 self.ram.write_u8(0x5c, 9);
                 self.ram.write_u8(0x5a, 0);
                 self.ram.write_u8(0x5b, 1);
-                self.ram.write_u8(0x5d, PlayerState::FallingIntoHole as u8)
+                self.ram
+                    .set_player_action_state(PlayerState::FallingIntoHole as u8)
             }
             true
         } else {
@@ -6067,9 +6085,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.enter_deep_water();
             if self.ram.read_u8(0x351) == 1 {
                 self.link_force_unequip_cape_quietly();
-                if self.ram.read_u8(0xf356) != 0 {
+                if self.ram.player().flippers() != 0 {
                     if self.ram.read_u8(0x2e0) == 0 {
-                        self.ram.write_u8(0x5d, PlayerState::Swimming as u8)
+                        self.ram
+                            .set_player_action_state(PlayerState::Swimming as u8)
                     }
                 } else {
                     self.outdoor_water_recoil_y()
@@ -6106,7 +6125,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.link_cancel_dash();
             self.ram.write_u8(0x37b, 1);
             self.ram.write_u8(0x78, 1);
-            self.ram.write_u8(0x5d, 11);
+            self.ram.set_player_action_state(11);
             self.ram.write_u8(0x46, 0);
             self.ram.write_u16(0x364, 0xffff);
             self.ram.write_u8(0x48, 0);
@@ -6138,7 +6157,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 if down_ledge & mask != 0 && self.run_ledge_hop_timer() {
                     self.link_cancel_dash();
                     self.ram
-                        .write_u8(0x28, if down_ledge & 4 != 0 { 16 } else { 0xf0 });
+                        .set_player_actual_velocity_x(if down_ledge & 4 != 0 { 16 } else { 0xf0 });
                     self.ram.write_u8(0x37b, 1);
                     self.ram.write_u8(0x48, 0);
                     self.ram.write_u8(0x5e, 0);
@@ -6148,7 +6167,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.ram.write_u8(0x363, 20);
                     self.ram.write_u16(0x364, self.ram.read_u16(0x364) | 0xff);
                     self.ram.write_u8(0x46, 0);
-                    self.ram.write_u8(0x5d, PlayerState::JumpOffLedgeDiag as u8);
+                    self.ram
+                        .set_player_action_state(PlayerState::JumpOffLedgeDiag as u8);
                     return;
                 }
             }
@@ -6246,9 +6266,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.enter_deep_water();
             if self.ram.read_u8(0x351) == 1 {
                 self.link_force_unequip_cape_quietly();
-                if self.ram.read_u8(0xf356) != 0 {
+                if self.ram.player().flippers() != 0 {
                     if self.ram.read_u8(0x2e0) == 0 {
-                        self.ram.write_u8(0x5d, PlayerState::Swimming as u8)
+                        self.ram
+                            .set_player_action_state(PlayerState::Swimming as u8)
                     }
                 } else {
                     self.outdoor_water_recoil_x()
@@ -6280,21 +6301,19 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         if self.ram.read_u8(0x36e) & 7 != 0 && self.run_ledge_hop_timer() {
             self.runtime.ancilla_sfx2_near(self.ram, 0x20);
-            self.ram.write_u8(
-                0x28,
-                if self.ram.read_u8(0x66) & 1 != 0 {
+            self.ram
+                .set_player_actual_velocity_x(if self.ram.read_u8(0x66) & 1 != 0 {
                     16
                 } else {
                     0xf0
-                },
-            );
+                });
             self.link_cancel_dash();
             self.ram.write_u8(0x4d, 2);
             self.ram.write_u8(0x362, 20);
             self.ram.write_u8(0x363, 20);
             self.ram.write_u16(0x364, self.ram.read_u16(0x364) | 0xff);
             self.ram
-                .write_u8(0x5d, PlayerState::FallOfLeftRightLedge as u8);
+                .set_player_action_state(PlayerState::FallOfLeftRightLedge as u8);
             self.ram.write_u8(0x37b, 1);
             self.ram.write_u8(0x78, 1);
             self.ram.write_u8(0x48, 0);
@@ -6302,7 +6321,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if self.ram.read_u8(0x1b) == 0 {
                 self.ram.write_u8(0xee, 2)
             }
-            let saved_x = self.ram.read_u16(0x22);
+            let saved_x = self.ram.player().x();
             let offset = (self.ram.read_u8(0x66) & !2).wrapping_mul(2);
             let found = self.link_hopping_horizontally_find_tile_x(offset);
             self.ram.write_u8(0x66, 1);
@@ -6311,21 +6330,19 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             } else {
                 self.link_hop_find_tile_to_land_on_south()
             }
-            self.ram.write_u16(0x22, saved_x);
+            self.ram.set_player_x(saved_x);
             return;
         }
         if self.ram.read_u8(0x370) & 0x77 != 0 && self.run_ledge_hop_timer() {
             let sound = self.runtime.ancilla_sfx2_near(self.ram, 0x20);
             self.ram
-                .write_u8(0x5d, if sound & 7 == 0 { 16 } else { 15 });
-            self.ram.write_u8(
-                0x28,
-                if self.ram.read_u8(0x66) & 1 != 0 {
+                .set_player_action_state(if sound & 7 == 0 { 16 } else { 15 });
+            self.ram
+                .set_player_actual_velocity_x(if self.ram.read_u8(0x66) & 1 != 0 {
                     16
                 } else {
                     0xf0
-                },
-            );
+                });
             self.link_cancel_dash();
             self.ram.write_u8(0x4d, 2);
             self.ram.write_u8(0x362, 20);
@@ -6341,7 +6358,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x36e) & 0x70 != 0
             && self.ram.read_u8(0x36e) & 7 == 0
             && self.ram.read_u8(0x370) & 0x77 == 0
-            && self.ram.read_u8(0x5d) != 13
+            && self.ram.player().action_state() != 13
             && self.run_ledge_hop_timer()
         {
             self.runtime.ancilla_sfx2_near(self.ram, 0x20);
@@ -6357,20 +6374,19 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             && self.ram.read_u8(0x370) & 0x77 == 0
             && self.run_ledge_hop_timer()
         {
-            self.ram.write_u8(
-                0x28,
-                if self.ram.read_u8(0x66) & 1 != 0 {
+            self.ram
+                .set_player_actual_velocity_x(if self.ram.read_u8(0x66) & 1 != 0 {
                     16
                 } else {
                     0xf0
-                },
-            );
+                });
             self.link_cancel_dash();
             self.ram.write_u8(0x4d, 2);
             self.ram.write_u8(0x362, 20);
             self.ram.write_u8(0x363, 20);
             self.ram.write_u16(0x364, self.ram.read_u16(0x364) | 0xff);
-            self.ram.write_u8(0x5d, PlayerState::JumpOffLedgeDiag as u8);
+            self.ram
+                .set_player_action_state(PlayerState::JumpOffLedgeDiag as u8);
             self.ram.write_u8(0x46, 0);
             self.ram.write_u8(0x37b, 1);
             self.ram.write_u8(0x78, 1);
@@ -6379,7 +6395,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return;
         }
         if self.ram.read_u16(0x0e) & 7 == 0 && self.ram.read_u16(0x0c) & 5 != 0 {
-            let skip = self.ram.read_u8(0x372) != 0 && self.ram.read_u8(0x2f) & 4 == 0;
+            let skip = self.ram.read_u8(0x372) != 0 && self.ram.player().facing() & 4 == 0;
             if !skip || self.runtime.enhanced_features0() & 4096 != 0 {
                 self.flag_moving_into_slopes_x();
                 if self.ram.read_u8(0x6b) & 0xf != 0 {
@@ -6568,7 +6584,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let r14 = self.ram.read_u16(0x0e);
         if r14 & 7 != 0 {
             let mut reached_nudge = false;
-            if self.ram.read_u8(0x5d) == PlayerState::Swimming as u8 {
+            if self.ram.player().action_state() == PlayerState::Swimming as u8 {
                 if self.ram.read_u8(0x310) == 0 {
                     self.reset_all_acceleration()
                 }
@@ -6604,7 +6620,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.link_bonk_and_smash();
                     self.repel_dash()
                 } else {
-                    let vel = self.ram.read_u8(0x30);
+                    let vel = self.ram.player().velocity_y();
                     let tt = if r14 & 4 != 0 {
                         if (vel as i8) < 0 {
                             vel
@@ -6618,9 +6634,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     };
                     let nudge = if (tt as i8) < 0 { -1 } else { 1 };
                     if r14 & 2 == 0 {
-                        if self.ram.read_u16(0x22) & 7 != 0 {
-                            self.ram
-                                .write_u16(0x22, add_i8(self.ram.read_u16(0x22), nudge));
+                        if self.ram.player().x() & 7 != 0 {
+                            self.ram.set_player_x(add_i8(self.ram.player().x(), nudge));
                             self.handle_nudging(nudge);
                             return;
                         }
@@ -6644,7 +6659,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     fn handle_pushing_bonking_snaps_x(&mut self) {
         let r14 = self.ram.read_u16(0x0e);
         if r14 & 7 != 0 {
-            if self.ram.read_u8(0x5d) == PlayerState::Swimming as u8 && self.ram.read_u8(0x312) == 0
+            if self.ram.player().action_state() == PlayerState::Swimming as u8
+                && self.ram.read_u8(0x312) == 0
             {
                 self.reset_all_acceleration()
             }
@@ -6673,7 +6689,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.link_bonk_and_smash();
                     self.repel_dash()
                 } else {
-                    let vel = self.ram.read_u8(0x31);
+                    let vel = self.ram.player().velocity_x();
                     let tt = if r14 & 4 != 0 {
                         if (vel as i8) < 0 {
                             vel
@@ -6687,9 +6703,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     };
                     let nudge = if (tt as i8) < 0 { -1 } else { 1 };
                     if r14 & 2 == 0 {
-                        if self.ram.read_u16(0x20) & 7 != 0 {
-                            self.ram
-                                .write_u16(0x20, add_i8(self.ram.read_u16(0x20), nudge));
+                        if self.ram.player().y() & 7 != 0 {
+                            self.ram.set_player_y(add_i8(self.ram.player().y(), nudge));
                             self.handle_nudging(nudge);
                             return;
                         }
@@ -6716,7 +6731,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     fn update_drag_state(&mut self) -> bool {
-        if self.ram.read_u8(0x66).wrapping_mul(2) == self.ram.read_u8(0x2f) {
+        if self.ram.read_u8(0x66).wrapping_mul(2) == self.ram.player().facing() {
             self.ram.write_u8(
                 0x48,
                 self.ram.read_u8(0x48) | ((self.ram.read_u8(0x315) & 1) << 1),
@@ -6788,10 +6803,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x59, 0);
         self.runtime.tile_detect_reset_state(self.ram);
         let mask = self.ram.read_u16(0xec);
-        let y0 = self.ram.read_u16(0x20).wrapping_add(Y0[index]) & mask;
-        let x0 = (self.ram.read_u16(0x22).wrapping_add(X0[index]) & mask) >> 3;
-        let y1 = self.ram.read_u16(0x20).wrapping_add(Y1[index]) & mask;
-        let x1 = (self.ram.read_u16(0x22).wrapping_add(X1[index]) & mask) >> 3;
+        let y0 = self.ram.player().y().wrapping_add(Y0[index]) & mask;
+        let x0 = (self.ram.player().x().wrapping_add(X0[index]) & mask) >> 3;
+        let y1 = self.ram.player().y().wrapping_add(Y1[index]) & mask;
+        let x1 = (self.ram.player().x().wrapping_add(X1[index]) & mask) >> 3;
         self.runtime.tile_detection_execute(self.ram, x0, y0, 1);
         self.runtime.tile_detection_execute(self.ram, x1, y1, 2);
         if (self.ram.read_u16(0x0e) | u16::from(self.ram.read_u8(0x36e))) & 3 != 0
@@ -6799,10 +6814,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         {
             if direction & 2 != 0 {
                 self.ram
-                    .write_u16(0x20, add_i8(self.ram.read_u16(0x20), -amount))
+                    .set_player_y(add_i8(self.ram.player().y(), -amount))
             } else {
                 self.ram
-                    .write_u16(0x22, add_i8(self.ram.read_u16(0x22), -amount))
+                    .set_player_x(add_i8(self.ram.player().x(), -amount))
             }
         }
     }
@@ -6821,10 +6836,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 result = true
             }
         }
-        self.ram.write_u16(0x20, self.ram.read_u16(0xfc4));
-        self.ram.write_u16(0x22, self.ram.read_u16(0xfc2));
-        self.ram.write_u8(0x2a, 0);
-        self.ram.write_u8(0x2b, 0);
+        self.ram.set_player_y(self.ram.read_u16(0xfc4));
+        self.ram.set_player_x(self.ram.read_u16(0xfc2));
+        self.ram.set_player_subpixel_y(0);
+        self.ram.set_player_subpixel_x(0);
         result
     }
 
@@ -6832,17 +6847,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         // Integer promotion in the C expression preserves a negative offset.
         // Treating it as `u8` turns -6 into 250 and crosses a coordinate page.
         let delta = i16::from(self.ram.read_u8(0x51) & 7)
-            - if (self.ram.read_u8(0x30) as i8) < 0 {
+            - if (self.ram.player().velocity_y() as i8) < 0 {
                 8
             } else {
                 0
             };
         self.ram
-            .write_u16(0x20, self.ram.read_u16(0x20).wrapping_add_signed(-delta))
+            .set_player_y(self.ram.player().y().wrapping_add_signed(-delta))
     }
 
     fn calculate_snap_scratch_y(&mut self) {
-        let mut vel = self.ram.read_u8(0x30);
+        let mut vel = self.ram.player().velocity_y();
         if self.ram.read_u16(0x0e) & 4 != 0 {
             if (vel as i8) >= 0 {
                 vel = 0u8.wrapping_sub(vel)
@@ -6850,21 +6865,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else if (vel as i8) < 0 {
             vel = 0u8.wrapping_sub(vel)
         }
-        self.ram.write_u16(
-            0x22,
-            add_i8(
-                self.ram.read_u16(0x22),
-                if (vel as i8) >= 0 { 1 } else { -1 },
-            ),
-        )
+        self.ram.set_player_x(add_i8(
+            self.ram.player().x(),
+            if (vel as i8) >= 0 { 1 } else { -1 },
+        ))
     }
 
     fn link_add_in_velocity_y(&mut self) {
-        self.ram.write_u16(
-            0x20,
+        self.ram.set_player_y(
             self.ram
-                .read_u16(0x20)
-                .wrapping_sub(self.ram.read_u8(0x30) as i8 as i16 as u16),
+                .player()
+                .y()
+                .wrapping_sub(self.ram.player().velocity_y() as i8 as i16 as u16),
         )
     }
 
@@ -6875,27 +6887,26 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x6c, 0);
             return;
         }
-        let high_half = self.ram.read_u8(0x22) >= 0x80;
+        let high_half = self.ram.player().x_low() >= 0x80;
         let delta = if high_half { -1 } else { 1 };
         if self.ram.read_u8(0x50) & 1 == 0 {
-            self.ram.write_u8(0x2f, if high_half { 4 } else { 6 })
+            self.ram.set_player_facing(if high_half { 4 } else { 6 })
         }
-        self.ram
-            .write_u16(0x22, add_i8(self.ram.read_u16(0x22), delta))
+        self.ram.set_player_x(add_i8(self.ram.player().x(), delta))
     }
 
     fn snap_on_x(&mut self) {
-        let x = self.ram.read_u16(0x22);
-        let delta = (x & 7).wrapping_sub(if (self.ram.read_u8(0x31) as i8) < 0 {
+        let x = self.ram.player().x();
+        let delta = (x & 7).wrapping_sub(if (self.ram.player().velocity_x() as i8) < 0 {
             8
         } else {
             0
         });
-        self.ram.write_u16(0x22, x.wrapping_sub(delta))
+        self.ram.set_player_x(x.wrapping_sub(delta))
     }
 
     fn calculate_snap_scratch_x(&mut self) {
-        let mut vel = self.ram.read_u8(0x31) as i8;
+        let mut vel = self.ram.player().velocity_x() as i8;
         if self.ram.read_u16(0x0e) & 4 != 0 {
             if vel >= 0 {
                 vel = vel.wrapping_neg()
@@ -6903,10 +6914,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else if vel < 0 {
             vel = vel.wrapping_neg()
         }
-        self.ram.write_u16(
-            0x20,
-            add_i8(self.ram.read_u16(0x20), if vel < 0 { -1 } else { 1 }),
-        )
+        self.ram
+            .set_player_y(add_i8(self.ram.player().y(), if vel < 0 { -1 } else { 1 }))
     }
 
     fn change_axis_of_perpendicular_door_movement_x(&mut self) -> i8 {
@@ -6917,8 +6926,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x6c, 0);
             return low as i8;
         }
-        let high_half = self.ram.read_u8(0x20) >= 0x80;
-        let mut vel = self.ram.read_u8(0x31) as i8;
+        let high_half = self.ram.player().y_low() >= 0x80;
+        let mut vel = self.ram.player().velocity_x() as i8;
         if high_half {
             if vel >= 0 {
                 vel = vel.wrapping_neg()
@@ -6927,10 +6936,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             vel = vel.wrapping_neg()
         }
         if self.ram.read_u8(0x50) & 1 == 0 {
-            self.ram.write_u8(0x2f, if high_half { 0 } else { 2 })
+            self.ram.set_player_facing(if high_half { 0 } else { 2 })
         }
-        self.ram
-            .write_u16(0x20, add_i8(self.ram.read_u16(0x20), vel));
+        self.ram.set_player_y(add_i8(self.ram.player().y(), vel));
         vel
     }
 
@@ -6948,17 +6956,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x66) == 0 {
             velocity = -velocity
         }
-        self.ram.write_u8(0x27, velocity as u8);
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x29, VELOCITY_Z[index]);
+        self.ram.set_player_actual_velocity_y(velocity as u8);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_z(VELOCITY_Z[index]);
         self.ram.write_u8(0x2c7, VELOCITY_Z[index]);
-        self.ram.write_u16(0x24, 0);
+        self.ram.set_player_z(0);
         self.ram.write_u8(0x46, 16);
         if self.ram.read_u8(0x4d) != 2 {
             self.ram.write_u8(0x4d, 1);
             self.ram.write_u8(0x360, 0)
         }
-        self.ram.write_u8(0x5d, PlayerState::RecoilOther as u8)
+        self.ram
+            .set_player_action_state(PlayerState::RecoilOther as u8)
     }
 
     fn link_hop_in_or_out_of_water_x(&mut self) {
@@ -6975,16 +6984,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x66) & 1 == 0 {
             velocity = -velocity
         }
-        self.ram.write_u8(0x28, velocity as u8);
-        self.ram.write_u8(0x27, 0);
-        self.ram.write_u8(0x29, VELOCITY_Z[index]);
+        self.ram.set_player_actual_velocity_x(velocity as u8);
+        self.ram.set_player_actual_velocity_y(0);
+        self.ram.set_player_actual_velocity_z(VELOCITY_Z[index]);
         self.ram.write_u8(0x2c7, VELOCITY_Z[index]);
         self.ram.write_u8(0x46, 16);
         if self.ram.read_u8(0x4d) != 2 {
             self.ram.write_u8(0x4d, 1);
             self.ram.write_u8(0x360, 0)
         }
-        self.ram.write_u8(0x5d, PlayerState::RecoilOther as u8)
+        self.ram
+            .set_player_action_state(PlayerState::RecoilOther as u8)
     }
 
     fn repel_dash(&mut self) {
@@ -7008,10 +7018,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const SW7_X: [u16; 8] = [0, 0, 384, 384, 0, 0, 256, 256];
         const DIRECTION: [u8; 4] = [8, 4, 2, 1];
         let direction = self.ram.read_u8(0x66) as usize;
-        self.ram.write_u8(0x27, Y[direction] as u8);
-        self.ram.write_u8(0x28, X[direction] as u8);
+        self.ram.set_player_actual_velocity_y(Y[direction] as u8);
+        self.ram.set_player_actual_velocity_x(X[direction] as u8);
         self.ram.write_u8(0x46, 24);
-        self.ram.write_u8(0x29, 36);
+        self.ram.set_player_actual_velocity_z(36);
         self.ram.write_u8(0x2c7, 36);
         let moving = self.ram.read_u8(0x34a);
         if moving != 0 {
@@ -7031,9 +7041,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x50, 0);
         self.ram.write_u8(0x6b, 0);
         if direction & 2 != 0 {
-            self.ram.write_u8(0x30, 0)
+            self.ram.set_player_velocity_y(0)
         } else {
-            self.ram.write_u8(0x31, 0)
+            self.ram.set_player_velocity_x(0)
         }
     }
 
@@ -7063,16 +7073,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     fn link_hop_find_tile_to_land_on_south(&mut self) {
         const Y: [i8; 2] = [-8, 8];
         const Y2: [i8; 2] = [-16, 16];
-        let original = self.ram.read_u16(0x20);
+        let original = self.ram.player().y();
         self.ram.write_u16(0x32, original);
-        self.ram.write_u8(
-            0x30,
-            original.wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8,
-        );
+        self.ram
+            .set_player_velocity_y(original.wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8);
         loop {
             let direction = self.ram.read_u8(0x66) as usize;
             self.ram
-                .write_u16(0x20, add_i8(self.ram.read_u16(0x20), Y[direction]));
+                .set_player_y(add_i8(self.ram.player().y(), Y[direction]));
             self.runtime
                 .tile_detect_movement_y(self.ram, direction as u8);
             let tiles = self.ram.read_u16(0x343)
@@ -7101,18 +7109,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         let direction = self.ram.read_u8(0x66) as usize;
         self.ram
-            .write_u16(0x20, add_i8(self.ram.read_u16(0x20), Y2[direction]));
-        let y = self.ram.read_u16(0x20);
+            .set_player_y(add_i8(self.ram.player().y(), Y2[direction]));
+        let y = self.ram.player().y();
         self.ram.write_u8(0x3e, y as u8);
         self.ram.write_u8(0x40, (y >> 8) as u8);
         self.ram.write_u8(0x46, 1);
-        let z = if self.ram.read_u8(0x24) >= 0xf0 {
+        let z = if self.ram.player().z_low() >= 0xf0 {
             0
         } else {
-            self.ram.read_u8(0x24)
+            self.ram.player().z_low()
         };
         let z = y.wrapping_sub(original).wrapping_add(u16::from(z));
-        self.ram.write_u16(0x24, z);
+        self.ram.set_player_z(z);
         self.ram.write_u16(0x364, z)
     }
 
@@ -7121,14 +7129,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const Y2: [i8; 2] = [-16, 16];
         const VEL_Z: [u8; 8] = [32, 32, 32, 40, 48, 56, 64, 72];
         const VEL_X: [u8; 8] = [16, 28, 28, 28, 28, 28, 28, 28];
-        let original = self.ram.read_u16(0x20);
+        let original = self.ram.player().y();
         self.ram.write_u16(0x32, original);
-        self.ram.write_u8(
-            0x30,
-            original.wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8,
-        );
+        self.ram
+            .set_player_velocity_y(original.wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8);
         let direction = self.ram.read_u8(0x66) as usize;
-        self.ram.write_u16(0x20, add_i8(original, Y[direction]));
+        self.ram.set_player_y(add_i8(original, Y[direction]));
         self.runtime
             .tile_detect_movement_y(self.ram, direction as u8);
         let tiles = self.ram.read_u16(0x343)
@@ -7136,36 +7142,33 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             | self.ram.read_u16(0x357)
             | self.ram.read_u16(0x341);
         if tiles & 7 != 7 {
-            self.ram.write_u16(0x20, original);
+            self.ram.set_player_y(original);
             self.ram.write_u8(0x46, 1);
-            let original_vel = self.ram.read_u8(0x28) as i8;
+            let original_vel = self.ram.player().actual_velocity_x() as i8;
             let index = (original_vel.unsigned_abs() >> 4) as usize;
             self.ram.write_u8(0x362, VEL_Z[index]);
             self.ram.write_u8(0x363, VEL_Z[index]);
             let vel = VEL_X[index];
-            self.ram.write_u8(
-                0x28,
-                if original_vel < 0 {
-                    0u8.wrapping_sub(vel)
-                } else {
-                    vel
-                },
-            )
+            self.ram.set_player_actual_velocity_x(if original_vel < 0 {
+                0u8.wrapping_sub(vel)
+            } else {
+                vel
+            })
         } else {
             self.ram
-                .write_u16(0x20, add_i8(self.ram.read_u16(0x20), Y2[direction]));
-            let y = self.ram.read_u16(0x20);
+                .set_player_y(add_i8(self.ram.player().y(), Y2[direction]));
+            let y = self.ram.player().y();
             self.ram.write_u8(0x3e, y as u8);
             self.ram.write_u8(0x40, (y >> 8) as u8);
             self.ram.write_u8(0x46, 1);
-            let z = if self.ram.read_u8(0x24) == 0xff {
+            let z = if self.ram.player().z_low() == 0xff {
                 0
             } else {
-                self.ram.read_u8(0x24)
+                self.ram.player().z_low()
             };
             let z = y.wrapping_sub(original).wrapping_add(u16::from(z));
             self.ram.write_u16(0x364, z);
-            self.ram.write_u16(0x24, z)
+            self.ram.set_player_z(z)
         }
         if self.ram.read_u16(0x341) & 7 != 0 {
             self.ram.write_u8(0x4d, 2);
@@ -7186,12 +7189,12 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             40, 40,
         ];
         let side = usize::from(offset >> 1);
-        let original = self.ram.read_u16(0x22);
+        let original = self.ram.player().x();
         self.ram.write_u16(0x32, original);
         let mut remaining = 7u8;
         loop {
             self.ram
-                .write_u16(0x22, add_i8(self.ram.read_u16(0x22), STEP[side]));
+                .set_player_x(add_i8(self.ram.player().x(), STEP[side]));
             let direction = self.ram.read_u8(0x66);
             self.runtime.tile_detect_movement_x(self.ram, direction);
             let tiles = self.ram.read_u16(0x343)
@@ -7212,20 +7215,20 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 break;
             }
             if remaining == 0 {
-                self.ram.write_u16(0x22, add_i8(original, FALLBACK[side]));
+                self.ram.set_player_x(add_i8(original, FALLBACK[side]));
                 remaining = 0xff;
                 break;
             }
             remaining = remaining.wrapping_sub(1);
         }
         self.ram
-            .write_u16(0x22, add_i8(self.ram.read_u16(0x22), EXTRA[side]));
-        let distance = original.abs_diff(self.ram.read_u16(0x22)) >> 3;
+            .set_player_x(add_i8(self.ram.player().x(), EXTRA[side]));
+        let distance = original.abs_diff(self.ram.player().x()) >> 3;
         let mut velocity = VEL_X[distance as usize];
         if offset != 2 {
             velocity = 0u8.wrapping_sub(velocity)
         }
-        self.ram.write_u8(0x28, velocity);
+        self.ram.set_player_actual_velocity_x(velocity);
         self.ram.write_u8(0x362, VEL_Z[distance as usize]);
         self.ram.write_u8(0x363, VEL_Z[distance as usize]);
         remaining
@@ -7239,14 +7242,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     fn restore_safe_coordinates(&mut self) {
-        self.ram.write_u16(
-            0x20,
-            u16::from_le_bytes([self.ram.read_u8(0x3e), self.ram.read_u8(0x40)]),
-        );
-        self.ram.write_u16(
-            0x22,
-            u16::from_le_bytes([self.ram.read_u8(0x3f), self.ram.read_u8(0x41)]),
-        )
+        self.ram.set_player_y(u16::from_le_bytes([
+            self.ram.read_u8(0x3e),
+            self.ram.read_u8(0x40),
+        ]));
+        self.ram.set_player_x(u16::from_le_bytes([
+            self.ram.read_u8(0x3f),
+            self.ram.read_u8(0x41),
+        ]))
     }
 
     fn link_find_valid_landing_tile_north(&mut self) {
@@ -7262,11 +7265,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             16, 16, 20, 20, 24, 24, 28, 28, 32, 32, 36, 36, 40, 40, 44, 44, 48, 48, 48, 48, 48, 48,
             48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
         ];
-        let original = self.ram.read_u16(0x20);
+        let original = self.ram.player().y();
         self.ram.write_u16(0x32, original);
         loop {
             self.ram
-                .write_u16(0x20, self.ram.read_u16(0x20).wrapping_sub(16));
+                .set_player_y(self.ram.player().y().wrapping_sub(16));
             let direction = self.ram.read_u8(0x66);
             self.runtime.tile_detect_movement_y(self.ram, direction);
             let tiles = self.ram.read_u16(0x343)
@@ -7287,24 +7290,25 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x5e, 0)
         }
         self.ram
-            .write_u16(0x20, self.ram.read_u16(0x20).wrapping_sub(16));
-        let distance = original.wrapping_sub(self.ram.read_u16(0x20));
+            .set_player_y(self.ram.player().y().wrapping_sub(16));
+        let distance = original.wrapping_sub(self.ram.player().y());
         self.ram.write_u16(0x32, distance);
-        self.ram.write_u16(0x20, original);
+        self.ram.set_player_y(original);
         let index = (distance as u8 >> 3) as usize;
         let mut dy = DY[index] as i8;
         if self.ram.read_u8(0x66) == 0 {
             dy = -dy
         }
-        self.ram.write_u8(0x27, dy as u8);
-        self.ram.write_u8(0x28, 0);
-        self.ram.write_u8(0x29, DZ[index]);
+        self.ram.set_player_actual_velocity_y(dy as u8);
+        self.ram.set_player_actual_velocity_x(0);
+        self.ram.set_player_actual_velocity_z(DZ[index]);
         self.ram.write_u8(0x2c7, DZ[index]);
-        self.ram.write_u16(0x24, 0);
+        self.ram.set_player_z(0);
         self.ram.write_u8(0x46, TIMER[index]);
         self.ram.write_u8(0x4d, 2);
         self.ram.write_u8(0x360, 0);
-        self.ram.write_u8(0x5d, PlayerState::RecoilOther as u8)
+        self.ram
+            .set_player_action_state(PlayerState::RecoilOther as u8)
     }
 
     fn link_find_valid_landing_tile_diagonal_north(&mut self) {
@@ -7321,34 +7325,32 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             44, 44, 48, 48, 48, 48, 52, 52, 52, 52,
         ];
         let saved_y_safe = self.ram.read_u8(0x3e);
-        let saved_x = self.ram.read_u16(0x22);
+        let saved_x = self.ram.player().x();
         let direction = self.ram.read_u8(0x66);
         self.ram
-            .write_u8(0x28, if direction != 2 { 1 } else { 0xff });
+            .set_player_actual_velocity_x(if direction != 2 { 1 } else { 0xff });
         self.ram.write_u8(0x66, 0);
         self.link_hop_find_landing_spot_diagonally_down();
-        self.ram.write_u16(0x22, saved_x);
+        self.ram.set_player_x(saved_x);
         self.ram.write_u8(0x3e, saved_y_safe);
         let original_y = self.ram.read_u16(0x32);
-        let distance = original_y.wrapping_sub(self.ram.read_u16(0x20));
+        let distance = original_y.wrapping_sub(self.ram.player().y());
         let index = (distance >> 3) as usize;
-        self.ram.write_u16(0x20, original_y);
-        self.ram.write_u8(0x27, 0u8.wrapping_sub(DY[index]));
-        self.ram.write_u8(
-            0x28,
-            if direction != 2 {
-                DX[index]
-            } else {
-                0u8.wrapping_sub(DX[index])
-            },
-        );
-        self.ram.write_u8(0x29, DZ[index]);
+        self.ram.set_player_y(original_y);
+        self.ram
+            .set_player_actual_velocity_y(0u8.wrapping_sub(DY[index]));
+        self.ram.set_player_actual_velocity_x(if direction != 2 {
+            DX[index]
+        } else {
+            0u8.wrapping_sub(DX[index])
+        });
+        self.ram.set_player_actual_velocity_z(DZ[index]);
         self.ram.write_u8(0x2c7, DZ[index]);
-        self.ram.write_u16(0x24, 0);
+        self.ram.set_player_z(0);
         self.ram.write_u8(0x364, 0);
         self.ram.write_u8(0x4d, 2);
         self.ram.write_u8(0x360, 0);
-        self.ram.write_u8(0x5d, 13)
+        self.ram.set_player_action_state(13)
     }
 
     fn link_hop_find_landing_spot_diagonally_down(&mut self) {
@@ -7356,19 +7358,17 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         const DY: [i8; 2] = [-9, 9];
         const BITS: [u8; 2] = [6, 3];
         const DY2: [i8; 2] = [-24, 24];
-        let original = self.ram.read_u16(0x20);
+        let original = self.ram.player().y();
         self.ram.write_u16(0x32, original);
-        self.ram.write_u8(
-            0x30,
-            original.wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8,
-        );
+        self.ram
+            .set_player_velocity_y(original.wrapping_sub(u16::from(self.ram.read_u8(0x3e))) as u8);
         let bits = loop {
-            let side = usize::from((self.ram.read_u8(0x28) as i8) >= 0);
+            let side = usize::from((self.ram.player().actual_velocity_x() as i8) >= 0);
             self.ram
-                .write_u16(0x22, add_i8(self.ram.read_u16(0x22), DX[side]));
+                .set_player_x(add_i8(self.ram.player().x(), DX[side]));
             let direction = self.ram.read_u8(0x66) as usize;
             self.ram
-                .write_u16(0x20, add_i8(self.ram.read_u16(0x20), DY[direction]));
+                .set_player_y(add_i8(self.ram.player().y(), DY[direction]));
             self.runtime
                 .tile_detect_movement_y(self.ram, direction as u8);
             let bits = BITS[side];
@@ -7390,25 +7390,25 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         let direction = self.ram.read_u8(0x66) as usize;
         self.ram
-            .write_u16(0x20, add_i8(self.ram.read_u16(0x20), DY2[direction]));
-        let y = self.ram.read_u16(0x20);
+            .set_player_y(add_i8(self.ram.player().y(), DY2[direction]));
+        let y = self.ram.player().y();
         self.ram.write_u8(0x3e, y as u8);
         self.ram.write_u8(0x40, (y >> 8) as u8);
         self.ram.write_u8(0x46, 1);
         let mirror = y
             .wrapping_sub(original)
-            .wrapping_add(u16::from(self.ram.read_u8(0x24)));
+            .wrapping_add(u16::from(self.ram.player().z_low()));
         self.ram.write_u16(0x364, mirror);
-        self.ram.write_u16(0x24, mirror)
+        self.ram.set_player_z(mirror)
     }
 
     pub fn link_handle_diagonal_kickback(&mut self) {
-        let x_vel = self.ram.read_u8(0x31);
-        let y_vel = self.ram.read_u8(0x30);
+        let x_vel = self.ram.player().velocity_x();
+        let y_vel = self.ram.player().velocity_y();
         let mut deadlocked = false;
         if x_vel != 0 && y_vel != 0 {
-            let old_y = self.ram.read_u16(0x20);
-            let old_x = self.ram.read_u16(0x22);
+            let old_y = self.ram.player().y();
+            let old_x = self.ram.player().x();
             self.ram.write_u16(0x2de, old_y);
             self.ram.write_u16(0x2dc, old_x);
             self.runtime
@@ -7416,9 +7416,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             if self.ram.read_u16(0x0c) & 5 != 0 {
                 self.flag_moving_into_slopes_x();
                 if self.ram.read_u8(0x6b) & 0xf != 0 {
-                    let xd = self.ram.read_u16(0x22).wrapping_sub(old_x) as u8;
-                    self.ram.write_u16(0x22, old_x);
-                    self.ram.write_u8(0x31, xd);
+                    let xd = self.ram.player().x().wrapping_sub(old_x) as u8;
+                    self.ram.set_player_x(old_x);
+                    self.ram.set_player_velocity_x(xd);
                     self.runtime
                         .tile_detect_movement_y(self.ram, if (y_vel as i8) < 0 { 0 } else { 1 });
                     if self.ram.read_u16(0x0c) & 5 != 0 {
@@ -7426,8 +7426,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                         if self.ram.read_u8(0x6b) & 0xf != 0 {
                             let moving = self.ram.read_u8(0x6b);
                             self.ram.write_u8(0x6d, moving);
-                            let yd = self.ram.read_u16(0x20).wrapping_sub(old_y) as u8;
-                            self.ram.write_u8(0x30, yd);
+                            let yd = self.ram.player().y().wrapping_sub(old_y) as u8;
+                            self.ram.set_player_velocity_y(yd);
                             const X0: [i8; 10] = [0, 1, 1, 1, 2, 2, 2, 3, 3, 3];
                             const X1: [i8; 10] = [0, -1, -1, -1, -2, -2, -2, -3, -3, -3];
                             const Y0: [i8; 10] = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3];
@@ -7443,10 +7443,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                             } else {
                                 Y0[yd as usize]
                             };
-                            self.ram
-                                .write_u16(0x22, add_i8(self.ram.read_u16(0x22), dx));
-                            self.ram
-                                .write_u16(0x20, add_i8(self.ram.read_u16(0x20), dy));
+                            self.ram.set_player_x(add_i8(self.ram.player().x(), dx));
+                            self.ram.set_player_y(add_i8(self.ram.player().y(), dy));
                             deadlocked = true;
                         }
                     }
@@ -7462,7 +7460,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn flag_moving_into_slopes_y(&mut self) {
         let state = self.ram.read_u16(0x6e) as u8;
         let r12 = self.ram.read_u16(0x0c);
-        let x = self.ram.read_u16(0x22);
+        let x = self.ram.player().x();
         let pos = self.ram.read_u16(0x51) as u8;
         let o = state
             .wrapping_mul(4)
@@ -7485,7 +7483,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 }
                 ym = AVOID_JUDDER[o] - ym
             }
-            let vel = self.ram.read_u8(0x30);
+            let vel = self.ram.player().velocity_y();
             if vel == 0 {
                 return;
             }
@@ -7496,18 +7494,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else {
             y = AVOID_JUDDER[o] - y
         }
-        let vel = self.ram.read_u8(0x30);
+        let vel = self.ram.player().velocity_y();
         if (vel as i8) < 0 {
             if y <= 0 {
                 return;
             }
-            self.ram.write_u16(0x20, add_i8(self.ram.read_u16(0x20), y));
+            self.ram.set_player_y(add_i8(self.ram.player().y(), y));
             self.ram.write_u8(0x6b, 8)
         } else {
             if y >= 0 {
                 return;
             }
-            self.ram.write_u16(0x20, add_i8(self.ram.read_u16(0x20), y));
+            self.ram.set_player_y(add_i8(self.ram.player().y(), y));
             self.ram.write_u8(0x6b, 4)
         }
         self.ram.write_u8(
@@ -7519,7 +7517,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn flag_moving_into_slopes_x(&mut self) {
         let state = self.ram.read_u16(0x6e) as u8;
         let r12 = self.ram.read_u16(0x0c);
-        let coord = self.ram.read_u16(0x22);
+        let coord = self.ram.player().x();
         let mut x = (coord.wrapping_sub((state == 6) as u16) & 7) as i8;
         let y_addr = if r12 & 4 != 0 { 0x53 } else { 0x51 };
         let o = state
@@ -7532,7 +7530,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             } else {
                 xm = AVOID_JUDDER[o] - (8 - xm)
             }
-            let vel = self.ram.read_u8(0x31);
+            let vel = self.ram.player().velocity_x();
             if vel == 0 {
                 return;
             }
@@ -7543,18 +7541,18 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         } else {
             x = AVOID_JUDDER[o] - x
         }
-        let vel = self.ram.read_u8(0x31);
+        let vel = self.ram.player().velocity_x();
         if (vel as i8) < 0 {
             if x <= 0 {
                 return;
             }
-            self.ram.write_u16(0x22, add_i8(self.ram.read_u16(0x22), x));
+            self.ram.set_player_x(add_i8(self.ram.player().x(), x));
             self.ram.write_u8(0x6b, 2)
         } else {
             if x >= 0 {
                 return;
             }
-            self.ram.write_u16(0x22, add_i8(self.ram.read_u16(0x22), x));
+            self.ram.set_player_x(add_i8(self.ram.player().x(), x));
             self.ram.write_u8(0x6b, 1)
         }
         self.ram.write_u8(
@@ -7581,12 +7579,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             }
             [10u8, 6, 14, 2, 12, 4, 8, 0][a as usize] + 0x40
         } else {
-            item.wrapping_mul(8).wrapping_add(self.ram.read_u8(0x2f))
+            item.wrapping_mul(8)
+                .wrapping_add(self.ram.player().facing())
         };
         offset >>= 1;
         let mask = self.ram.read_u16(0xec);
-        let x = add_i8(self.ram.read_u16(0x22), X[offset as usize]) & mask;
-        let y = add_i8(self.ram.read_u16(0x20), Y[offset as usize]) & mask;
+        let x = add_i8(self.ram.player().x(), X[offset as usize]) & mask;
+        let y = add_i8(self.ram.player().y(), Y[offset as usize]) & mask;
         if matches!(item, 1 | 2 | 3 | 6 | 7 | 8) {
             self.tile_behavior_handle_item_and_execute(x >> 3, y);
             return;
@@ -7600,8 +7599,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
 
     fn tile_detect_main_handler_post_detection(&mut self) {
         if self.ram.read_u16(0x357) & 0x10 != 0 {
-            let tx = self.ram.read_u16(0x22) as u8 & 0xf;
-            let ty = self.ram.read_u16(0x20).wrapping_add(8) as u8 & 0xf;
+            let tx = self.ram.player().x() as u8 & 0xf;
+            let ty = self.ram.player().y().wrapping_add(8) as u8 & 0xf;
             if !(4..11).contains(&ty)
                 && !(4..12).contains(&tx)
                 && self.ram.read_u8(0x31f) == 0
@@ -7634,10 +7633,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     && self.ram.read_u8(0x345) != 0
                     && self.ram.read_u8(0x2e0) == 0
                 {
-                    if self.ram.read_u8(0xf356) != 0 {
+                    if self.ram.player().flippers() != 0 {
                         self.ram.write_u8(0x345, 0);
                         self.ram.write_u8(0x26, self.ram.read_u8(0x340));
-                        self.ram.write_u8(0x5d, 0)
+                        self.ram.set_player_action_state(0)
                     }
                 } else if !self.link_permission_for_slosh_sounds() {
                     if self.ram.read_u8(0x8a) == 0x70 {
@@ -7677,7 +7676,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             {
                 self.ram.write_u8(0x3f7, 0);
                 self.ram.write_u16(0x3f5, 0);
-                if self.ram.read_u8(0xf357) != 0 {
+                if self.ram.player().moon_pearl() != 0 {
                     self.ram.write_u8(0x56, 0);
                     self.ram.write_u8(0x2e0, 0)
                 }
@@ -7711,7 +7710,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.link_reset_swimming_state()
             }
         } else {
-            if self.ram.read_u8(0x5d) != PlayerState::Swimming as u8 {
+            if self.ram.player().action_state() != PlayerState::Swimming as u8 {
                 if self.ram.read_u8(0x34a) != 0 {
                     self.ram.write_u8(0x26, self.ram.read_u8(0x340))
                 }
@@ -7727,7 +7726,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn link_permission_for_slosh_sounds(&self) -> bool {
         if self.ram.read_u8(0x67) & 0xf == 0 {
             true
-        } else if self.ram.read_u8(0x5d) != PlayerState::StartDash as u8 {
+        } else if self.ram.player().action_state() != PlayerState::StartDash as u8 {
             self.ram.read_u8(0x1a) & 0xf != 0
         } else {
             self.ram.read_u8(0x1a) & 7 != 0
@@ -7762,8 +7761,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             let world = self.ram.read_u8(0x8a) & 0x40;
             self.ram.write_u8(0x7b, world);
             if world != 0 {
-                let y = self.ram.read_u16(0x20);
-                let x = self.ram.read_u16(0x22);
+                let y = self.ram.player().y();
+                let x = self.ram.player().x();
                 self.ram.write_u8(0x1adf, y as u8);
                 self.ram.write_u8(0x1aef, (y >> 8) as u8);
                 self.ram.write_u8(0x1abf, x as u8);
@@ -7773,9 +7772,9 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x3f8, 0);
             self.ram.write_u8(0x2db, 1);
             self.ram.write_u8(0xb0, 0);
-            self.ram.write_u8(0x28, 0);
-            self.ram.write_u8(0x27, 0);
-            self.ram.write_u8(0x5d, PlayerState::Mirror as u8)
+            self.ram.set_player_actual_velocity_x(0);
+            self.ram.set_player_actual_velocity_y(0);
+            self.ram.set_player_action_state(PlayerState::Mirror as u8)
         }
     }
 
@@ -7827,7 +7826,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 self.runtime.ancilla_sfx2_near(self.ram, 38);
                 self.ram
                     .write_u8(0xcfc, self.ram.read_u8(0xcfc).wrapping_add(1));
-                let mut health = self.ram.read_u8(0xf36d).wrapping_sub(damage);
+                let mut health = self.ram.player().health().wrapping_sub(damage);
                 if health == 0 || health >= 0xa8 {
                     self.ram.write_u8(0xc211, self.ram.read_u8(0x1c));
                     self.ram.write_u8(0xc212, self.ram.read_u8(0x1d));
@@ -7838,13 +7837,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     self.ram.write_u8(0xf372, 0);
                     health = 0;
                 }
-                self.ram.write_u8(0xf36d, health);
+                self.ram.set_player_health(health);
             }
         }
-        if self.ram.read_u8(0x5d) != 0 {
+        if self.ram.player().action_state() != 0 {
             self.player_check_handle_cape_stuff();
         }
-        match self.ram.read_u8(0x5d) {
+        match self.ram.player().action_state() {
             0 => self.link_state_default(),
             1 => self.link_state_pits(),
             2 | 6 => self.link_state_recoil(),
@@ -7908,10 +7907,10 @@ mod tests {
     }
     impl PlayerRuntime for SpellRt {
         fn ancilla_add_ether_spell(&mut self, ram: &mut Ram<'_>, _type_: u8, _arg: u8) {
-            self.ether_position = Some((ram.read_u16(0x22), ram.read_u16(0x20)))
+            self.ether_position = Some((ram.player().x(), ram.player().y()))
         }
         fn ancilla_add_bombos_spell(&mut self, ram: &mut Ram<'_>, _type_: u8, _arg: u8) {
-            self.bombos_position = Some((ram.read_u16(0x22), ram.read_u16(0x20)))
+            self.bombos_position = Some((ram.player().x(), ram.player().y()))
         }
     }
     impl PlayerRuntime for RecordingRt {
@@ -7965,8 +7964,8 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u8(0x46c, 2);
-        ram.write_u16(0x20, 0x100);
-        ram.write_u16(0x22, 0x200);
+        ram.set_player_y(0x100);
+        ram.set_player_x(0x200);
         ram.write_u16(0xe6, 0x30);
         ram.write_u16(0xe8, 0x10);
         ram.write_u16(0xe0, 0x50);
@@ -7978,15 +7977,15 @@ mod tests {
             applied_movement_to_camera: false,
         };
         assert!(p.check_if_room_needs_double_layer_check());
-        assert_eq!(p.ram.read_u16(0x20), 0x120);
-        assert_eq!(p.ram.read_u16(0x22), 0x230);
-        p.ram.write_u16(0x22, 0x232);
-        p.ram.write_u16(0x20, 0x123);
+        assert_eq!(p.ram.player().y(), 0x120);
+        assert_eq!(p.ram.player().x(), 0x230);
+        p.ram.set_player_x(0x232);
+        p.ram.set_player_y(0x123);
         p.create_velocity_from_moving_background();
-        assert_eq!(p.ram.read_u16(0x20), 0x103);
-        assert_eq!(p.ram.read_u16(0x22), 0x202);
-        assert_eq!(p.ram.read_u8(0x30), 3);
-        assert_eq!(p.ram.read_u8(0x31), 2);
+        assert_eq!(p.ram.player().y(), 0x103);
+        assert_eq!(p.ram.player().x(), 0x202);
+        assert_eq!(p.ram.player().velocity_y(), 3);
+        assert_eq!(p.ram.player().velocity_x(), 2);
         assert_eq!(p.ram.read_u8(0xee), 0)
     }
     #[test]
@@ -7995,7 +7994,7 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u8(0x67, 5);
-        ram.write_u8(0x2f, 4);
+        ram.set_player_facing(4);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
@@ -8011,8 +8010,8 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = RecordingRt::default();
-        ram.write_u8(0x30, 1);
-        ram.write_u8(0x31, 1);
+        ram.set_player_velocity_y(1);
+        ram.set_player_velocity_x(1);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
@@ -8036,8 +8035,8 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = RecordingRt::default();
         ram.write_u16(0xec, 0xffff);
-        ram.write_u16(0x22, 0x100);
-        ram.write_u16(0x20, 0x200);
+        ram.set_player_x(0x100);
+        ram.set_player_y(0x200);
         ram.write_u16(0x357, 1);
         let mut p = Player {
             ram: &mut ram,
@@ -8055,19 +8054,19 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = RecordingRt::default();
         ram.write_u16(0xec, 0xffff);
-        ram.write_u16(0x20, 0x101);
-        ram.write_u16(0x22, 0x0ff);
+        ram.set_player_y(0x101);
+        ram.set_player_x(0x0ff);
         ram.write_u8(0x3e, 0);
         ram.write_u8(0x3f, 0);
-        ram.write_u8(0x5d, PlayerState::Hookshot as u8);
+        ram.set_player_action_state(PlayerState::Hookshot as u8);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.link_handle_cardinal_collision();
-        assert_eq!(p.ram.read_u8(0x30), 1);
-        assert_eq!(p.ram.read_u8(0x31), 0xff);
+        assert_eq!(p.ram.player().velocity_y(), 1);
+        assert_eq!(p.ram.player().velocity_x(), 0xff);
         assert_eq!(p.ram.read_u8(0x67), 6)
     }
 
@@ -8076,8 +8075,8 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u8(0x31, 1);
-        ram.write_u8(0x30, 0);
+        ram.set_player_velocity_x(1);
+        ram.set_player_velocity_y(0);
         ram.write_u8(0x6d, 0xff);
         ram.write_u8(0x6b, 0x3f);
         let mut p = Player {
@@ -8096,8 +8095,8 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u8(0x375, 0);
-        ram.write_u16(0x20, 0x1234);
-        ram.write_u16(0x22, 0x5678);
+        ram.set_player_y(0x1234);
+        ram.set_player_x(0x5678);
         ram.write_u16(0xfc4, 0xabcd);
         ram.write_u16(0xfc2, 0xef01);
         let mut p = Player {
@@ -8107,8 +8106,8 @@ mod tests {
         };
         assert!(p.run_ledge_hop_timer());
         assert_eq!(p.ram.read_u8(0x375), 19);
-        assert_eq!(p.ram.read_u16(0x20), 0x1234);
-        assert_eq!(p.ram.read_u16(0x22), 0x5678)
+        assert_eq!(p.ram.player().y(), 0x1234);
+        assert_eq!(p.ram.player().x(), 0x5678)
     }
 
     #[test]
@@ -8117,16 +8116,16 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u16(0x0e, 1);
-        ram.write_u16(0x20, 0x80);
-        ram.write_u8(0x31, 2);
+        ram.set_player_y(0x80);
+        ram.set_player_velocity_x(2);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         assert_eq!(p.change_axis_of_perpendicular_door_movement_x(), -2);
-        assert_eq!(p.ram.read_u16(0x20), 0x7e);
-        assert_eq!(p.ram.read_u8(0x2f), 0)
+        assert_eq!(p.ram.player().y(), 0x7e);
+        assert_eq!(p.ram.player().facing(), 0)
     }
 
     #[test]
@@ -8135,18 +8134,18 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u8(0x66, 2);
-        ram.write_u8(0x30, 9);
-        ram.write_u8(0x31, 7);
+        ram.set_player_velocity_y(9);
+        ram.set_player_velocity_x(7);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.link_apply_tile_rebound();
-        assert_eq!(p.ram.read_u8(0x28), 24);
-        assert_eq!(p.ram.read_u8(0x27), 0);
-        assert_eq!(p.ram.read_u8(0x30), 0);
-        assert_eq!(p.ram.read_u8(0x31), 7);
+        assert_eq!(p.ram.player().actual_velocity_x(), 24);
+        assert_eq!(p.ram.player().actual_velocity_y(), 0);
+        assert_eq!(p.ram.player().velocity_y(), 0);
+        assert_eq!(p.ram.player().velocity_x(), 7);
         assert_eq!(p.ram.read_u8(0x46), 24)
     }
 
@@ -8155,25 +8154,25 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u8(0x29, 0xfe);
-        ram.write_u16(0x24, 0x8081);
+        ram.set_player_actual_velocity_z(0xfe);
+        ram.set_player_z(0x8081);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.player_change_z(2);
-        assert_eq!(p.ram.read_u16(0x24), 0xffff);
-        assert_eq!(p.ram.read_u8(0x29), 0xff);
-        p.ram.write_u16(0x24, 0x8001);
-        p.ram.write_u8(0x29, 0xfe);
+        assert_eq!(p.ram.player().z(), 0xffff);
+        assert_eq!(p.ram.player().actual_velocity_z(), 0xff);
+        p.ram.set_player_z(0x8001);
+        p.ram.set_player_actual_velocity_z(0xfe);
         p.player_change_z(2);
-        assert_eq!(p.ram.read_u16(0x24), 0x8001);
-        assert_eq!(p.ram.read_u8(0x29), 0xfc);
-        p.ram.write_u16(0x24, 0);
-        p.ram.write_u8(0x29, 0xfe);
+        assert_eq!(p.ram.player().z(), 0x8001);
+        assert_eq!(p.ram.player().actual_velocity_z(), 0xfc);
+        p.ram.set_player_z(0);
+        p.ram.set_player_actual_velocity_z(0xfe);
         p.player_change_z(2);
-        assert_eq!(p.ram.read_u8(0x29), 0xfe)
+        assert_eq!(p.ram.player().actual_velocity_z(), 0xfe)
     }
 
     #[test]
@@ -8181,8 +8180,8 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = LandingRt;
-        ram.write_u16(0x20, 100);
-        ram.write_u16(0x22, 200);
+        ram.set_player_y(100);
+        ram.set_player_x(200);
         ram.write_u8(0x3e, 90);
         ram.write_u8(0x66, 2);
         let mut p = Player {
@@ -8191,12 +8190,12 @@ mod tests {
             applied_movement_to_camera: false,
         };
         p.link_find_valid_landing_tile_diagonal_north();
-        assert_eq!(p.ram.read_u16(0x20), 100);
-        assert_eq!(p.ram.read_u16(0x22), 200);
-        assert_eq!(p.ram.read_u8(0x27), 0xf0);
-        assert_eq!(p.ram.read_u8(0x28), 0xf0);
-        assert_eq!(p.ram.read_u8(0x29), 32);
-        assert_eq!(p.ram.read_u8(0x5d), 13)
+        assert_eq!(p.ram.player().y(), 100);
+        assert_eq!(p.ram.player().x(), 200);
+        assert_eq!(p.ram.player().actual_velocity_y(), 0xf0);
+        assert_eq!(p.ram.player().actual_velocity_x(), 0xf0);
+        assert_eq!(p.ram.player().actual_velocity_z(), 32);
+        assert_eq!(p.ram.player().action_state(), 13)
     }
 
     #[test]
@@ -8221,8 +8220,8 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = SpellRt::default();
-        ram.write_u16(0x22, 0x1234);
-        ram.write_u16(0x20, 0x5678);
+        ram.set_player_x(0x1234);
+        ram.set_player_y(0x5678);
         ram.write_u16(0x3c, 161);
         let mut p = Player {
             ram: &mut ram,
@@ -8231,13 +8230,13 @@ mod tests {
         };
         p.link_state_receiving_ether();
         assert_eq!(p.runtime.ether_position, Some((0x6b0, 0x37)));
-        assert_eq!(p.ram.read_u16(0x22), 0x1234);
-        assert_eq!(p.ram.read_u16(0x20), 0x5678);
+        assert_eq!(p.ram.player().x(), 0x1234);
+        assert_eq!(p.ram.player().y(), 0x5678);
         p.ram.write_u16(0x3c, 161);
         p.link_state_receiving_bombos();
         assert_eq!(p.runtime.bombos_position, Some((0x378, 0xeb0)));
-        assert_eq!(p.ram.read_u16(0x22), 0x1234);
-        assert_eq!(p.ram.read_u16(0x20), 0x5678)
+        assert_eq!(p.ram.player().x(), 0x1234);
+        assert_eq!(p.ram.player().y(), 0x5678)
     }
 
     #[test]
@@ -8245,10 +8244,10 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u8(0x5d, PlayerState::RecoilOther as u8);
+        ram.set_player_action_state(PlayerState::RecoilOther as u8);
         ram.write_u8(0x46, 1);
-        ram.write_u8(0x27, 9);
-        ram.write_u8(0x28, 7);
+        ram.set_player_actual_velocity_y(9);
+        ram.set_player_actual_velocity_x(7);
         ram.write_u16(0xfc4, 0x1111);
         ram.write_u16(0xfc2, 0x2222);
         let mut p = Player {
@@ -8257,9 +8256,12 @@ mod tests {
             applied_movement_to_camera: false,
         };
         assert!(p.link_check_for_edge_screen_transition());
-        assert_eq!(p.ram.read_u16(0x20), 0x1111);
-        assert_eq!(p.ram.read_u16(0x22), 0x2222);
-        assert_eq!(p.ram.read_u8(0x27) | p.ram.read_u8(0x28), 0);
+        assert_eq!(p.ram.player().y(), 0x1111);
+        assert_eq!(p.ram.player().x(), 0x2222);
+        assert_eq!(
+            p.ram.player().actual_velocity_y() | p.ram.player().actual_velocity_x(),
+            0
+        );
         assert_eq!(p.ram.read_u8(0x2c6), 3)
     }
 
@@ -8268,8 +8270,8 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u16(0x22, 0x1200);
-        ram.write_u16(0x20, 0x3400);
+        ram.set_player_x(0x1200);
+        ram.set_player_y(0x3400);
         ram.write_u8(0x67, 1);
         let mut p = Player {
             ram: &mut ram,
@@ -8277,13 +8279,13 @@ mod tests {
             applied_movement_to_camera: false,
         };
         p.link_handle_velocity();
-        assert_eq!(p.ram.read_u8(0x28), 24);
-        assert_eq!(p.ram.read_u16(0x22), 0x1201);
-        assert_eq!(p.ram.read_u8(0x2b), 0x80);
+        assert_eq!(p.ram.player().actual_velocity_x(), 24);
+        assert_eq!(p.ram.player().x(), 0x1201);
+        assert_eq!(p.ram.player().subpixel_x(), 0x80);
         assert_eq!(p.ram.read_u8(0x3f), 0);
         assert_eq!(p.ram.read_u8(0x41), 0x12);
-        assert_eq!(p.ram.read_u8(0x31), 1);
-        assert_eq!(p.ram.read_u16(0x24), 0xffff)
+        assert_eq!(p.ram.player().velocity_x(), 1);
+        assert_eq!(p.ram.player().z(), 0xffff)
     }
 
     #[test]
@@ -8291,19 +8293,19 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u8(0x28, 0xff);
-        ram.write_u8(0x27, 1);
+        ram.set_player_actual_velocity_x(0xff);
+        ram.set_player_actual_velocity_y(1);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.link_move_position();
-        assert_eq!(p.ram.read_u16(0x22), 0xffff);
-        assert_eq!(p.ram.read_u8(0x2b), 0xf0);
-        assert_eq!(p.ram.read_u16(0x20), 0);
-        assert_eq!(p.ram.read_u8(0x2a), 0x10);
-        assert_eq!(p.ram.read_u8(0x31), 0xff)
+        assert_eq!(p.ram.player().x(), 0xffff);
+        assert_eq!(p.ram.player().subpixel_x(), 0xf0);
+        assert_eq!(p.ram.player().y(), 0);
+        assert_eq!(p.ram.player().subpixel_y(), 0x10);
+        assert_eq!(p.ram.player().velocity_x(), 0xff)
     }
 
     #[test]
@@ -8313,7 +8315,7 @@ mod tests {
         let mut rt = Rt;
         ram.write_u8(0x46c, 1);
         ram.write_u8(0x322, 3);
-        ram.write_u16(0x24, 0xffff);
+        ram.set_player_z(0xffff);
         ram.write_u16(0x310, 0x00ff);
         ram.write_u16(0x312, 1);
         let mut p = Player {
@@ -8323,19 +8325,19 @@ mod tests {
         };
         p.link_handle_moving_floor();
         assert_eq!(p.ram.read_u8(0x67), 9);
-        assert_eq!(p.ram.read_u16(0x20), 0x00ff);
-        assert_eq!(p.ram.read_u16(0x22), 1);
+        assert_eq!(p.ram.player().y(), 0x00ff);
+        assert_eq!(p.ram.player().x(), 1);
 
-        p.ram.write_u16(0x20, 0x0100);
-        p.ram.write_u16(0x22, 0x0200);
+        p.ram.set_player_y(0x0100);
+        p.ram.set_player_x(0x0200);
         p.ram.write_u8(0x3f3, 1);
         p.ram.write_u8(0x41c, 0);
         p.ram.write_u8(0x41d, 0x55);
         p.ram.write_u8(0x67, 0);
         p.link_apply_conveyor();
-        assert_eq!(p.ram.read_u16(0x20), 0x00ff);
+        assert_eq!(p.ram.player().y(), 0x00ff);
         assert_eq!(p.ram.read_u8(0x41c), 0x80);
-        assert_eq!(p.ram.read_u16(0x22), 0x0200);
+        assert_eq!(p.ram.player().x(), 0x0200);
         assert_eq!(p.ram.read_u8(0x41d), 0x55);
         assert_eq!(p.ram.read_u8(0x67), 8)
     }
@@ -8345,8 +8347,8 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u16(0x20, 0x1200);
-        ram.write_u16(0x22, 0x34ff);
+        ram.set_player_y(0x1200);
+        ram.set_player_x(0x34ff);
         ram.write_u8(0x40, 0x13);
         ram.write_u8(0x41, 0x33);
         let mut p = Player {
@@ -8419,14 +8421,14 @@ mod tests {
         ram.write_u8(0x55, 1);
         ram.write_u8(0x4c, 1);
         ram.write_u8(0x2e2, 1);
-        ram.write_u8(0xf36e, 0);
+        ram.set_player_magic(0);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.link_item_cape();
-        assert_eq!(p.ram.read_u8(0xf36e), 0xff);
+        assert_eq!(p.ram.player().magic(), 0xff);
         assert_eq!(p.ram.read_u8(0x55), 1)
     }
 
@@ -8439,20 +8441,20 @@ mod tests {
         ram.write_u8(0xc18, 0x01);
         ram.write_u8(0xbfa, 0x00);
         ram.write_u8(0xc0e, 0x02);
-        ram.write_u16(0x22, 0x100);
-        ram.write_u16(0x20, 0x208);
-        ram.write_u8(0x30, 3);
-        ram.write_u8(0x2f, 6);
+        ram.set_player_x(0x100);
+        ram.set_player_y(0x208);
+        ram.set_player_velocity_y(3);
+        ram.set_player_facing(6);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.gravestone_act_as_barrier(0);
-        assert_eq!(p.ram.read_u16(0x20), 0x210);
-        assert_eq!(p.ram.read_u8(0x30), 11);
+        assert_eq!(p.ram.player().y(), 0x210);
+        assert_eq!(p.ram.player().velocity_y(), 11);
         assert_eq!(p.ram.read_u8(0x48) & 4, 4);
-        assert_eq!(p.ram.read_u8(0x2f), 2)
+        assert_eq!(p.ram.player().facing(), 2)
     }
 
     #[test]
@@ -8463,8 +8465,8 @@ mod tests {
         ram.write_u8(0xf4, 0x40);
         ram.write_u8(0xf34f, 1);
         ram.write_u8(0xf35c, 3);
-        ram.write_u8(0xf36c, 0x50);
-        ram.write_u8(0xf36d, 0x30);
+        ram.set_player_max_health(0x50);
+        ram.set_player_health(0x30);
         ram.write_u8(0x10, 7);
         let mut p = Player {
             ram: &mut ram,
@@ -8489,7 +8491,7 @@ mod tests {
         ] {
             ram.write_u8(address, 0xff);
         }
-        ram.write_u8(0x5d, PlayerState::RecoilOther as u8);
+        ram.set_player_action_state(PlayerState::RecoilOther as u8);
         ram.write_u8(0xee, 2);
         let mut p = Player {
             ram: &mut ram,
@@ -8497,7 +8499,7 @@ mod tests {
             applied_movement_to_camera: false,
         };
         p.link_handle_recoil_and_timer(true);
-        assert_eq!(p.ram.read_u16(0x24), 0);
+        assert_eq!(p.ram.player().z(), 0);
         for address in [
             0x4d, 0x5e, 0x50, 0x301, 0x37a, 0x300, 0x37b, 0x360, 0x28, 0x27,
         ] {
@@ -8511,14 +8513,17 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u8(0x2f, 4);
+        ram.set_player_facing(4);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.link_animate_victory_spin();
-        assert_eq!(p.ram.read_u8(0x5d), PlayerState::SpinAttacking as u8);
+        assert_eq!(
+            p.ram.player().action_state(),
+            PlayerState::SpinAttacking as u8
+        );
         assert_eq!(p.ram.read_u8(0x31e), 24);
         assert_eq!(p.ram.read_u8(0x31c), LINK_SPIN_GRAPHICS_BY_DIR[24]);
         assert_eq!(p.ram.read_u8(0x3d), 2);
@@ -8575,7 +8580,7 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u8(0x28, 0xff);
+        ram.set_player_actual_velocity_x(0xff);
         ram.write_u8(0x362, 4);
         ram.write_u8(0x364, 0x20);
         let mut p = Player {
@@ -8594,16 +8599,16 @@ mod tests {
         let mut b = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
-        ram.write_u16(0x20, 0x0dca);
+        ram.set_player_y(0x0dca);
         ram.write_u8(0x51, 2);
-        ram.write_u8(0x30, 0xfe);
+        ram.set_player_velocity_y(0xfe);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
             applied_movement_to_camera: false,
         };
         p.link_add_in_velocity_y_falling();
-        assert_eq!(p.ram.read_u16(0x20), 0x0dd0);
+        assert_eq!(p.ram.player().y(), 0x0dd0);
     }
 
     #[test]
@@ -8612,8 +8617,8 @@ mod tests {
         let mut ram = Ram::new(&mut b);
         let mut rt = Rt;
         ram.write_u8(0x373, 8);
-        ram.write_u8(0xf36d, 0x88);
-        ram.write_u8(0x5d, 22);
+        ram.set_player_health(0x88);
+        ram.set_player_action_state(22);
         let mut p = Player {
             ram: &mut ram,
             runtime: &mut rt,
@@ -8621,7 +8626,7 @@ mod tests {
         };
         p.link_control_handler();
         assert_eq!(p.ram.read_u8(0x373), 0);
-        assert_eq!(p.ram.read_u8(0xf36d), 0x80);
+        assert_eq!(p.ram.player().health(), 0x80);
         assert_eq!(p.ram.read_u8(0x31f), 58);
         assert_eq!(p.ram.read_u8(0xcfc), 1);
     }

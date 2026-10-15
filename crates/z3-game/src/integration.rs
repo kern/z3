@@ -11,7 +11,7 @@ use crate::{
     assets::RuntimeAssets,
     attract::{Attract, AttractRuntime},
     dungeon::{Dungeon, DungeonHooks},
-    ending::{Ending, EndingRuntime},
+    ending::{Ending, EndingCall, EndingRuntime},
     messaging::{Messaging, MessagingAssets, MessagingRuntime},
     misc::{self, MiscHooks},
     overworld,
@@ -405,7 +405,7 @@ pub enum NativeHostAction {
     DeathFunc15(bool),
     RouteMainModule,
     LoadSongBank(u8),
-    EndingExternal(&'static str),
+    EndingExternal(EndingCall),
     WorldMapLoadLight,
     TransferMode7Characters,
     WorldMapSetupHdma,
@@ -633,85 +633,91 @@ struct EndingAdapter<'a, 'assets, 'messages, S> {
 }
 
 impl<S: GameServices> EndingRuntime for EndingAdapter<'_, '_, '_, S> {
-    fn call(&mut self, name: &'static str, ram: &mut Ram<'_>) {
-        match name {
-            "EnableForceBlank"
-            | "EraseTileMaps_normal"
-            | "EraseTileMaps_triforce"
-            | "Graphics_LoadChrHalfSlot"
-            | "InitializeTilesets"
-            | "LoadCommonSprites"
-            | "LoadDefaultGraphics"
-            | "LoadFollowerGraphics"
-            | "LoadItemGFXIntoWRAM4BPPBuffer"
-            | "Overworld_LoadAllPalettes"
-            | "OverworldLoadScreensPaletteSet"
-            | "Overworld_CopyPalettesToCache"
-            | "SpecialOverworld_CopyPalettesToCache"
-            | "Overworld_LoadPalettesInner"
-            | "PaletteFilter_BlindingWhiteTriforce"
-            | "PaletteFilter_SP5F"
-            | "PaletteFilter_WishPonds_Inner"
-            | "Palette_FadeIntro2"
-            | "Palette_FadeIntroOneStep"
-            | "Palette_Load_HUD"
-            | "Palette_Load_OWBG2"
-            | "Palette_RevertTranslucencySwap"
-            | "Palette_SetOwBgColor"
-            | "SetBackdropcolorBlack"
-            | "TransferFontToVRAM" => {
+    fn call(&mut self, call: EndingCall, ram: &mut Ram<'_>) {
+        match call {
+            EndingCall::EnableForceBlank
+            | EndingCall::EraseTileMapsNormal
+            | EndingCall::EraseTileMapsTriforce
+            | EndingCall::GraphicsLoadChrHalfSlot
+            | EndingCall::InitializeTilesets
+            | EndingCall::LoadCommonSprites
+            | EndingCall::LoadDefaultGraphics
+            | EndingCall::LoadFollowerGraphics
+            | EndingCall::LoadItemGfxIntoWram4BppBuffer
+            | EndingCall::OverworldLoadAllPalettes
+            | EndingCall::OverworldLoadScreensPaletteSet
+            | EndingCall::OverworldCopyPalettesToCache
+            | EndingCall::SpecialOverworldCopyPalettesToCache
+            | EndingCall::OverworldLoadPalettesInner
+            | EndingCall::PaletteFilterBlindingWhiteTriforce
+            | EndingCall::PaletteFilterSp5F
+            | EndingCall::PaletteFilterWishPondsInner
+            | EndingCall::PaletteFadeIntro2
+            | EndingCall::PaletteFadeIntroOneStep
+            | EndingCall::PaletteLoadHud
+            | EndingCall::PaletteLoadOwbg2
+            | EndingCall::PaletteRevertTranslucencySwap
+            | EndingCall::PaletteSetOwBgColor
+            | EndingCall::SetBackdropcolorBlack
+            | EndingCall::TransferFontToVram => {
                 let mut gfx = crate::load_gfx::LoadGfx {
                     wram: ram.bytes_mut(),
                     vram: &mut self.ppu.vram,
                     assets: self.assets,
                     hooks: self.services,
                 };
-                match name {
-                    "EnableForceBlank" => gfx.enable_force_blank(),
-                    "EraseTileMaps_normal" => gfx.erase_tile_maps_normal(),
-                    "EraseTileMaps_triforce" => gfx.erase_tile_maps_triforce(),
-                    "Graphics_LoadChrHalfSlot" => gfx.graphics_load_chr_half_slot(),
-                    "InitializeTilesets" => gfx.initialize_tilesets(),
-                    "LoadCommonSprites" => gfx.load_common_sprites(),
-                    "LoadDefaultGraphics" => gfx.load_default_graphics(),
-                    "LoadFollowerGraphics" => gfx.load_follower_graphics(),
-                    "LoadItemGFXIntoWRAM4BPPBuffer" => {
+                match call {
+                    EndingCall::EnableForceBlank => gfx.enable_force_blank(),
+                    EndingCall::EraseTileMapsNormal => gfx.erase_tile_maps_normal(),
+                    EndingCall::EraseTileMapsTriforce => gfx.erase_tile_maps_triforce(),
+                    EndingCall::GraphicsLoadChrHalfSlot => gfx.graphics_load_chr_half_slot(),
+                    EndingCall::InitializeTilesets => gfx.initialize_tilesets(),
+                    EndingCall::LoadCommonSprites => gfx.load_common_sprites(),
+                    EndingCall::LoadDefaultGraphics => gfx.load_default_graphics(),
+                    EndingCall::LoadFollowerGraphics => gfx.load_follower_graphics(),
+                    EndingCall::LoadItemGfxIntoWram4BppBuffer => {
                         gfx.load_item_gfx_into_wram_4bpp_buffer();
                     }
-                    "Overworld_LoadAllPalettes" => gfx.overworld_load_all_palettes(),
-                    "OverworldLoadScreensPaletteSet" => {
+                    EndingCall::OverworldLoadAllPalettes => gfx.overworld_load_all_palettes(),
+                    EndingCall::OverworldLoadScreensPaletteSet => {
                         gfx.overworld_load_screens_palette_set();
                     }
-                    "Overworld_CopyPalettesToCache" => gfx.overworld_copy_palettes_to_cache(),
-                    "SpecialOverworld_CopyPalettesToCache" => {
+                    EndingCall::OverworldCopyPalettesToCache => {
+                        gfx.overworld_copy_palettes_to_cache()
+                    }
+                    EndingCall::SpecialOverworldCopyPalettesToCache => {
                         gfx.special_overworld_copy_palettes_to_cache();
                     }
-                    "Overworld_LoadPalettesInner" => gfx.overworld_load_palettes_inner(),
-                    "PaletteFilter_BlindingWhiteTriforce" => {
+                    EndingCall::OverworldLoadPalettesInner => gfx.overworld_load_palettes_inner(),
+                    EndingCall::PaletteFilterBlindingWhiteTriforce => {
                         gfx.palette_filter_blinding_white_triforce();
                     }
-                    "PaletteFilter_SP5F" => gfx.palette_filter_sp5f(),
-                    "PaletteFilter_WishPonds_Inner" => gfx.palette_filter_wish_ponds_inner(),
-                    "Palette_FadeIntro2" => gfx.palette_fade_intro_2(),
-                    "Palette_FadeIntroOneStep" => gfx.palette_fade_intro_one_step(),
-                    "Palette_Load_HUD" => gfx.palette_load_hud(),
-                    "Palette_Load_OWBG2" => gfx.palette_load_owbg2(),
-                    "Palette_RevertTranslucencySwap" => gfx.palette_revert_translucency_swap(),
-                    "Palette_SetOwBgColor" => gfx.palette_set_ow_bg_color(),
-                    "SetBackdropcolorBlack" => gfx.palette_bg_and_fixed_color_black(),
-                    "TransferFontToVRAM" => gfx.transfer_font_to_vram(),
+                    EndingCall::PaletteFilterSp5F => gfx.palette_filter_sp5f(),
+                    EndingCall::PaletteFilterWishPondsInner => {
+                        gfx.palette_filter_wish_ponds_inner()
+                    }
+                    EndingCall::PaletteFadeIntro2 => gfx.palette_fade_intro_2(),
+                    EndingCall::PaletteFadeIntroOneStep => gfx.palette_fade_intro_one_step(),
+                    EndingCall::PaletteLoadHud => gfx.palette_load_hud(),
+                    EndingCall::PaletteLoadOwbg2 => gfx.palette_load_owbg2(),
+                    EndingCall::PaletteRevertTranslucencySwap => {
+                        gfx.palette_revert_translucency_swap()
+                    }
+                    EndingCall::PaletteSetOwBgColor => gfx.palette_set_ow_bg_color(),
+                    EndingCall::SetBackdropcolorBlack => gfx.palette_bg_and_fixed_color_black(),
+                    EndingCall::TransferFontToVram => gfx.transfer_font_to_vram(),
                     _ => unreachable!(),
                 }
-                if name == "EraseTileMaps_normal" {
+                if call == EndingCall::EraseTileMapsNormal {
                     // Dungeon loading can write a tile equal to the pre-erase
                     // scratch value. Rebase its diff on the erased live VRAM.
                     self.services.sync_vram(&self.ppu.vram);
                 }
             }
-            "LoadOWMusicIfNeeded" => {
+            EndingCall::LoadOwMusicIfNeeded => {
                 Dungeon::new(ram.bytes_mut(), self.services).load_ow_music_if_needed();
             }
-            "Text_GenerateMessagePointers" => {
+            EndingCall::TextGenerateMessagePointers => {
                 let mut pointer = 0x1c_8000_u32;
                 for index in 0..398 {
                     if index == 359 {
@@ -727,34 +733,34 @@ impl<S: GameServices> EndingRuntime for EndingAdapter<'_, '_, '_, S> {
                     }
                 }
             }
-            "RenderText" => Messaging {
+            EndingCall::RenderText => Messaging {
                 ram,
                 sram: self.sram,
                 assets: self.messaging_assets,
                 runtime: self.services,
             }
             .render_text(),
-            "BirdTravel_Finish_Doit" => Messaging {
+            EndingCall::BirdTravelFinishDoit => Messaging {
                 ram,
                 sram: self.sram,
                 assets: self.messaging_assets,
                 runtime: self.services,
             }
             .bird_travel_finish_doit(),
-            "FluteMenu_LoadSelectedScreen" => Messaging {
+            EndingCall::FluteMenuLoadSelectedScreen => Messaging {
                 ram,
                 sram: self.sram,
                 assets: self.messaging_assets,
                 runtime: self.services,
             }
             .flute_menu_load_selected_screen(),
-            "LoadCreditsSongs" => crate::misc::load_credits_songs(ram, self.services),
-            "LoadOverworldFromDungeon" => {
+            EndingCall::LoadCreditsSongs => crate::misc::load_credits_songs(ram, self.services),
+            EndingCall::LoadOverworldFromDungeon => {
                 crate::overworld::load_overworld_from_dungeon(ram, self.assets, |ram| {
                     crate::overworld::load_gfx_and_screen_size(ram, self.assets)
                 });
             }
-            "Overworld_EnterSpecialArea" => {
+            EndingCall::OverworldEnterSpecialArea => {
                 let ppu = std::cell::RefCell::new(&mut *self.ppu);
                 let services = std::cell::RefCell::new(&mut *self.services);
                 crate::overworld::enter_special_area(
@@ -789,9 +795,33 @@ impl<S: GameServices> EndingRuntime for EndingAdapter<'_, '_, '_, S> {
                     },
                 );
             }
-            "Sprite_Main" => self.services.run_sprite_main(ram),
-            "LinkOam_Main" => self.services.run_link_oam_main(ram),
-            _ => EndingRuntime::call(self.services, name, ram),
+            EndingCall::SpriteMain => self.services.run_sprite_main(ram),
+            EndingCall::LinkOamMain => self.services.run_link_oam_main(ram),
+            EndingCall::ApplyPaletteFilterBounce
+            | EndingCall::CallForDuckIndoors
+            | EndingCall::ConditionalMosaicControl
+            | EndingCall::DungeonHandleLayerEffect
+            | EndingCall::DungeonLoadAndDrawRoom
+            | EndingCall::DungeonLoadEntrance
+            | EndingCall::DungeonLoadPalettes
+            | EndingCall::HudRebuildIndoor
+            | EndingCall::LinkHandleMovingAnimationFullLongEntry
+            | EndingCall::LinkHandleVelocity
+            | EndingCall::LinkResetPropertiesA
+            | EndingCall::MainShowTextMessage
+            | EndingCall::Module0802LoadAndAdvance
+            | EndingCall::OverworldHandleMapScroll
+            | EndingCall::OverworldLoadAndBuildScreen
+            | EndingCall::OverworldLoadOverlayAndMap
+            | EndingCall::OverworldLoadOverlays2
+            | EndingCall::OverworldSetFixedColAndScroll
+            | EndingCall::PaletteAnimGetMasterSword2
+            | EndingCall::ResetTransitionPropsAndAdvanceResetInterface
+            | EndingCall::SaveDungeonKeys
+            | EndingCall::SpriteSpawnBatCrashCutscene
+            | EndingCall::TriforceRoomLinkApproachTriforce => {
+                EndingRuntime::call(self.services, call, ram)
+            }
         }
     }
     fn ppu_write(&mut self, register: u16, value: u8) {
@@ -1885,7 +1915,7 @@ where
                             .load_song_bank(self.overworld_assets.bytes(usize::from(bank)))
                             .expect("valid compiled song bank");
                     }
-                    NativeHostAction::EndingExternal(name) => {
+                    NativeHostAction::EndingExternal(call) => {
                         let mut ending = EndingAdapter {
                             sram: self.sram,
                             dma: self.dma,
@@ -1894,7 +1924,7 @@ where
                             messaging_assets: self.messaging_assets,
                             services: self.services,
                         };
-                        ending.call(name, ram);
+                        ending.call(call, ram);
                     }
                     NativeHostAction::WorldMapLoadLight => {
                         for word in &mut self.ppu.vram[..0x4000] {
@@ -2296,6 +2326,38 @@ mod tests {
         let mut runtime = DungeonRuntime;
         run_dungeon_module(&mut ram, &mut runtime, MainModule::DungeonFallingEntrance);
         assert_eq!(ram.read_u8(0xb0), 1);
+    }
+
+    #[test]
+    fn typed_ending_calls_preserve_immediate_and_deferred_service_routing() {
+        let asset_bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../zelda3_assets.dat"
+        ))
+        .unwrap();
+        let assets = RuntimeAssets::parse(&asset_bytes).unwrap();
+        let mut services = NativeGameServices::new(&assets);
+        let mut bytes = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        ram.write_u8(MAIN_MODULE, 26);
+        for call in [
+            EndingCall::EnableForceBlank,
+            EndingCall::EraseTileMapsNormal,
+        ] {
+            EndingRuntime::call(&mut services, call, &mut ram);
+        }
+        EndingRuntime::call(&mut services, EndingCall::MainShowTextMessage, &mut ram);
+        assert_eq!(ram.read_u8(MAIN_MODULE), 14);
+        assert_eq!(ram.read_u8(0x11), 2);
+        EndingRuntime::call(&mut services, EndingCall::RenderText, &mut ram);
+        assert_eq!(
+            services.take_host_actions(),
+            [
+                NativeHostAction::EndingExternal(EndingCall::EnableForceBlank),
+                NativeHostAction::EndingExternal(EndingCall::EraseTileMapsNormal),
+                NativeHostAction::EndingExternal(EndingCall::RenderText),
+            ]
+        );
     }
 
     #[test]

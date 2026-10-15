@@ -6,6 +6,7 @@
 //! payloads. Assets are addressed by their stable numeric index.
 
 use core::fmt;
+use core::ops::Range;
 
 /// Number of entries in the asset table generated for this source revision.
 pub const ASSET_COUNT: usize = 165;
@@ -29,7 +30,7 @@ pub const ASSET_SIGNATURE: [u8; 48] = [
 pub struct AssetFile<'a> {
     bytes: &'a [u8],
     keys: &'a [u8],
-    assets: Vec<&'a [u8]>,
+    assets: Vec<Range<usize>>,
 }
 
 impl<'a> AssetFile<'a> {
@@ -84,13 +85,13 @@ impl<'a> AssetFile<'a> {
             let size_offset = HEADER_SIZE + index * 4;
             let size = read_u32(bytes, size_offset).ok_or(AssetError::OffsetOverflow)? as usize;
             let end = offset.checked_add(size).ok_or(AssetError::OffsetOverflow)?;
-            let data = bytes.get(offset..end).ok_or(AssetError::AssetOutOfBounds {
+            bytes.get(offset..end).ok_or(AssetError::AssetOutOfBounds {
                 index,
                 offset,
                 size,
                 file_size: bytes.len(),
             })?;
-            assets.push(data);
+            assets.push(offset..end);
             offset = end;
         }
 
@@ -128,12 +129,32 @@ impl<'a> AssetFile<'a> {
     /// Returns an asset by the stable numeric index used by `src/assets.h`.
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&'a [u8]> {
-        self.assets.get(index).copied()
+        self.source_range(index).map(|range| &self.bytes[range])
+    }
+
+    /// Returns the payload's validated byte range in the original container.
+    ///
+    /// Empty payloads retain their aligned source position. Alignment padding
+    /// and trailing bytes are not part of a payload's range.
+    #[must_use]
+    pub fn source_range(&self, index: usize) -> Option<Range<usize>> {
+        self.assets.get(index).cloned()
+    }
+
+    /// Returns the original file from the start of an asset through EOF.
+    ///
+    /// This view includes subsequent alignment padding, assets, and trailing
+    /// bytes. It supports legacy tables that address bytes past their declared
+    /// payload while keeping that file-relative behavior explicit and safe.
+    #[must_use]
+    pub fn file_suffix(&self, index: usize) -> Option<&'a [u8]> {
+        self.source_range(index)
+            .map(|range| &self.bytes[range.start..])
     }
 
     /// Iterates over asset payloads in their stable numeric-index order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &'a [u8]> + '_ {
-        self.assets.iter().copied()
+        self.assets.iter().map(|range| &self.bytes[range.clone()])
     }
 }
 
@@ -309,6 +330,60 @@ mod tests {
         assert_eq!(file.iter().count(), ASSET_COUNT);
         assert!(file.key_table().starts_with(b"asset_0\0asset_1\0"));
         assert_eq!(file.bytes(), bytes);
+    }
+
+    #[test]
+    fn source_ranges_preserve_empty_payload_positions_and_file_suffixes() {
+        let mut bytes = synthetic_file(&[vec![0x11], vec![], vec![0x22, 0x33, 0x44]]);
+        let payload_start = {
+            let file = AssetFile::parse(&bytes).unwrap();
+            align_four(HEADER_SIZE + ASSET_COUNT * 4 + file.key_table().len()).unwrap()
+        };
+        // Distinguish physical file padding from the payload bytes.
+        bytes[payload_start + 1..payload_start + 4].fill(0xa5);
+        let trailing_start = bytes.len();
+        bytes.extend_from_slice(&[0xde, 0xad]);
+        let file = AssetFile::parse(&bytes).unwrap();
+
+        assert_eq!(file.source_range(0), Some(payload_start..payload_start + 1));
+        assert_eq!(
+            file.source_range(1),
+            Some(payload_start + 4..payload_start + 4)
+        );
+        assert_eq!(
+            file.source_range(2),
+            Some(payload_start + 4..payload_start + 7)
+        );
+        assert_eq!(
+            file.source_range(ASSET_COUNT - 1),
+            Some(trailing_start..trailing_start)
+        );
+        assert_eq!(file.get(1), Some(&[][..]));
+        assert_eq!(file.get(2), Some(&[0x22, 0x33, 0x44][..]));
+        assert_eq!(
+            &file.file_suffix(0).unwrap()[..7],
+            &[0x11, 0xa5, 0xa5, 0xa5, 0x22, 0x33, 0x44]
+        );
+        assert_eq!(file.file_suffix(ASSET_COUNT - 1), Some(&[0xde, 0xad][..]));
+        assert_eq!(file.source_range(ASSET_COUNT), None);
+        assert_eq!(file.file_suffix(ASSET_COUNT), None);
+        assert_eq!(file.iter().nth(2), file.get(2));
+    }
+
+    #[test]
+    fn payload_and_suffix_borrow_the_input_independently_of_the_parser() {
+        let bytes = synthetic_file(&[vec![1, 2, 3]]);
+        let (range, payload, suffix) = {
+            let file = AssetFile::parse(&bytes).unwrap();
+            (
+                file.source_range(0).unwrap(),
+                file.get(0).unwrap(),
+                file.file_suffix(0).unwrap(),
+            )
+        };
+        assert_eq!(payload.as_ptr(), bytes[range.clone()].as_ptr());
+        assert_eq!(suffix.as_ptr(), bytes[range.start..].as_ptr());
+        assert_eq!(payload, &[1, 2, 3]);
     }
 
     #[test]

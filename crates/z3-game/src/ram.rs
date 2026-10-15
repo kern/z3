@@ -1,10 +1,13 @@
 //! Typed, explicitly little-endian access to the C port's `g_ram` layout.
 //!
-//! Gameplay modules keep the original addresses during the parity phase. This
-//! makes every translated variable mechanically traceable to `variables.h`
-//! without raw pointers, alignment assumptions, or native-endian aliasing.
+//! Low-level compatibility boundary for the canonical image. Gameplay should
+//! prefer named, live views such as [`Ram::player`] over carrying layout offsets.
+//! Remaining translated accesses are traceable to `variables.h` without raw
+//! pointers, alignment assumptions, or native-endian aliasing.
 
 use z3_core::WRAM_SIZE;
+
+use crate::player_state::{PlayerMut, PlayerRef};
 
 pub struct Ram<'a> {
     bytes: &'a mut [u8; WRAM_SIZE],
@@ -14,6 +17,18 @@ impl<'a> Ram<'a> {
     #[must_use]
     pub fn new(bytes: &'a mut [u8; WRAM_SIZE]) -> Self {
         Self { bytes }
+    }
+
+    /// Borrows the named player fields directly from the canonical WRAM.
+    #[must_use]
+    pub fn player(&self) -> PlayerRef<'_> {
+        PlayerRef::new(self.bytes)
+    }
+
+    /// Exclusively borrows the named player fields without copying state.
+    #[must_use]
+    pub fn player_mut(&mut self) -> PlayerMut<'_> {
+        PlayerMut::new(self.bytes)
     }
 
     #[must_use]

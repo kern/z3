@@ -4,7 +4,7 @@ pub mod native_app;
 
 use std::time::{Duration, Instant};
 use z3_core::config::{ConfigState, GamepadButton, SdlKeyConstants, find_command_for_sdl_key};
-use z3_game::host::{HostAction, InputState, render_number};
+use z3_game::host::{HostAction, HostCommand, InputState, render_number};
 use z3_game::runtime::{NativeRuntime, StateRecorder, apply_patch_command};
 use z3_sdl::{GameController, Rect, Renderer, Sdl, TextureLock, WgpuRenderer, Window};
 
@@ -289,18 +289,9 @@ pub fn save_load_slot(
 
 pub fn apply_runtime_command(
     runtime: &mut NativeRuntime,
-    command: u16,
+    command: HostCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let patch = match command {
-        113 => Some('w'),
-        114 => Some('o'),
-        115 => Some('W'),
-        116 => Some('E'),
-        117 => Some('k'),
-        118 => Some('l'),
-        _ => None,
-    };
-    if let Some(patch) = patch {
+    if let Some(patch) = command.patch_key() {
         let snapshot = runtime.save_snes_state()?;
         apply_patch_command(
             &mut z3_game::ram::Ram::new(&mut runtime.wram),
@@ -308,7 +299,7 @@ pub fn apply_runtime_command(
             patch,
             &snapshot,
         );
-    } else if command == 120 {
+    } else if command == HostCommand::Reset {
         runtime.reset(true);
     }
     Ok(())

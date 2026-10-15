@@ -48,6 +48,11 @@ clang $common_flags oracle/player_oam_oracle.c src/player_oam.o \
 clang $common_flags oracle/player_oam_main_oracle.c src/player_oam.o \
   -o build/c-oracle/player_oam_main_oracle
 
+clang $common_flags oracle/position_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/position_oracle
+
 clang $common_flags oracle/tile_detect_oracle.c src/tile_detect.o \
   -o build/c-oracle/tile_detect_oracle
 

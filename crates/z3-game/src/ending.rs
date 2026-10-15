@@ -174,9 +174,75 @@ pub struct IntroSpriteEnt {
     pub ext: u8,
 }
 
+/// Cross-module effects requested by the ending sequence.
+///
+/// Each variant names one existing C entry point; dispatch is exhaustive in
+/// production so a missing route cannot turn into a silent string mismatch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EndingCall {
+    ApplyPaletteFilterBounce,
+    BirdTravelFinishDoit,
+    CallForDuckIndoors,
+    ConditionalMosaicControl,
+    DungeonHandleLayerEffect,
+    DungeonLoadAndDrawRoom,
+    DungeonLoadEntrance,
+    DungeonLoadPalettes,
+    EnableForceBlank,
+    EraseTileMapsNormal,
+    EraseTileMapsTriforce,
+    FluteMenuLoadSelectedScreen,
+    GraphicsLoadChrHalfSlot,
+    HudRebuildIndoor,
+    InitializeTilesets,
+    LinkOamMain,
+    LinkHandleMovingAnimationFullLongEntry,
+    LinkHandleVelocity,
+    LinkResetPropertiesA,
+    LoadCommonSprites,
+    LoadCreditsSongs,
+    LoadDefaultGraphics,
+    LoadFollowerGraphics,
+    LoadItemGfxIntoWram4BppBuffer,
+    LoadOwMusicIfNeeded,
+    LoadOverworldFromDungeon,
+    MainShowTextMessage,
+    Module0802LoadAndAdvance,
+    OverworldHandleMapScroll,
+    OverworldLoadScreensPaletteSet,
+    OverworldCopyPalettesToCache,
+    OverworldEnterSpecialArea,
+    OverworldLoadAllPalettes,
+    OverworldLoadAndBuildScreen,
+    OverworldLoadOverlayAndMap,
+    OverworldLoadOverlays2,
+    OverworldLoadPalettesInner,
+    OverworldSetFixedColAndScroll,
+    PaletteFilterBlindingWhiteTriforce,
+    PaletteFilterSp5F,
+    PaletteFilterWishPondsInner,
+    PaletteAnimGetMasterSword2,
+    PaletteFadeIntro2,
+    PaletteFadeIntroOneStep,
+    PaletteLoadHud,
+    PaletteLoadOwbg2,
+    PaletteRevertTranslucencySwap,
+    PaletteSetOwBgColor,
+    RenderText,
+    ResetTransitionPropsAndAdvanceResetInterface,
+    SaveDungeonKeys,
+    SetBackdropcolorBlack,
+    SpecialOverworldCopyPalettesToCache,
+    SpriteMain,
+    SpriteSpawnBatCrashCutscene,
+    TextGenerateMessagePointers,
+    TransferFontToVram,
+    TriforceRoomLinkApproachTriforce,
+}
+
 /// Only calls whose implementations live in another C translation unit.
 pub trait EndingRuntime {
-    fn call(&mut self, _name: &'static str, _ram: &mut Ram<'_>) {}
+    fn call(&mut self, _call: EndingCall, _ram: &mut Ram<'_>) {}
     fn ppu_write(&mut self, _register: u16, _value: u8) {}
     fn sprite_reset(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
     fn sprite_set_x(&mut self, ram: &mut Ram<'_>, k: usize, x: u16) {
@@ -283,20 +349,20 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             & 0xd0)
             != 0
     }
-    fn external(&mut self, n: &'static str) {
-        self.runtime.call(n, self.ram);
+    fn external(&mut self, call: EndingCall) {
+        self.runtime.call(call, self.ram);
     }
 
     pub fn credits_load_scene_overworld_prep_gfx(&mut self) {
-        self.external("EnableForceBlank");
-        self.external("EraseTileMaps_normal");
+        self.external(EndingCall::EnableForceBlank);
+        self.external(EndingCall::EraseTileMapsNormal);
         self.ram.write_u8(CGWSEL, 0x82);
         let k = (self.ram.read_u8(SUBMODULE) >> 1) as usize;
         self.ram.write_u16(DUNGEON_ROOM_INDEX, ENDING_TAB1[k]);
         self.external(if k == 6 || k == 15 {
-            "Overworld_EnterSpecialArea"
+            EndingCall::OverworldEnterSpecialArea
         } else {
-            "LoadOverworldFromDungeon"
+            EndingCall::LoadOverworldFromDungeon
         });
         self.ram.write_u8(MUSIC_CONTROL, 0);
         self.ram.write_u8(0x12d, 0);
@@ -310,29 +376,29 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             },
         );
         self.ram.write_u8(0xaa3, ENDING_SPRITE_PACK[k]);
-        self.external("InitializeTilesets");
-        self.external("OverworldLoadScreensPaletteSet");
+        self.external(EndingCall::InitializeTilesets);
+        self.external(EndingCall::OverworldLoadScreensPaletteSet);
         let bg = self
             .runtime
             .get_overworld_bg_palette(self.ram.read_u8(0x8a));
         self.runtime
             .overworld_load_palettes(self.ram, bg, ENDING_SPRITE_PAL[k]);
         self.ram.write_u8(0xab2, 1);
-        self.external("Palette_Load_HUD");
+        self.external(EndingCall::PaletteLoadHud);
         if self.ram.read_u8(SUBMODULE) == 0 {
-            self.external("TransferFontToVRAM")
+            self.external(EndingCall::TransferFontToVram)
         }
-        self.external("Overworld_LoadPalettesInner");
-        self.external("Overworld_SetFixedColAndScroll");
+        self.external(EndingCall::OverworldLoadPalettesInner);
+        self.external(EndingCall::OverworldSetFixedColAndScroll);
         if self.ram.read_u8(0x8a) >= 128 {
-            self.external("Palette_SetOwBgColor")
+            self.external(EndingCall::PaletteSetOwBgColor)
         }
         self.ram.write_u8(BGMODE, 9);
         self.inc8(SUBSUBMODULE);
     }
 
     pub fn credits_load_scene_overworld_overlay(&mut self) {
-        self.external("Overworld_LoadOverlays2");
+        self.external(EndingCall::OverworldLoadOverlays2);
         self.ram.write_u8(MUSIC_CONTROL, 0);
         self.ram.write_u8(0x12d, 0);
         self.dec8(SUBMODULE);
@@ -340,7 +406,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     }
 
     pub fn credits_load_scene_overworld_load_map(&mut self) {
-        self.external("Overworld_LoadAndBuildScreen");
+        self.external(EndingCall::OverworldLoadAndBuildScreen);
         self.credits_prep_and_load_sprites();
         self.ram.write_u16(R16, 0);
         self.ram.write_u8(SUBSUBMODULE, 0);
@@ -350,28 +416,28 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u8(0xaa1, 33);
         self.ram.write_u8(0xaa2, 59);
         self.ram.write_u8(0xaa3, 45);
-        self.external("InitializeTilesets");
+        self.external(EndingCall::InitializeTilesets);
         self.ram.write_u8(0x8a, 0x5b);
         let bg = self.runtime.get_overworld_bg_palette(0x5b);
         self.runtime.overworld_load_palettes(self.ram, bg, 0x13);
         self.ram.write_u8(0xab5, 3);
-        self.external("Palette_Load_OWBG2");
-        self.external("Overworld_CopyPalettesToCache");
-        self.external("Overworld_LoadOverlays2");
+        self.external(EndingCall::PaletteLoadOwbg2);
+        self.external(EndingCall::OverworldCopyPalettesToCache);
+        self.external(EndingCall::OverworldLoadOverlays2);
         self.ram.write_u16(BG1_VOFS2, 0);
         self.ram.write_u16(BG1_HOFS2, 0);
         self.dec8(SUBMODULE);
     }
 
     pub fn credits_load_scene_dungeon(&mut self) {
-        self.external("EnableForceBlank");
-        self.external("EraseTileMaps_normal");
+        self.external(EndingCall::EnableForceBlank);
+        self.external(EndingCall::EraseTileMapsNormal);
         let k = (self.ram.read_u8(SUBMODULE) >> 1) as usize;
         self.ram.write_u16(0x10e, ENDING_TAB1[k]);
-        self.external("Dungeon_LoadEntrance");
+        self.external(EndingCall::DungeonLoadEntrance);
         self.ram.write_u8(0x45a, 0);
         self.ram.write_u8(0x458, 0);
-        self.external("Dungeon_LoadAndDrawRoom");
+        self.external(EndingCall::DungeonLoadAndDrawRoom);
         let anim = self
             .runtime
             .dungeon_animated_tile_for_theme(self.ram.read_u8(0xaa1));
@@ -384,9 +450,9 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u8(0xaad, p5);
         self.ram.write_u8(0xaae, p6);
         self.ram.write_u8(0xaa4, 10);
-        self.external("InitializeTilesets");
+        self.external(EndingCall::InitializeTilesets);
         self.ram.write_u8(0xab1, 10);
-        self.external("Dungeon_LoadPalettes");
+        self.external(EndingCall::DungeonLoadPalettes);
         self.ram.write_u8(BGMODE, 9);
         self.ram.write_u16(R16, 0);
         self.ram.write_u8(INIDISP, 0);
@@ -450,7 +516,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u16(BG1_HOFS, self.ram.read_u16(BG1_HOFS2));
         self.ram.write_u16(BG1_VOFS2, saved[3].wrapping_add(yo));
         self.ram.write_u16(BG1_VOFS, self.ram.read_u16(BG1_VOFS2));
-        self.external("Sprite_Main");
+        self.external(EndingCall::SpriteMain);
         for (a, v) in [
             (BG2_HOFS2, saved[0]),
             (BG2_VOFS2, saved[1]),
@@ -461,14 +527,14 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         }
         match self.ram.read_u8(0x200) {
             0 => {
-                self.external("Dungeon_HandleLayerEffect");
-                self.external("CallForDuckIndoors");
-                self.external("SaveDungeonKeys");
+                self.external(EndingCall::DungeonHandleLayerEffect);
+                self.external(EndingCall::CallForDuckIndoors);
+                self.external(EndingCall::SaveDungeonKeys);
                 self.inc8(0x200);
                 self.inc8(0x2e4);
             }
             1 => {
-                self.external("Dungeon_HandleLayerEffect");
+                self.external(EndingCall::DungeonHandleLayerEffect);
                 if self.ram.read_u8(SUBMODULE) == 10 {
                     self.ram.write_u16(0x8a, 91);
                     self.ram.write_u8(0x1b, 0);
@@ -478,11 +544,11 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 }
             }
             2 => {
-                self.external("Dungeon_HandleLayerEffect");
+                self.external(EndingCall::DungeonHandleLayerEffect);
                 if self.dec8(INIDISP) == 0 {
-                    self.external("EnableForceBlank");
+                    self.external(EndingCall::EnableForceBlank);
                     self.inc8(0x200);
-                    self.external("Hud_RebuildIndoor");
+                    self.external(EndingCall::HudRebuildIndoor);
                     self.ram.write_u8(LINK_X_VEL, 0);
                     self.ram.write_u8(LINK_Y_VEL, 0)
                 }
@@ -490,19 +556,19 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             3 => {
                 self.ram.write_u8(0x1af0, 8);
                 self.ram.write_u8(0x1af1, 0);
-                self.external("FluteMenu_LoadSelectedScreen");
-                self.external("LoadOWMusicIfNeeded");
+                self.external(EndingCall::FluteMenuLoadSelectedScreen);
+                self.external(EndingCall::LoadOwMusicIfNeeded);
                 self.ram.write_u8(MUSIC_CONTROL, 9);
             }
             4 => {
-                self.external("Overworld_LoadOverlayAndMap");
+                self.external(EndingCall::OverworldLoadOverlayAndMap);
                 self.ram.write_u8(SUBSUBMODULE, 0)
             }
             5 => {
                 if self.inc8(INIDISP) == 15 {
                     self.ram.write_u16(0x402, 0);
                     self.ram.write_u8(0xfc1, 0);
-                    self.external("Sprite_SpawnBatCrashCutscene");
+                    self.external(EndingCall::SpriteSpawnBatCrashCutscene);
                     self.ram.write_u8(0x2f, 2);
                     self.ram.write_u8(0x10c, 9);
                     self.ram.write_u8(0x1b, 0);
@@ -516,32 +582,32 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                     self.inc8(0x200);
                 }
             }
-            8 => self.external("BirdTravel_Finish_Doit"),
+            8 => self.external(EndingCall::BirdTravelFinishDoit),
             _ => {}
         }
-        self.external("LinkOam_Main");
+        self.external(EndingCall::LinkOamMain);
     }
 
     pub fn module19_triforce_room(&mut self) {
         match self.ram.read_u8(SUBSUBMODULE) {
             0 => {
-                self.external("Link_ResetProperties_A");
+                self.external(EndingCall::LinkResetPropertiesA);
                 self.ram.write_u8(0x66, 0);
                 self.ram.write_u8(MUSIC_CONTROL, 0xf1);
-                self.external("ResetTransitionPropsAndAdvance_ResetInterface")
+                self.external(EndingCall::ResetTransitionPropsAndAdvanceResetInterface)
             }
             1 => {
-                self.external("ConditionalMosaicControl");
-                self.external("ApplyPaletteFilter_bounce")
+                self.external(EndingCall::ConditionalMosaicControl);
+                self.external(EndingCall::ApplyPaletteFilterBounce)
             }
             2 => {
-                self.external("EnableForceBlank");
-                self.external("LoadCreditsSongs");
+                self.external(EndingCall::EnableForceBlank);
+                self.external(EndingCall::LoadCreditsSongs);
                 self.ram.write_u16(DUNGEON_ROOM_INDEX, 0x189);
-                self.external("EraseTileMaps_normal");
-                self.external("Palette_RevertTranslucencySwap");
-                self.external("Overworld_EnterSpecialArea");
-                self.external("Overworld_LoadOverlays2");
+                self.external(EndingCall::EraseTileMapsNormal);
+                self.external(EndingCall::PaletteRevertTranslucencySwap);
+                self.external(EndingCall::OverworldEnterSpecialArea);
+                self.external(EndingCall::OverworldLoadOverlays2);
                 self.inc8(SUBSUBMODULE);
                 self.ram.write_u8(MAIN_MODULE, 25);
                 self.ram.write_u8(SUBMODULE, 0)
@@ -550,15 +616,15 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.ram.write_u8(0xaa1, 36);
                 self.ram.write_u8(0xaa3, 125);
                 self.ram.write_u8(0xaa2, 81);
-                self.external("InitializeTilesets");
+                self.external(EndingCall::InitializeTilesets);
                 self.runtime.overworld_load_area_palettes_ex(self.ram, 4);
                 self.runtime.overworld_load_palettes(self.ram, 14, 0);
-                self.external("SpecialOverworld_CopyPalettesToCache");
+                self.external(EndingCall::SpecialOverworldCopyPalettesToCache);
                 self.inc8(SUBSUBMODULE);
             }
             4 => {
                 let s = self.ram.read_u8(SUBSUBMODULE);
-                self.external("Module08_02_LoadAndAdvance");
+                self.external(EndingCall::Module0802LoadAndAdvance);
                 self.ram.write_u8(SUBSUBMODULE, s + 1);
                 self.ram.write_u8(INIDISP, 15);
                 self.ram.write_u16(PALETTE_FILTER_COUNTDOWN, 31);
@@ -594,13 +660,13 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
                 self.ram.write_u8(BGMODE, 9);
                 self.ram
                     .write_u8(MOSAIC, self.ram.read_u8(MOSAIC_LEVEL) | 7);
-                self.external("ApplyPaletteFilter_bounce")
+                self.external(EndingCall::ApplyPaletteFilterBounce)
             }
             7 => {
                 self.triforce_room_prep_gfx_slot_for_poly();
                 self.ram.write_u16(0x1cf0, 0x173);
-                self.external("Main_ShowTextMessage");
-                self.external("RenderText");
+                self.external(EndingCall::MainShowTextMessage);
+                self.external(EndingCall::RenderText);
                 self.ram.write_u8(R16, 0x80);
                 self.ram.write_u8(MAIN_MODULE, 25);
                 self.inc8(SUBSUBMODULE);
@@ -617,7 +683,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             }
             9 => {
                 self.advance_polyhedral();
-                self.external("RenderText");
+                self.external(EndingCall::RenderText);
                 if self.ram.read_u8(SUBMODULE) == 0 {
                     self.ram.write_u8(0x200, 0);
                     self.ram.write_u8(MAIN_MODULE, 25);
@@ -626,7 +692,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             }
             11 => {
                 self.advance_polyhedral();
-                self.external("TriforceRoom_LinkApproachTriforce");
+                self.external(EndingCall::TriforceRoomLinkApproachTriforce);
                 if self.ram.read_u8(SUBSUBMODULE) == 12 {
                     self.ram.write_u8(0x67, 0);
                     self.ram.write_u8(0x26, 0)
@@ -635,13 +701,13 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             12 => {
                 self.advance_polyhedral();
                 if self.dec8(R16) == 0 {
-                    self.external("Palette_AnimGetMasterSword2");
+                    self.external(EndingCall::PaletteAnimGetMasterSword2);
                     self.inc8(SUBMODULE);
                 }
             }
             13 => {
                 self.advance_polyhedral();
-                self.external("PaletteFilter_BlindingWhiteTriforce");
+                self.external(EndingCall::PaletteFilterBlindingWhiteTriforce);
                 if self.ram.read_u8(DARKENING) == 255 {
                     self.inc8(SUBSUBMODULE);
                 }
@@ -662,10 +728,10 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.copy_scroll();
         let s = self.ram.read_u8(SUBSUBMODULE);
         if !(7..11).contains(&s) {
-            self.external("Link_HandleVelocity");
-            self.external("Link_HandleMovingAnimation_FullLongEntry")
+            self.external(EndingCall::LinkHandleVelocity);
+            self.external(EndingCall::LinkHandleMovingAnimationFullLongEntry)
         }
-        self.external("LinkOam_Main");
+        self.external(EndingCall::LinkOamMain);
     }
 
     pub fn intro_initialize_background_settings(&mut self) {
@@ -710,15 +776,15 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     }
     pub fn intro_setup_screen(&mut self) {
         self.ram.write_u8(NMI_DISABLE_CORE, 0x80);
-        self.external("EnableForceBlank");
+        self.external(EndingCall::EnableForceBlank);
         self.ram.write_u8(TM, 16);
         self.ram.write_u8(TS, 0);
         self.intro_initialize_background_settings();
         self.ram.write_u8(CGWSEL, 0x20);
         self.ram.write_u8(0xaaa, 20);
-        self.external("Graphics_LoadChrHalfSlot");
+        self.external(EndingCall::GraphicsLoadChrHalfSlot);
         self.ram.write_u8(0xaaa, 0);
-        self.external("LoadOWMusicIfNeeded");
+        self.external(EndingCall::LoadOwMusicIfNeeded);
         for i in 0..17 {
             self.ram.write_u16(MAIN_PALETTE + (144 + i) * 2, 0x7fff);
         }
@@ -729,8 +795,8 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u16(R18, 0x1bfe);
     }
     pub fn intro_load_text_pointers_and_palettes(&mut self) {
-        self.external("Text_GenerateMessagePointers");
-        self.external("Overworld_LoadAllPalettes");
+        self.external(EndingCall::TextGenerateMessagePointers);
+        self.external(EndingCall::OverworldLoadAllPalettes);
     }
     pub fn module00_intro(&mut self, enhanced_features0: u32) {
         let skip = if enhanced_features0 & 128 != 0 { 4 } else { 8 };
@@ -773,8 +839,8 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         match t {
             0..=7 => self.intro_clear_1kb_blocks_of_wram(),
             8 => self.intro_load_text_pointers_and_palettes(),
-            9 => self.external("LoadItemGFXIntoWRAM4BPPBuffer"),
-            10 => self.external("LoadFollowerGraphics"),
+            9 => self.external(EndingCall::LoadItemGfxIntoWram4BppBuffer),
+            10 => self.external(EndingCall::LoadFollowerGraphics),
             _ => {}
         }
     }
@@ -794,14 +860,14 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u16(R18, i.wrapping_sub(0x400));
     }
     pub fn intro_initialize_memory_darken(&mut self) {
-        self.external("EnableForceBlank");
-        self.external("EraseTileMaps_normal");
+        self.external(EndingCall::EnableForceBlank);
+        self.external(EndingCall::EraseTileMapsNormal);
         self.ram.write_u8(0xaa1, 35);
         self.ram.write_u8(0xaa3, 125);
         self.ram.write_u8(0xaa2, 81);
         self.ram.write_u8(0xaa4, 8);
-        self.external("LoadDefaultGraphics");
-        self.external("InitializeTilesets");
+        self.external(EndingCall::LoadDefaultGraphics);
+        self.external(EndingCall::InitializeTilesets);
         self.runtime
             .decompress_animated_dungeon_tiles(self.ram, 0x5d);
         self.ram.write_u16(0xc00d, 2);
@@ -820,7 +886,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         if self.ram.read_u8(FRAME_COUNTER) & 1 == 0 {
             return;
         }
-        self.external("Palette_FadeIntroOneStep");
+        self.external(EndingCall::PaletteFadeIntroOneStep);
         let p = self.ram.read_u8(PALETTE_FILTER_COUNTDOWN);
         if p == 0 {
             self.ram.write_u8(SUBSUBMODULE, 42);
@@ -836,7 +902,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.intro_handle_all_triforce_animations();
         if self.ram.read_u8(PALETTE_FILTER_COUNTDOWN) != 0 {
             if self.ram.read_u8(FRAME_COUNTER) & 1 != 0 {
-                self.external("Palette_FadeIntro2")
+                self.external(EndingCall::PaletteFadeIntro2)
             }
         } else if self.joy_skip() {
             self.fade_music_and_reset_sram_mirror()
@@ -875,7 +941,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u8(TS, 0);
         self.ram.write_u8(0x1b, 0);
         self.ram.write_u8(MUSIC_CONTROL, 0xf1);
-        self.external("SetBackdropcolorBlack");
+        self.external(EndingCall::SetBackdropcolorBlack);
         self.ram.slice_mut(0x20, 0x70).fill(0);
         self.ram.slice_mut(0xf000, 1280).fill(0);
         self.ram.write_u8(MAIN_MODULE, 1);
@@ -883,7 +949,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.ram.write_u8(SUBMODULE, 0);
     }
     pub fn intro_initialize_triforce_poly_thread(&mut self) {
-        self.external("LoadCommonSprites");
+        self.external(EndingCall::LoadCommonSprites);
         self.intro_init_gfx_helper();
         for k in 0..3 {
             self.ram.write_u8(INTRO_INITED + k, 1);
@@ -1273,7 +1339,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     }
     pub fn triforce_room_prep_gfx_slot_for_poly(&mut self) {
         self.ram.write_u8(0xaa4, 8);
-        self.external("LoadCommonSprites");
+        self.external(EndingCall::LoadCommonSprites);
         self.intro_init_gfx_helper();
         for k in 0..3 {
             self.ram.write_u8(INTRO_INITED + k, 1);
@@ -1284,7 +1350,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     }
     pub fn credits_initialize_polyhedral(&mut self) {
         self.ram.write_u8(0xaa4, 8);
-        self.external("LoadCommonSprites");
+        self.external(EndingCall::LoadCommonSprites);
         self.intro_init_gfx_helper();
         self.ram.write_u8(POLY_CONFIG1, 0);
         for k in 0..3 {
@@ -1390,7 +1456,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         if self.ram.read_u8(R18) != 0 {
             self.dec8(R18);
         }
-        self.external("SetBackdropcolorBlack");
+        self.external(EndingCall::SetBackdropcolorBlack);
         let flashes = self.ram.read_u8(INTRO_FLASHES);
         if flashes != 0 {
             if flashes & 3 != 0 {
@@ -2176,7 +2242,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     pub fn credits_operate_scrolling_and_tile_map(&mut self) {
         self.credits_handle_camera_scroll_control();
         if self.ram.read_u8(OW_TRANS_DIR) != 0 {
-            self.external("OverworldHandleMapScroll")
+            self.external(EndingCall::OverworldHandleMapScroll)
         }
     }
     pub fn credits_handle_camera_scroll_control(&mut self) {
@@ -2427,15 +2493,15 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
         self.runtime.sprite_move_xy(self.ram, k);
     }
     pub fn end_sequence_32(&mut self) {
-        self.external("EnableForceBlank");
-        self.external("EraseTileMaps_triforce");
-        self.external("TransferFontToVRAM");
+        self.external(EndingCall::EnableForceBlank);
+        self.external(EndingCall::EraseTileMapsTriforce);
+        self.external(EndingCall::TransferFontToVram);
         self.credits_load_cool_background();
         self.credits_initialize_polyhedral();
         self.ram.write_u8(INIDISP, 128);
         self.ram.write_u16(0xaa8, 0x200);
         self.ram.write_u8(0xab2, 1);
-        self.external("Palette_Load_HUD");
+        self.external(EndingCall::PaletteLoadHud);
         self.inc8(UPDATE_CGRAM);
         self.ram.write_u16(0xf3e7 + 4 * 2, 0);
         let ds = self.ram.read_u16(0xf403);
@@ -2643,7 +2709,7 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
     pub fn credits_fade_and_disperse_triangles(&mut self) {
         self.dec8(R16);
         if self.ram.read_u8(R18) == 0 {
-            self.external("ApplyPaletteFilter_bounce");
+            self.external(EndingCall::ApplyPaletteFilterBounce);
             if self.ram.read_u8(PALETTE_FILTER_COUNTDOWN) != 0 {
                 self.credits_animate_the_triangles();
                 return;
@@ -2655,11 +2721,11 @@ impl<R: EndingRuntime> Ending<'_, '_, R> {
             return;
         }
         self.inc8(SUBMODULE);
-        self.external("PaletteFilter_WishPonds_Inner")
+        self.external(EndingCall::PaletteFilterWishPondsInner)
     }
     pub fn credits_fade_in_the_end(&mut self) {
         if self.ram.read_u8(FRAME_COUNTER) & 7 == 0 {
-            self.external("PaletteFilter_SP5F");
+            self.external(EndingCall::PaletteFilterSp5F);
             if self.ram.read_u8(PALETTE_FILTER_COUNTDOWN) == 0 {
                 self.inc8(SUBMODULE);
             }
@@ -2936,6 +3002,57 @@ mod tests {
     use z3_core::WRAM_SIZE;
     struct Rt;
     impl EndingRuntime for Rt {}
+    #[test]
+    fn typed_overworld_scene_calls_preserve_order_and_immediate_ram_effects() {
+        struct Spy(Vec<(EndingCall, u8)>);
+        impl EndingRuntime for Spy {
+            fn call(&mut self, call: EndingCall, ram: &mut Ram<'_>) {
+                self.0.push((call, ram.read_u8(CGWSEL)));
+                if matches!(
+                    call,
+                    EndingCall::LoadOverworldFromDungeon | EndingCall::OverworldEnterSpecialArea
+                ) {
+                    // Later palette routing must observe the area loaded by
+                    // this call in the same scene, before it advances.
+                    ram.write_u8(0x8a, 128);
+                }
+            }
+        }
+        for (submodule, load) in [
+            (0, EndingCall::LoadOverworldFromDungeon),
+            (12, EndingCall::OverworldEnterSpecialArea),
+            (30, EndingCall::OverworldEnterSpecialArea),
+        ] {
+            let mut bytes = [0; WRAM_SIZE];
+            let mut ram = Ram::new(&mut bytes);
+            ram.write_u8(SUBMODULE, submodule);
+            let mut spy = Spy(Vec::new());
+            Ending {
+                ram: &mut ram,
+                runtime: &mut spy,
+            }
+            .credits_load_scene_overworld_prep_gfx();
+            let mut expected = vec![
+                (EndingCall::EnableForceBlank, 0),
+                (EndingCall::EraseTileMapsNormal, 0),
+                (load, 0x82),
+                (EndingCall::InitializeTilesets, 0x82),
+                (EndingCall::OverworldLoadScreensPaletteSet, 0x82),
+                (EndingCall::PaletteLoadHud, 0x82),
+            ];
+            if submodule == 0 {
+                expected.push((EndingCall::TransferFontToVram, 0x82));
+            }
+            expected.extend([
+                (EndingCall::OverworldLoadPalettesInner, 0x82),
+                (EndingCall::OverworldSetFixedColAndScroll, 0x82),
+                (EndingCall::PaletteSetOwBgColor, 0x82),
+            ]);
+            assert_eq!(spy.0, expected);
+            assert_eq!(ram.read_u8(SUBSUBMODULE), 1);
+        }
+    }
+
     #[test]
     fn credits_dungeon_scene_sets_which_entrance_word() {
         let mut b = [0; WRAM_SIZE];

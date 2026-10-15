@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use z3_core::config::{ConfigState, FEATURE_DIM_FLASHES, OutputMethod, parse_config_file};
 use z3_game::assets::RuntimeAssets;
-use z3_game::host::{HostAction, InputState, SaveLoadKind, normalize_host_config};
+use z3_game::host::{HostAction, HostCommand, InputState, SaveLoadKind, normalize_host_config};
 use z3_game::integration::{NativeGameServices, NativeRuntimeIntegratedExt};
 use z3_game::runtime::NativeRuntime;
 use z3_sdl::{Event, Renderer, Sdl, Window};
@@ -17,17 +17,6 @@ use crate::{
     handle_gamepad_axis_input, handle_gamepad_input, handle_input, open_one_gamepad,
     save_load_slot, sdl_renderer_init, zelda_apu_lock, zelda_apu_unlock,
 };
-
-const COMMAND_FULLSCREEN: u16 = 119;
-const COMMAND_PAUSE: u16 = 121;
-const COMMAND_PAUSE_DIMMED: u16 = 122;
-const COMMAND_REPLAY_TURBO: u16 = 124;
-const COMMAND_WINDOW_BIGGER: u16 = 125;
-const COMMAND_WINDOW_SMALLER: u16 = 126;
-const COMMAND_DISPLAY_PERF: u16 = 127;
-const COMMAND_TOGGLE_RENDERER: u16 = 128;
-const COMMAND_VOLUME_UP: u16 = 129;
-const COMMAND_VOLUME_DOWN: u16 = 130;
 
 #[derive(Debug)]
 struct Options {
@@ -106,30 +95,34 @@ fn execute_action(
             result?;
         }
         HostAction::Command(command) => match command {
-            COMMAND_FULLSCREEN => {
+            HostCommand::Fullscreen => {
                 let fullscreen = window.flags() & z3_sdl::WINDOW_FULLSCREEN_DESKTOP == 0;
                 window.set_fullscreen_desktop(fullscreen)?;
                 state.cursor = !state.cursor;
                 window.show_cursor(state.cursor);
             }
-            COMMAND_PAUSE => state.toggle_pause(false),
-            COMMAND_PAUSE_DIMMED => state.toggle_pause(true),
-            COMMAND_REPLAY_TURBO => state.replay_turbo = !state.replay_turbo,
-            COMMAND_WINDOW_BIGGER => {
+            HostCommand::Pause => state.toggle_pause(false),
+            HostCommand::PauseDimmed => state.toggle_pause(true),
+            HostCommand::ReplayTurbo => state.replay_turbo = !state.replay_turbo,
+            HostCommand::WindowBigger => {
                 change_window_scale(window, &mut state.window_scale, 1, snes_width, snes_height)
             }
-            COMMAND_WINDOW_SMALLER => {
+            HostCommand::WindowSmaller => {
                 change_window_scale(window, &mut state.window_scale, -1, snes_width, snes_height)
             }
-            COMMAND_DISPLAY_PERF => state.display_perf = !state.display_perf,
-            COMMAND_TOGGLE_RENDERER => state.render_flags ^= z3_snes::ppu::RENDER_NEW,
-            COMMAND_VOLUME_UP | COMMAND_VOLUME_DOWN => {
+            HostCommand::DisplayPerf => state.display_perf = !state.display_perf,
+            HostCommand::ToggleRenderer => state.render_flags ^= z3_snes::ppu::RENDER_NEW,
+            HostCommand::VolumeUp | HostCommand::VolumeDown => {
                 if let Some(buffer) = audio_buffer
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .as_mut()
                 {
-                    let direction = if command == COMMAND_VOLUME_UP { 1 } else { -1 };
+                    let direction = if command == HostCommand::VolumeUp {
+                        1
+                    } else {
+                        -1
+                    };
                     let volume = buffer.handle_volume_adjustment(direction);
                     println!("[SDL mixer volume]={volume}");
                 }

@@ -24,6 +24,8 @@ cargo run -q -p z3-verify --bin check_player_oam -- \
   build/c-oracle/player_oam_oracle
 cargo run -q -p z3-verify --bin check_player_oam_main -- \
   build/c-oracle/player_oam_main_oracle
+cargo run -q -p z3-verify --bin check_positions -- \
+  build/c-oracle/position_oracle
 cargo run -q -p z3-verify --bin check_tile_detect -- \
   build/c-oracle/tile_detect_oracle
 cargo run -q -p z3-verify --bin check_overlord -- \

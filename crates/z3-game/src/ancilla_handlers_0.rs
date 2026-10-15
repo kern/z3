@@ -4,6 +4,7 @@
 //! [`AncillaRuntime`] boundary; ancilla-owned state transitions remain local.
 
 use super::{Ancilla, AncillaHitBox, AncillaRuntime, PFLAGS, ProjectSpeed};
+use crate::sound::{SoundPort, SoundRequest};
 use crate::{misc, oam};
 use z3_core::c_types::PairU8;
 
@@ -2010,10 +2011,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x15808, 40);
         self.write(0xaaa, 9);
         self.write(0x15812, 0x40);
-        self.write(
-            0x12f,
-            misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22)) | 0x26,
-        );
+        let sound = SoundRequest::at_player(self.ram, 0x26);
+        SoundPort::EffectsB.overwrite(self.ram, sound);
         for i in 0..8 {
             self.write(0x15800 + i, (i * 8) as u8);
         }
@@ -4672,7 +4671,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             let cycle = self.read(0x394 + k);
             self.write(0x394 + k, cycle.wrapping_add(1));
             if cycle & 0x0f == 0 {
-                self.write(0x12f, misc::calculate_sfx_pan(self.ram, self.get_x(k)) | 1);
+                let sound = SoundRequest::at_world_x(self.ram, 1, self.get_x(k));
+                SoundPort::EffectsB.overwrite(self.ram, sound);
             }
             if self.check_sprite_collision(k).is_some() || self.check_tile_collision(k) != 0 {
                 const Y_OFFSET: [i8; 4] = [0, 0, -6, -6];
@@ -4789,7 +4789,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     .read_u16(0x15810)
                     .wrapping_add(i16::from(Y[direction]) as u16),
             );
-            self.write(0x12f, 1 | misc::calculate_sfx_pan(self.ram, self.get_x(k)));
+            let sound = SoundRequest::at_world_x(self.ram, 1, self.get_x(k));
+            SoundPort::EffectsB.overwrite(self.ram, sound);
             self.write(Self::type_address(k), 4);
             self.write(0xc68 + k, 7);
             self.write(0xc90 + k, 16);

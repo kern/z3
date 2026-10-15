@@ -2,7 +2,7 @@
 
 #![allow(non_upper_case_globals)]
 
-use crate::{oam, ram::Ram};
+use crate::{oam::OamCursor, ram::Ram};
 
 pub trait PlayerOamHooks {
     /// Runtime visual feature flags, which live outside emulated WRAM in the C port.
@@ -763,19 +763,13 @@ fn visible_z(ram: &Ram<'_>) -> u8 {
 }
 
 #[inline]
-fn write_tile(ram: &mut Ram<'_>, pos: usize, tile: u16) {
-    let mut e = oam::read(ram, pos);
-    e.charnum = tile as u8;
-    e.flags = (tile >> 8) as u8;
-    oam::write(ram, pos, e);
+fn write_tile(ram: &mut Ram<'_>, pos: OamCursor, tile: u16) {
+    pos.set_tile(ram, tile);
 }
 
 #[inline]
-fn write_xy(ram: &mut Ram<'_>, pos: usize, x: u8, y: u8) {
-    let mut e = oam::read(ram, pos);
-    e.x = x;
-    e.y = y;
-    oam::write(ram, pos, e);
+fn write_xy(ram: &mut Ram<'_>, pos: OamCursor, x: u8, y: u8) {
+    pos.set_xy(ram, x, y);
 }
 
 #[must_use]
@@ -889,7 +883,7 @@ pub fn calculate_x_offset_relative_link(ram: &mut Ram<'_>, x: u8) {
 
 pub fn calculate_sword_sparkle_position(
     ram: &mut Ram<'_>,
-    mut oam_pos: usize,
+    oam_pos: usize,
     mut oam_x: u8,
     mut oam_y: u8,
 ) -> usize {
@@ -912,19 +906,16 @@ pub fn calculate_sword_sparkle_position(
     if ram.read_u16(0x346) == 0 {
         tile = (tile & !0xe00) | 0x600;
     }
-    write_tile(ram, oam_pos, tile);
+    let cursor = OamCursor::from_index(oam_pos);
+    write_tile(ram, cursor, tile);
     ram.write_i8(0x45, kSwordOamXOffs_Good[i]);
     ram.write_i8(0x44, kSwordOamYOffs_Good[i]);
     oam_x = add_i8(oam_x, kSwordOamXOffs_Good[i]);
     oam_y = add_i8(oam_y, kSwordOamYOffs_Good[i]);
-    write_xy(ram, oam_pos, oam_x, oam_y);
+    write_xy(ram, cursor, oam_x, oam_y);
     calculate_x_offset_relative_link(ram, ram.read_u8(0x45));
-    ram.write_u8(
-        oam::BYTEWISE_EXTENDED_OAM + oam_pos,
-        ram.read_u16(0x3fa) as u8,
-    );
-    oam_pos += 1;
-    oam_pos
+    cursor.set_extended(ram, ram.read_u16(0x3fa) as u8);
+    cursor.next().index()
 }
 
 pub fn unused_weapon_settings(ram: &mut Ram<'_>, r4loc: usize, oam_x: u8, oam_y: u8) {
@@ -934,7 +925,8 @@ pub fn unused_weapon_settings(ram: &mut Ram<'_>, r4loc: usize, oam_x: u8, oam_y:
     } else {
         kSwordStuff_oam_index_ptrs_0
     };
-    let mut pos = (usize::from(table[r4loc]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let mut pos =
+        OamCursor::from_byte_offset(usize::from(table[r4loc]) + usize::from(ram.read_u16(0x352)));
     for _ in 0..4 {
         if kPlayerOam_DrawOam_Throwing_State[j] != -1 {
             write_tile(ram, pos, (0x2609 & !0x3000) | ram.read_u16(0x64));
@@ -944,8 +936,8 @@ pub fn unused_weapon_settings(ram: &mut Ram<'_>, r4loc: usize, oam_x: u8, oam_y:
                 add_i8(oam_x, kPlayerOam_DrawOam_Throwing_X[j]),
                 add_i8(oam_y, kPlayerOam_DrawOam_Throwing_Y[j]),
             );
-            ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos, 0);
-            pos += 1;
+            pos.set_extended(ram, 0);
+            pos.advance();
         }
         j += 1;
     }
@@ -976,7 +968,8 @@ pub fn draw_dungeon_fall_shadow(ram: &mut Ram<'_>, r4loc: usize, mut x: u8) {
     } else {
         kShadow_oam_indexes_0
     };
-    let mut pos = (usize::from(table[r4loc]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let mut pos =
+        OamCursor::from_byte_offset(usize::from(table[r4loc]) + usize::from(ram.read_u16(0x352)));
     yv *= 2;
     for i in 0..2 {
         let tile = kLinkShadows_Chardata[yv + i];
@@ -984,9 +977,9 @@ pub fn draw_dungeon_fall_shadow(ram: &mut Ram<'_>, r4loc: usize, mut x: u8) {
             write_tile(ram, pos, (tile & !0x3000) | ram.read_u16(0x35d));
             write_xy(ram, pos, x, y);
         }
-        ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos, 0);
+        pos.set_extended(ram, 0);
         x = x.wrapping_add(8);
-        pos += 1;
+        pos.advance();
     }
 }
 
@@ -1007,7 +1000,9 @@ pub fn draw_foot_object(ram: &mut Ram<'_>, r4loc: usize, mut x: u8, mut y: u8) {
     );
     x = add_i8(x, kOffsToShadowGivenDir_X[i]);
     y = add_i8(y, kOffsToShadowGivenDir_Y[i]);
-    let pos = (usize::from(kShadow_oam_indexes_1[r4loc]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let pos = OamCursor::from_byte_offset(
+        usize::from(kShadow_oam_indexes_1[r4loc]) + usize::from(ram.read_u16(0x352)),
+    );
     let ripple = ram.read_u8(0x351) == 2;
     let frame = if ripple {
         let a = ram.read_u8(0x2e);
@@ -1026,10 +1021,10 @@ pub fn draw_foot_object(ram: &mut Ram<'_>, r4loc: usize, mut x: u8, mut y: u8) {
         )
     };
     write_tile(ram, pos, (tile0 & !0x3000) | ram.read_u16(0x35d));
-    write_tile(ram, pos + 1, tile1 | ram.read_u16(0x35d));
+    write_tile(ram, pos.next(), tile1 | ram.read_u16(0x35d));
     write_xy(ram, pos, x, y);
-    write_xy(ram, pos + 1, x.wrapping_add(8), y);
-    ram.write_u16(oam::BYTEWISE_EXTENDED_OAM + pos, 0);
+    write_xy(ram, pos.next(), x.wrapping_add(8), y);
+    pos.set_extended_pair(ram, 0);
 }
 
 pub fn main(ram: &mut Ram<'_>, hooks: &impl PlayerOamHooks) {
@@ -1293,12 +1288,13 @@ fn draw_extra_body_parts(
     let bank1 = kPlayerOam_Spr1Bank[j] as u8;
     if bank1 != 0xff {
         ram.write_u16(0x102, u16::from(bank1) * 2);
-        let pos = (usize::from(if foot {
-            kPlayerOam_Tab19B[r4]
-        } else {
-            kPlayerOam_Tab19A[r4]
-        }) + sort)
-            >> 2;
+        let pos = OamCursor::from_byte_offset(
+            usize::from(if foot {
+                kPlayerOam_Tab19B[r4]
+            } else {
+                kPlayerOam_Tab19A[r4]
+            }) + sort,
+        );
         let qi = usize::from(bank1 >> 1);
         let q0 = u16::from(kPlayerOam_Prio[qi]) | (u16::from(kPlayerOam_Prio[qi + 1]) << 8);
         let q = if bank1 & 1 != 0 { q0 << 4 } else { q0 };
@@ -1313,17 +1309,18 @@ fn draw_extra_body_parts(
             pos,
             (q & 0xc000) | ram.read_u16(0x64) | ram.read_u16(0x346) | 4,
         );
-        ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos, 0);
+        pos.set_extended(ram, 0);
     }
     let bank2 = kPlayerOam_Spr2Bank[j] as u8;
     if bank2 != 0xff {
         ram.write_u16(0x104, u16::from(bank2) * 2);
-        let pos = (usize::from(if foot {
-            kPlayerOam_Tab20B[r4]
-        } else {
-            kPlayerOam_Tab20A[r4]
-        }) + sort)
-            >> 2;
+        let pos = OamCursor::from_byte_offset(
+            usize::from(if foot {
+                kPlayerOam_Tab20B[r4]
+            } else {
+                kPlayerOam_Tab20A[r4]
+            }) + sort,
+        );
         let qi = usize::from(bank2 >> 1);
         let q0 = u16::from(kPlayerOam_Prio[qi]) | (u16::from(kPlayerOam_Prio[qi + 1]) << 8);
         let q = if bank2 & 1 != 0 { q0 << 4 } else { q0 };
@@ -1338,7 +1335,7 @@ fn draw_extra_body_parts(
             pos,
             (q & 0xc000) | ram.read_u16(0x64) | ram.read_u16(0x346) | 0x14,
         );
-        ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos, 0);
+        pos.set_extended(ram, 0);
     }
     let _ = r2;
 }
@@ -1378,8 +1375,9 @@ fn draw_sword(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r4: usize, sr: SwordR
     } else {
         kSwordStuff_oam_index_ptrs_0
     };
-    let mut pos = (usize::from(table[r4]) + usize::from(ram.read_u16(0x352))) >> 2;
-    pos = calculate_sword_sparkle_position(ram, pos, x, y);
+    let pos =
+        OamCursor::from_byte_offset(usize::from(table[r4]) + usize::from(ram.read_u16(0x352)));
+    let mut pos = OamCursor::from_index(calculate_sword_sparkle_position(ram, pos.index(), x, y));
     let mut j = usize::from(sr.r6) * 3;
     for i in 0..3 {
         let mut tile = kSwordTiledata[j];
@@ -1395,11 +1393,8 @@ fn draw_sword(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r4: usize, sr: SwordR
             write_tile(ram, pos, tile);
             write_xy(ram, pos, ox, oy);
             let abs = absolute_screen_x_distance(x, ox);
-            ram.write_u8(
-                oam::BYTEWISE_EXTENDED_OAM + pos,
-                sr.r12 | u8::from(abs >= 0x80),
-            );
-            pos += 1;
+            pos.set_extended(ram, sr.r12 | u8::from(abs >= 0x80));
+            pos.advance();
         }
         ox = ox.wrapping_add(8);
         if i == 1 {
@@ -1430,7 +1425,8 @@ fn draw_shield(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r4: usize, sr: Sword
     } else {
         kShieldStuff_oam_index_ptrs_0
     };
-    let pos = (usize::from(table[r4]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let pos =
+        OamCursor::from_byte_offset(usize::from(table[r4]) + usize::from(ram.read_u16(0x352)));
     let mut j = usize::from(sr.r6) * 3;
     for i in 0..3 {
         let tile0 = kShieldStuff_OamData[j];
@@ -1438,10 +1434,7 @@ fn draw_shield(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r4: usize, sr: Sword
         if tile0 != 0xffff {
             write_tile(ram, pos, (tile0 & 0xc1ff) | pal | ram.read_u16(0x64));
             write_xy(ram, pos, ox, oy);
-            ram.write_u8(
-                oam::BYTEWISE_EXTENDED_OAM + pos,
-                sr.r12 | ram.read_u16(0x3fa) as u8,
-            );
+            pos.set_extended(ram, sr.r12 | ram.read_u16(0x3fa) as u8);
             ox = ox.wrapping_add(8);
             if i == 1 {
                 ox = ox.wrapping_sub(16);
@@ -1468,17 +1461,18 @@ fn draw_normal_shadow(ram: &mut Ram<'_>, foot: bool, x: u8, r4: usize) {
     } else {
         kShadow_oam_indexes_0
     };
-    let pos = (usize::from(table[r4]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let pos =
+        OamCursor::from_byte_offset(usize::from(table[r4]) + usize::from(ram.read_u16(0x352)));
     let mut tile = (kLinkShadows_Chardata[idx * 2] & !0x3000) | ram.read_u16(0x35d);
     if ram.read_u16(0x346) == 0 {
         tile = (tile & !0xe00) | 0x600;
     }
     write_tile(ram, pos, tile);
-    write_tile(ram, pos + 1, (tile & !0xc000) | 0x4000);
+    write_tile(ram, pos.next(), (tile & !0xc000) | 0x4000);
     write_xy(ram, pos, ox, oy as u8);
-    write_xy(ram, pos + 1, ox.wrapping_add(8), oy as u8);
-    ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos, 0);
-    ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos + 1, 0);
+    write_xy(ram, pos.next(), ox.wrapping_add(8), oy as u8);
+    pos.set_extended(ram, 0);
+    pos.next().set_extended(ram, 0);
 }
 
 fn draw_body(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r2: usize, r4: usize) {
@@ -1487,7 +1481,8 @@ fn draw_body(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r2: usize, r4: usize) 
     } else {
         kLinkBody_oam_index_0
     };
-    let pos = (usize::from(table[r4]) + usize::from(ram.read_u16(0x352))) >> 2;
+    let pos =
+        OamCursor::from_byte_offset(usize::from(table[r4]) + usize::from(ram.read_u16(0x352)));
     let j = usize::from(kLinkDmaGraphicsIndices[r2]);
     ram.write_u16(0x100, (j * 2) as u16);
     if ram.read_u8(0x4b) == 12 {
@@ -1505,16 +1500,16 @@ fn draw_body(ram: &mut Ram<'_>, foot: bool, x: u8, y: u8, r2: usize, r4: usize) 
             (td & 0xf000) | ram.read_u16(0x64) | ram.read_u16(0x346),
         );
         write_xy(ram, pos, ox, oy);
-        ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos, 2 + u8::from(ox >= 0xf8));
+        pos.set_extended(ram, 2 + u8::from(ox >= 0xf8));
     }
     if (td << 4) & 0xf000 != 0xf000 {
         write_tile(
             ram,
-            pos + 1,
+            pos.next(),
             ((td << 4) & 0xf000) | ram.read_u16(0x64) | ram.read_u16(0x346) | 2,
         );
-        write_xy(ram, pos + 1, x, y.wrapping_sub(z).wrapping_add(8));
-        ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + pos + 1, 2);
+        write_xy(ram, pos.next(), x, y.wrapping_sub(z).wrapping_add(8));
+        pos.next().set_extended(ram, 2);
     }
 }
 
@@ -1546,21 +1541,19 @@ fn apply_visibility(ram: &mut Ram<'_>, hooks: &impl PlayerOamHooks, foot: bool, 
     } else {
         None
     };
-    let base = usize::from(ram.read_u16(0x352)) >> 2;
+    let base = OamCursor::from_byte_offset(usize::from(ram.read_u16(0x352)));
     if hooks.enhanced_features0() & FEATURE_WIDESCREEN_VISUAL_FIXES != 0 {
         for i in 0..12 {
             if shadow.is_none_or(|s| i < s || i > s + 1) {
-                let mut e = oam::read(ram, base + i);
-                e.y = 0xf0;
-                oam::write(ram, base + i, e);
+                base.offset(i).hide(ram);
             }
         }
     } else {
         for i in 0..12 {
-            ram.write_u8(oam::BYTEWISE_EXTENDED_OAM + base + i, 1);
+            base.offset(i).set_extended(ram, 1);
         }
         if let Some(s) = shadow {
-            ram.write_u16(oam::BYTEWISE_EXTENDED_OAM + base + s, 0);
+            base.offset(s).set_extended_pair(ram, 0);
         }
     }
 }
@@ -1568,6 +1561,7 @@ fn apply_visibility(ram: &mut Ram<'_>, hooks: &impl PlayerOamHooks, foot: bool, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oam;
     use z3_core::WRAM_SIZE;
     use z3_core::c_types::OamEnt;
 
@@ -1633,6 +1627,66 @@ mod tests {
         );
         assert_eq!(ram.read_u8(oam::BYTEWISE_EXTENDED_OAM + 4), 0);
         assert_eq!(ram.read_u16(0x3fa), 0);
+    }
+
+    #[test]
+    fn sparkle_at_last_entry_returns_one_past_without_advancing_global_pointer() {
+        let mut bytes = [0xa5; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        ram.write_u8(0x5d, 0);
+        ram.write_u8(0x5e, 0);
+        ram.write_u8(0xf359, 2);
+        ram.write_u8(0x3a, 0x80);
+        ram.write_u8(0x3c, 2);
+        ram.write_u8(0x2f, 0);
+        ram.write_u16(0x22, 0x1f8);
+        ram.write_u16(0xe2, 0);
+        ram.write_u16(0x64, 0x2000);
+        ram.write_u16(0x346, 0xe00);
+        let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+        assert_eq!(
+            calculate_sword_sparkle_position(&mut ram, 127, 0xf8, 0x40),
+            128
+        );
+        expected[0x44] = (-5i8) as u8;
+        expected[0x45] = 15;
+        expected[0x3fa..0x3fc].fill(0);
+        expected[0x9fc..0xa00].copy_from_slice(&[7, 0x3b, 0x3e, 0x6a]);
+        expected[oam::BYTEWISE_EXTENDED_OAM + 127] = 0;
+        assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+    }
+
+    #[test]
+    fn blink_visibility_retains_shadow_and_all_unrelated_bytes_in_both_modes() {
+        struct VisualHooks(u32);
+        impl PlayerOamHooks for VisualHooks {
+            fn enhanced_features0(&self) -> u32 {
+                self.0
+            }
+        }
+        for features in [0, FEATURE_WIDESCREEN_VISUAL_FIXES] {
+            let mut bytes = [0xa5; WRAM_SIZE];
+            let mut ram = Ram::new(&mut bytes);
+            ram.write_u8(0x6c, 0);
+            ram.write_u8(0x11, 0);
+            ram.write_u8(0x31f, 7);
+            ram.write_u8(0x4b, 0);
+            ram.write_u8(0x55, 0);
+            ram.write_u16(0x352, 0x190);
+            let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+            expected[0x31f] = 6;
+            for index in 100..112 {
+                if features != 0 {
+                    if index < 110 {
+                        expected[oam::OAM_BUFFER + index * 4 + 1] = 0xf0;
+                    }
+                } else {
+                    expected[oam::BYTEWISE_EXTENDED_OAM + index] = u8::from(index < 110);
+                }
+            }
+            apply_visibility(&mut ram, &VisualHooks(features), false, 2);
+            assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+        }
     }
 
     #[test]
