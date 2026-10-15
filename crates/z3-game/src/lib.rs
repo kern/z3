@@ -39,3 +39,5 @@ pub mod sprite_main_bank2b;
 pub mod sprite_state;
 pub mod tagalong;
 pub mod tile_detect;
+pub mod tile_map;
+pub mod velocity;

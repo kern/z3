@@ -5,6 +5,9 @@
 //! the C implementation; later slices add the transition and map builders.
 
 use crate::ram::Ram;
+use crate::tile_map::{
+    DUNGEON_BG1, DungeonAttributes, OVERWORLD_MAP16, TileByteOffset, TileWordIndex,
+};
 
 const BGMODE: usize = 0x94;
 const MOSAIC: usize = 0x95;
@@ -26,7 +29,6 @@ const OVERWORLD_OFFSET_MASK_Y: usize = 0x70a;
 const OVERWORLD_OFFSET_BASE_X_ADDR: usize = 0x70c;
 const OVERWORLD_OFFSET_MASK_X: usize = 0x70e;
 const DUNG_BG2: usize = 0x2000;
-const DUNG_BG1: usize = 0x4000;
 const LINK_Y: usize = 0x20;
 const LINK_X: usize = 0x22;
 const LINK_Z: usize = 0x24;
@@ -149,6 +151,7 @@ const MAP16_LOAD_SRC_OFFSET: usize = 0x84;
 const MAP16_LOAD_DST_OFFSET: usize = 0x86;
 const MAP16_LOAD_VAR2: usize = 0x88;
 const MAP16_ROW_BUFFER: usize = 0x500;
+#[cfg(test)]
 const DUNG_BG2_ATTR_TABLE: usize = 0x12000;
 const MAP16_STRIPE_HEADERS: usize = 0x14000;
 const NMI_SUBROUTINE_INDEX: usize = 0x17;
@@ -2402,7 +2405,10 @@ pub fn read_tile_attribute(ram: &Ram<'_>, tile_attributes: &[u8], x: u16, y: u16
     let y_offset = y.wrapping_sub(ram.read_u16(OVERWORLD_OFFSET_BASE_Y_ADDR))
         & ram.read_u16(OVERWORLD_OFFSET_MASK_Y);
     let map_byte_offset = x_offset | y_offset.wrapping_shl(3);
-    let map16 = ram.read_u16(DUNG_BG2 + usize::from(map_byte_offset & !1));
+    let map16 = OVERWORLD_MAP16.read_at_byte(
+        ram,
+        TileByteOffset::new(usize::from(map_byte_offset)).aligned(),
+    );
     tile_attributes[usize::from(map16)]
 }
 
@@ -2526,7 +2532,9 @@ pub fn get_map16_of_link_mult8<'a>(ram: &Ram<'_>, assets: &'a impl OverworldAsse
     let horizontal = x.wrapping_sub(ram.read_u16(OVERWORLD_OFFSET_BASE_X_ADDR))
         & ram.read_u16(OVERWORLD_OFFSET_MASK_X);
     let position = vertical.wrapping_mul(8).wrapping_add(horizontal);
-    let map16 = usize::from(ram.read_u16(DUNG_BG2 + usize::from(position & !1)));
+    let map16 = usize::from(
+        OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)).aligned()),
+    );
     &assets.map16_to_map8()[map16 * 4..][..4]
 }
 
@@ -2600,7 +2608,8 @@ pub fn use_entrance(
         x_coord.wrapping_sub(ram.read_u16(OVERWORLD_OFFSET_BASE_X_ADDR))
             & ram.read_u16(OVERWORLD_OFFSET_MASK_X),
     );
-    let map16 = usize::from(ram.read_u16(DUNG_BG2 + usize::from(position)));
+    let map16 =
+        usize::from(OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position))));
     let map8 = assets.map16_to_map8();
     let mut map8_offset = map16 * 4;
     if ram.read_u8(LINK_FACING) == 0 {
@@ -2615,7 +2624,9 @@ pub fn use_entrance(
             setup_big_overworld_door(ram, position, tile);
             return;
         }
-        map8_offset = usize::from(ram.read_u16(DUNG_BG2 + usize::from(position) + 2)) * 4;
+        map8_offset = usize::from(
+            OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position) + 2)),
+        ) * 4;
         tile = map8[map8_offset] & 0x41ff;
         if tile == 0x40e9 {
             position = position.wrapping_sub(2);
@@ -2699,7 +2710,7 @@ pub fn tool_and_tile_interaction(
         x.wrapping_sub(ram.read_u16(OVERWORLD_OFFSET_BASE_X_ADDR))
             & ram.read_u16(OVERWORLD_OFFSET_MASK_X),
     );
-    let attribute = ram.read_u16(DUNG_BG2 + usize::from(position));
+    let attribute = OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)));
     let item = ram.read_u8(LINK_ITEM_IN_HAND);
 
     let replacement = if item & 2 != 0 {
@@ -2757,7 +2768,7 @@ pub fn tool_and_tile_interaction(
                 value = secret;
             }
         }
-        ram.write_u16(DUNG_BG2 + usize::from(position), value);
+        OVERWORLD_MAP16.write_at_byte(ram, TileByteOffset::new(usize::from(position)), value);
         memorize_map16_change(ram, position, value);
         draw_map16(ram, assets, position, value);
         ram.write_u8(NMI_LOAD_BG_FROM_VRAM, 1);
@@ -3089,7 +3100,7 @@ pub fn module09_recover_from_drowning(
 pub fn overworld_func2f(ram: &mut Ram<'_>, assets: &impl OverworldAssets) {
     const POSITION: u16 = 0x720;
     const VALUE: u16 = 0x212;
-    ram.write_u16(DUNG_BG2 + usize::from(POSITION), VALUE);
+    OVERWORLD_MAP16.write_at_byte(ram, TileByteOffset::new(usize::from(POSITION)), VALUE);
     memorize_map16_change(ram, POSITION, VALUE);
     draw_map16(ram, assets, POSITION, VALUE);
     ram.write_u8(NMI_LOAD_BG_FROM_VRAM, 1);
@@ -3244,10 +3255,10 @@ pub fn copy_map16_to_buffer(
             let map16 = usize::from(ram.read_u16(row_buffer));
             row_buffer += 2;
             let map8 = &assets.map16_to_map8()[map16 * 4..][..4];
-            ram.write_u16(DUNG_BG2_ATTR_TABLE + r14, map8[0]);
-            ram.write_u16(DUNG_BG2_ATTR_TABLE + r14 + 64, map8[2]);
-            ram.write_u16(DUNG_BG2_ATTR_TABLE + r14 + 2, map8[1]);
-            ram.write_u16(DUNG_BG2_ATTR_TABLE + r14 + 66, map8[3]);
+            DungeonAttributes::write_pair(ram, TileWordIndex::new(r14), map8[0]);
+            DungeonAttributes::write_pair(ram, TileWordIndex::new(r14 + 64), map8[2]);
+            DungeonAttributes::write_pair(ram, TileWordIndex::new(r14 + 2), map8[1]);
+            DungeonAttributes::write_pair(ram, TileWordIndex::new(r14 + 66), map8[3]);
             r14 += 4;
         }
         tilemap_address = tilemap_address.wrapping_add(0x400);
@@ -3337,9 +3348,9 @@ pub fn handle_overlays_and_bomb_doors(
 ) {
     let screen = ram.read_u16(OVERWORLD_SCREEN_INDEX);
     if screen == 0x33 {
-        ram.write_u16(DUNG_BG2 + 340 * 2, 0x20f);
+        OVERWORLD_MAP16.write(ram, TileWordIndex::new(340), 0x20f);
     } else if screen == 0x2f {
-        ram.write_u16(DUNG_BG2 + 1497 * 2, 0x20f);
+        OVERWORLD_MAP16.write(ram, TileWordIndex::new(1497), 0x20f);
     }
     let screen_byte = usize::from(screen as u8);
     let event = ram.read_u8(SAVE_OW_EVENT_INFO + screen_byte);
@@ -3348,8 +3359,8 @@ pub fn handle_overlays_and_bomb_doors(
     }
     if event & 2 != 0 {
         let position = usize::from(SECONDARY_OVERLAY_PER_OW[usize::from(screen)]);
-        ram.write_u16(DUNG_BG2 + position, 0xdb4);
-        ram.write_u16(DUNG_BG2 + position + 2, 0xdb5);
+        OVERWORLD_MAP16.write_at_byte(ram, TileByteOffset::new(position), 0xdb4);
+        OVERWORLD_MAP16.write_at_byte(ram, TileByteOffset::new(position + 2), 0xdb5);
     }
 }
 
@@ -3360,7 +3371,7 @@ pub fn draw_quadrants_and_overlays(
 ) {
     decompress_and_draw_all_quadrants(ram, assets);
     for index in 0..64 {
-        ram.write_u16(DUNG_BG1 + index * 2, 0xdc4);
+        DUNGEON_BG1.write(ram, TileWordIndex::new(index), 0xdc4);
     }
     let mut position = ram.read_u16(OW_ENTRANCE_VALUE);
     if !matches!(position, 0 | 0xffff) {
@@ -3370,9 +3381,13 @@ pub fn draw_quadrants_and_overlays(
             position &= 0x1fff;
             (0xdb4, 0xdb5)
         };
-        ram.write_u16(DUNG_BG2 + usize::from(position), first);
+        OVERWORLD_MAP16.write_at_byte(ram, TileByteOffset::new(usize::from(position)), first);
         memorize_map16_change(ram, position, first);
-        ram.write_u16(DUNG_BG2 + usize::from(position.wrapping_add(2)), second);
+        OVERWORLD_MAP16.write_at_byte(
+            ram,
+            TileByteOffset::new(usize::from(position.wrapping_add(2))),
+            second,
+        );
         memorize_map16_change(ram, position.wrapping_add(2), second);
         ram.write_u16(OW_ENTRANCE_VALUE, 0);
     }
@@ -3386,7 +3401,7 @@ pub fn some_tile_map_change(
 ) {
     decompress_and_draw_all_quadrants(ram, assets);
     for index in 0..64 {
-        ram.write_u16(DUNG_BG1 + index * 2, 0xdc4);
+        DUNGEON_BG1.write(ram, TileWordIndex::new(index), 0xdc4);
     }
     handle_overlays_and_bomb_doors(ram, load_event_overlay);
     ram.write_u8(SUBMODULE, ram.read_u8(SUBMODULE).wrapping_add(1));
@@ -3535,7 +3550,7 @@ pub fn buffer_and_build_map16_stripes_x(
         let tile = if position >= 0x2000 {
             0
         } else {
-            ram.read_u16(DUNG_BG2 + usize::from(position & !1))
+            OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)).aligned())
         };
         ram.write_u16(MAP16_ROW_BUFFER + buffer_index * 2, tile);
         buffer_index = (buffer_index + 1) & 0x1f;
@@ -3583,7 +3598,7 @@ pub fn buffer_and_build_map16_stripes_y(
         let tile = if position >= 0x2000 {
             0
         } else {
-            ram.read_u16(DUNG_BG2 + usize::from(position & !1))
+            OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)).aligned())
         };
         ram.write_u16(MAP16_ROW_BUFFER + buffer_index * 2, tile);
         position = position.wrapping_add(2);
@@ -4521,7 +4536,11 @@ pub fn draw_map16_persist(
     position: u16,
     value: u16,
 ) {
-    ram.write_u16(DUNG_BG2 + usize::from(position & !1), value);
+    OVERWORLD_MAP16.write_at_byte(
+        ram,
+        TileByteOffset::new(usize::from(position)).aligned(),
+        value,
+    );
     draw_map16(ram, assets, position, value);
 }
 
@@ -4570,7 +4589,8 @@ pub fn bomb_tile(
         & ram.read_u16(OVERWORLD_OFFSET_MASK_X);
     let position = vertical.wrapping_shl(3).wrapping_add(horizontal);
     if ram.read_u8(FOLLOWER_INDICATOR) != 13 {
-        let map16 = ram.read_u16(DUNG_BG2 + usize::from(position & !1));
+        let map16 =
+            OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)).aligned());
         let replacement = match map16 {
             0x36 => Some((2, 0xdc7)),
             0x72a => Some((4, 0xdc8)),
@@ -4580,7 +4600,11 @@ pub fn bomb_tile(
         if let Some((kind, default_tile)) = replacement {
             let secret = reveal_secret(ram, assets, position);
             let value = if secret != 0 { secret } else { default_tile };
-            ram.write_u16(DUNG_BG2 + usize::from(position & !1), value);
+            OVERWORLD_MAP16.write_at_byte(
+                ram,
+                TileByteOffset::new(usize::from(position)).aligned(),
+                value,
+            );
             memorize_map16_change(ram, position, value);
             draw_map16(ram, assets, position, value);
             spawn_smashed_terrain(ram, kind, x & !7, y & !7);
@@ -4589,10 +4613,18 @@ pub fn bomb_tile(
         }
     }
     if reveal_secret(ram, assets, position) == 0xdb4 {
-        ram.write_u16(DUNG_BG2 + usize::from(position & !1), 0xdb4);
+        OVERWORLD_MAP16.write_at_byte(
+            ram,
+            TileByteOffset::new(usize::from(position)).aligned(),
+            0xdb4,
+        );
         memorize_map16_change(ram, position, 0xdb4);
         draw_map16(ram, assets, position, 0xdb4);
-        ram.write_u16(DUNG_BG2 + usize::from(position & !1) + 2, 0xdb5);
+        OVERWORLD_MAP16.write_at_byte(
+            ram,
+            TileByteOffset::new(usize::from(position & !1) + 2),
+            0xdb5,
+        );
         memorize_map16_change(ram, position, 0xdb5);
         draw_map16(ram, assets, position.wrapping_add(2), 0xdb5);
         ram.write_u8(NMI_LOAD_BG_FROM_VRAM, 1);
@@ -4617,7 +4649,11 @@ pub fn lift_small_overworld_object(
     if secret != 0 {
         replacement = secret;
     }
-    ram.write_u16(DUNG_BG2 + usize::from(position & !1), replacement);
+    OVERWORLD_MAP16.write_at_byte(
+        ram,
+        TileByteOffset::new(usize::from(position)).aligned(),
+        replacement,
+    );
     memorize_map16_change(ram, position, replacement);
     draw_map16(ram, assets, position, replacement);
     ram.write_u8(NMI_LOAD_BG_FROM_VRAM, 1);
@@ -4680,7 +4716,8 @@ pub fn smash_rock_pile(
     }
     let (position, point) = get_link_map16_coords(ram);
     ram.write_u16(LINK_Y, saved_y);
-    let map16 = ram.read_u16(DUNG_BG2 + usize::from(position & !1));
+    let map16 =
+        OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)).aligned());
     if (0x226..=0x229).contains(&map16) {
         Some(smash_rock_pile_from_lift(
             ram,
@@ -4707,7 +4744,8 @@ pub fn handle_liftable_tiles(
     mut update_map_32x32: impl FnMut(&mut Ram<'_>),
 ) -> u8 {
     let (position, point) = get_link_map16_coords(ram);
-    let map16 = ram.read_u16(DUNG_BG2 + usize::from(position & !1));
+    let map16 =
+        OVERWORLD_MAP16.read_at_byte(ram, TileByteOffset::new(usize::from(position)).aligned());
     let rock_piece = match map16 {
         0x36d | 0x23b => Some(0),
         0x36e | 0x23c => Some(1),
@@ -5306,7 +5344,7 @@ pub fn recover_mirror_bonk_changed_tiles(ram: &mut Ram<'_>) {
     for index in 0..count {
         let position = usize::from(ram.read_u16(MEMORIZED_TILE_ADDR + index * 2));
         let value = ram.read_u16(MEMORIZED_TILE_VALUE + index * 2);
-        ram.write_u16(DUNG_BG2 + position, value);
+        OVERWORLD_MAP16.write_at_byte(ram, TileByteOffset::new(position), value);
     }
 }
 
@@ -5356,7 +5394,7 @@ pub fn set_camera_boundaries(ram: &mut Ram<'_>, big: bool, area: usize) {
 pub fn overworld_load_event_overlay(ram: &mut Ram<'_>) {
     let screen = ram.read_u16(OVERWORLD_SCREEN_INDEX);
     let mut put = |x: usize, y: usize, tile: u16| {
-        ram.write_u16(DUNG_BG2 + (y * 64 + x) * 2, tile);
+        OVERWORLD_MAP16.write(ram, TileWordIndex::new(y * 64 + x), tile);
     };
     match screen {
         0..=2 => {

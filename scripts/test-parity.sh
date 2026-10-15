@@ -29,6 +29,10 @@ cargo run -q -p z3-verify --bin check_positions -- \
   build/c-oracle/position_oracle
 cargo run -q -p z3-verify --bin check_stripes -- \
   build/c-oracle/stripe_oracle
+cargo run -q -p z3-verify --bin check_sprite_state -- \
+  build/c-oracle/sprite_state_oracle
+cargo run -q -p z3-verify --bin check_tile_maps -- \
+  build/c-oracle/tile_map_oracle
 cargo run -q -p z3-verify --bin check_tile_detect -- \
   build/c-oracle/tile_detect_oracle
 cargo run -q -p z3-verify --bin check_overlord -- \

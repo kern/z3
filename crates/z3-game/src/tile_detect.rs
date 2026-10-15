@@ -1,6 +1,7 @@
 //! Tile collision detection ported from `src/tile_detect.c`.
 
 use crate::ram::Ram;
+use crate::tile_map::{DungeonAttributes, OVERWORLD_MAP16, TileByteOffset, TileWordIndex};
 
 /// ROM data and object coordinates owned by modules outside this port.
 pub trait TileDetectHooks {
@@ -71,7 +72,7 @@ const OW_BASE_X: usize = 0x70c;
 const OW_MASK_X: usize = 0x70e;
 const ANCILLA_DIR: usize = 0xc72;
 const BLOCK_LINK_MENU: usize = 0xffc;
-const OW_TILEATTR: usize = 0x2000;
+#[cfg(test)]
 const DUNGEON_ATTR: usize = 0x12000;
 
 fn or8(ram: &mut Ram<'_>, address: usize, bits: u8) {
@@ -87,8 +88,8 @@ pub fn overworld_tile_attribute(ram: &Ram<'_>, hooks: &impl TileDetectHooks, x: 
     let mut t = y.wrapping_sub(ram.read_u16(OW_BASE_Y)) & ram.read_u16(OW_MASK_Y);
     t = t.wrapping_mul(8);
     t |= x.wrapping_sub(ram.read_u16(OW_BASE_X)) & ram.read_u16(OW_MASK_X);
-    t = ram
-        .read_u16(OW_TILEATTR + usize::from(t >> 1) * 2)
+    t = OVERWORLD_MAP16
+        .read_at_byte(ram, TileByteOffset::new(usize::from(t)).aligned())
         .wrapping_mul(4);
     t |= (y & 8) >> 2;
     t |= x & 1;
@@ -383,7 +384,7 @@ pub fn execute(ram: &mut Ram<'_>, hooks: &impl TileDetectHooks, x: u16, y: u16, 
             },
         );
         let offset = usize::from(offset);
-        let tile = ram.read_u8(DUNGEON_ATTR + offset);
+        let tile = DungeonAttributes::read(ram, TileWordIndex::new(offset));
         ram.write_u8(LINK_TILE_BELOW, tile);
         (tile, offset)
     } else {
@@ -559,7 +560,7 @@ pub fn execute_inner(ram: &mut Ram<'_>, mut tile: u8, offset: usize, bits: u16, 
                 or16(
                     ram,
                     TILE_MISC,
-                    if ram.read_u8(DUNGEON_ATTR + offset + 64) == 0x60 {
+                    if DungeonAttributes::read(ram, TileWordIndex::new(offset + 64)) == 0x60 {
                         bits << 8
                     } else {
                         bits << 12

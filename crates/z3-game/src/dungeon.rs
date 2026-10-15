@@ -6,6 +6,7 @@
 
 use crate::ram::Ram;
 use crate::sound::{SoundPort, SoundRequest};
+use crate::tile_map::{DUNGEON_BG1, DUNGEON_BG2, DungeonAttributes, TileWordIndex};
 use z3_core::WRAM_SIZE;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -323,11 +324,43 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     }
 
     fn set_bg1(&mut self, word_offset: usize, value: u16) {
-        self.w16(DUNG_BG1 + word_offset * 2, value);
+        self.set_bg1_tile(TileWordIndex::new(word_offset), value);
     }
 
     fn set_bg2(&mut self, word_offset: usize, value: u16) {
-        self.w16(DUNG_BG2 + word_offset * 2, value);
+        self.set_bg2_tile(TileWordIndex::new(word_offset), value);
+    }
+
+    fn bg1_tile(&self, index: TileWordIndex) -> u16 {
+        DUNGEON_BG1.read(&self.ram, index)
+    }
+
+    fn bg2_tile(&self, index: TileWordIndex) -> u16 {
+        DUNGEON_BG2.read(&self.ram, index)
+    }
+
+    fn set_bg1_tile(&mut self, index: TileWordIndex, value: u16) {
+        DUNGEON_BG1.write(&mut self.ram, index, value);
+    }
+
+    fn set_bg2_tile(&mut self, index: TileWordIndex, value: u16) {
+        DUNGEON_BG2.write(&mut self.ram, index, value);
+    }
+
+    fn collision_attribute(&self, index: TileWordIndex) -> u8 {
+        DungeonAttributes::read(&self.ram, index)
+    }
+
+    fn collision_attribute_pair(&self, index: TileWordIndex) -> u16 {
+        DungeonAttributes::read_pair(&self.ram, index)
+    }
+
+    fn set_collision_attribute(&mut self, index: TileWordIndex, value: u8) {
+        DungeonAttributes::write(&mut self.ram, index, value);
+    }
+
+    fn set_collision_attribute_pair(&mut self, index: TileWordIndex, value: u16) {
+        DungeonAttributes::write_pair(&mut self.ram, index, value);
     }
 
     fn object_data<const N: usize>(&self, byte_offset: usize) -> [u16; N] {
@@ -2786,8 +2819,12 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w16(upload + index * 6, Self::dungeon_map_vram_addr(position));
             self.w16(upload + index * 6 + 2, 0x100);
             self.w16(upload + index * 6 + 4, source[index]);
-            self.w16(DUNG_BG2 + usize::from(position) * 2, source[index]);
-            self.w8(0x12000 + usize::from(position), attribute);
+            self.set_bg2_tile(TileWordIndex::new(usize::from(position)), source[index]);
+            DungeonAttributes::write(
+                &mut self.ram,
+                TileWordIndex::new(usize::from(position)),
+                attribute,
+            );
         }
         self.w16(upload + 24, 0xffff);
         self.w16(0x1000, self.r16(0x1000).wrapping_add(24));
@@ -2811,8 +2848,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w16(upload + index * 6, Self::dungeon_map_vram_addr(position));
             self.w16(upload + index * 6 + 2, 0x100);
             self.w16(upload + index * 6 + 4, 0x190f);
-            self.w16(DUNG_BG2 + usize::from(position) * 2, 0x190f);
-            self.w16(0x12000 + usize::from(position), attribute);
+            self.set_bg2_tile(TileWordIndex::new(usize::from(position)), 0x190f);
+            self.set_collision_attribute_pair(TileWordIndex::new(usize::from(position)), attribute);
         }
         self.w16(upload + 12, 0xffff);
         self.w16(0x1000, self.r16(0x1000).wrapping_add(24));
@@ -2834,7 +2871,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         position = usize::from(location >> 1);
         for row in 0..3 {
             for column in [0usize, 2] {
-                self.w16(0x12000 + position + xy(column, row), 0x2727);
+                self.set_collision_attribute_pair(
+                    TileWordIndex::new(position + xy(column, row)),
+                    0x2727,
+                );
             }
         }
         self.dungeon_flag_room_data_quadrants();
@@ -2855,15 +2895,15 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             (self.r16(0x20).wrapping_sub(4) & 0x1f8).wrapping_mul(8)
                 | ((self.r16(0x22).wrapping_add(7) & 0x1f8) >> 3),
         );
-        if self.r16(0x12000 + position) != 0x6363 {
+        if self.collision_attribute_pair(TileWordIndex::new(position)) != 0x6363 {
             position -= 1;
-            if self.r16(0x12000 + position) != 0x6363 {
+            if self.collision_attribute_pair(TileWordIndex::new(position)) != 0x6363 {
                 position += 2;
             }
         }
         *chest_position = (position * 2) as u16;
-        self.w16(0x12000 + position, 0x202);
-        self.w16(0x12000 + position + xy(0, 1), 0x202);
+        self.set_collision_attribute_pair(TileWordIndex::new(position), 0x202);
+        self.set_collision_attribute_pair(TileWordIndex::new(position + xy(0, 1)), 0x202);
         let source = self.object_data::<4>(0x14a4);
         let wrong_position = position + xy(0, 2);
         for (index, delta) in [0usize, xy(0, 1), xy(1, 0), xy(1, 1)]
@@ -2969,8 +3009,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         };
 
         for (index, delta) in [0usize, 64, 1, 65].into_iter().enumerate() {
-            self.w16(0x2000 + (position + delta) * 2, source[index]);
-            self.w8(0x12000 + position + delta, attribute);
+            self.set_bg2_tile(TileWordIndex::new(position + delta), source[index]);
+            self.set_collision_attribute(TileWordIndex::new(position + delta), attribute);
         }
         let upload = 0x1002 + usize::from(self.r16(0x1000));
         for (index, delta) in [0usize, 64, 1, 65].into_iter().enumerate() {
@@ -3026,8 +3066,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w16(upload + (i * 3) * 2, Self::dungeon_map_vram_addr(position));
             self.w16(upload + (i * 3 + 1) * 2, 0x100);
             self.w16(upload + (i * 3 + 2) * 2, tile);
-            self.w16(DUNG_BG2 + usize::from(position) * 2, tile);
-            self.w8(0x12000 + usize::from(position), attribute);
+            self.set_bg2_tile(TileWordIndex::new(usize::from(position)), tile);
+            self.set_collision_attribute(TileWordIndex::new(usize::from(position)), attribute);
         }
         self.w16(upload + 24, 0xffff);
         self.w16(0x1000, self.r16(0x1000).wrapping_add(24));
@@ -3556,7 +3596,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 self.room_draw_some_big_decors(10, &source, usize::from(destination));
                 destination = destination.wrapping_sub(0x1000).wrapping_add(448);
                 for column in 0..10 {
-                    let tile = self.r16(DUNG_BG1 + (usize::from(destination) + column) * 2);
+                    let tile = self.bg1_tile(TileWordIndex::new(usize::from(destination) + column));
                     self.set_bg2(usize::from(destination) + column, tile | 0x2000);
                 }
             }
@@ -3579,7 +3619,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 self.room_draw_4x4(&source, pointer);
                 for _ in 0..4 {
                     let position = usize::from(original) + xy(0, 3);
-                    self.set_bg2(position, self.r16(DUNG_BG1 + position * 2) | 0x2000);
+                    self.set_bg2(
+                        position,
+                        self.bg1_tile(TileWordIndex::new(position)) | 0x2000,
+                    );
                     original = original.wrapping_add(1);
                 }
             }
@@ -3940,7 +3983,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     }
 
     pub fn write_attr2(&mut self, index: usize, attribute: u16) {
-        self.w8(0x12000 + index, attribute as u8);
+        self.set_collision_attribute(TileWordIndex::new(index), attribute as u8);
         self.w8(0x12001 + index, (attribute >> 8) as u8);
     }
 
@@ -4176,8 +4219,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let floor_count = usize::from(self.r16(0x44e) >> 1);
         for index in 0..floor_count {
             let position = usize::from(self.r16(0x6c0 + index * 2));
-            if self.r8(0x12000 + position) & 0xf0 == 0x80 {
-                let attribute = self.r16(0x12000 + position) | 0x1010;
+            if self.collision_attribute(TileWordIndex::new(position)) & 0xf0 == 0x80 {
+                let attribute =
+                    self.collision_attribute_pair(TileWordIndex::new(position)) | 0x1010;
                 self.write_attr2(position, attribute);
                 self.write_attr2(position + xy(0, 1), attribute);
             } else {
@@ -4189,8 +4233,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let palace_count = usize::from(self.r16(0x450) >> 1);
         for index in 0..palace_count {
             let position = usize::from(self.r16(0x6d0 + index * 2));
-            if self.r8(0x12000 + position) & 0xf0 == 0x80 {
-                let attribute = self.r16(0x12000 + position) | 0x2020;
+            if self.collision_attribute(TileWordIndex::new(position)) & 0xf0 == 0x80 {
+                let attribute =
+                    self.collision_attribute_pair(TileWordIndex::new(position)) | 0x2020;
                 self.write_attr2(position, attribute);
                 self.write_attr2(position + xy(0, 1), attribute);
             } else {
@@ -4730,7 +4775,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         self.w8(0xb0, 32);
         self.w16(0x20, self.r16(0x20).wrapping_add(2));
         let mut position = position;
-        if self.r16(0x12000 + usize::from(position)) & 0xfe00 != 0x2400 {
+        if self.collision_attribute_pair(TileWordIndex::new(usize::from(position))) & 0xfe00
+            != 0x2400
+        {
             position = position.wrapping_add(1);
             self.w16(0x4b6, position);
         }
@@ -5047,8 +5094,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         assert_ne!(loops, 0);
         for _ in 0..loops {
             let tile_index = usize::from(self.r16(0xb2) / 2);
-            let tile0 = self.r16(DUNG_BG2 + tile_index * 2);
-            let tile1 = self.r16(DUNG_BG2 + (tile_index + 1) * 2);
+            let tile0 = self.bg2_tile(TileWordIndex::new(tile_index));
+            let tile1 = self.bg2_tile(TileWordIndex::new(tile_index + 1));
             let mut attribute0 = self
                 .hooks
                 .dungeon_tile_attribute(&self.ram, usize::from(tile0 & 0x3ff));
@@ -5062,8 +5109,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 attribute1 |= (tile1 >> 14) as u8;
             }
             let destination = usize::from(self.r16(0xb4));
-            self.w8(0x12000 + destination, attribute0);
-            self.w8(0x12000 + destination + 1, attribute1);
+            self.set_collision_attribute(TileWordIndex::new(destination), attribute0);
+            self.set_collision_attribute(TileWordIndex::new(destination + 1), attribute1);
             self.w16(0xb4, self.r16(0xb4).wrapping_add(2));
             self.w16(0xb2, self.r16(0xb2).wrapping_add(4));
         }
@@ -5104,9 +5151,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         }
         let origin = self.room_tag_get_tilemap_coords();
         for position in [origin, origin + 64, origin + 1, origin + 65] {
-            let attribute = self.r16(0x12000 + position);
+            let attribute = self.collision_attribute_pair(TileWordIndex::new(position));
             if attribute == 0x2323 || attribute == 0x2424 {
-                if attribute == self.r16(0x12000 + position + 64) {
+                if attribute == self.collision_attribute_pair(TileWordIndex::new(position + 64)) {
                     self.w16(0x4b6, position as u16);
                     return Some(attribute as u8);
                 }
@@ -5124,9 +5171,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         }
         let origin = self.room_tag_get_tilemap_coords();
         for position in [origin, origin + 64, origin + 1, origin + 65] {
-            let attribute = self.r16(0x12000 + position);
+            let attribute = self.collision_attribute_pair(TileWordIndex::new(position));
             if matches!(attribute, 0x2323 | 0x3a3a | 0x3b3b) {
-                if attribute == self.r16(0x12000 + position + 64) {
+                if attribute == self.collision_attribute_pair(TileWordIndex::new(position + 64)) {
                     self.w16(0x4b6, position as u16);
                     return Some(u8::from(attribute == 0x3b3b));
                 }
@@ -5319,11 +5366,13 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 | ((self.r16(0x22) & 0x1f8) >> 3)
                 | if self.r8(0xee) != 0 { 0x1000 } else { 0 },
         );
-        let attribute = self.r8(0x12000 + position + if direction == 4 { 0x80 } else { 0 });
+        let attribute = self.collision_attribute(TileWordIndex::new(
+            position + if direction == 4 { 0x80 } else { 0 },
+        ));
         if !matches!(attribute, 0x26 | 0x38 | 0x39 | 0x5e | 0x5f) {
             return;
         }
-        let staircase = self.r8(0x12000 + position + xy(0, 1));
+        let staircase = self.collision_attribute(TileWordIndex::new(position + xy(0, 1)));
         if staircase & 0xf8 != 0x30 {
             return;
         }
@@ -5686,7 +5735,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 }
             } else if step == 4 {
                 self.w16(0x692, u16::from(counter));
-                let door = usize::from(self.r8(0x12000 + usize::from(self.r16(0x68e))) & 0xf);
+                let door = usize::from(
+                    self.collision_attribute(TileWordIndex::new(usize::from(self.r16(0x68e))))
+                        & 0xf,
+                );
                 let dma = self.draw_door_opening_step1(door, 0);
                 let position = self.r16(0x19a0 + door * 2);
                 self.hooks
@@ -5696,7 +5748,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 return;
             }
         }
-        let door_attribute = self.r8(0x12000 + usize::from(self.r16(0x68e)));
+        let door_attribute =
+            self.collision_attribute(TileWordIndex::new(usize::from(self.r16(0x68e))));
         if self.r16(0x690) == 12 || skip_animation {
             let mask = UPPER_BITMASKS[usize::from(door_attribute & 7)];
             self.w16(0x68c, self.r16(0x68c) | mask);
@@ -5849,9 +5902,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
     pub fn dungeon_draw_room_overlay_apply(&mut self, mut position: usize) {
         for _ in 0..4 {
             for column in 0..4 {
-                let tile = self.r16(DUNG_BG2 + (position + column) * 2) & 0x3fe;
-                self.w8(
-                    0x12000 + position + column,
+                let tile = self.bg2_tile(TileWordIndex::new(position + column)) & 0x3fe;
+                self.set_collision_attribute(
+                    TileWordIndex::new(position + column),
                     if tile == 0xee || tile == 0xfe {
                         0
                     } else {
@@ -6133,7 +6186,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 | ((self.r16(0x22).wrapping_add(8) & 0x1f8) >> 3)
                 | if self.r8(0xee) != 0 { 0x1000 } else { 0 },
         );
-        let mut attribute = self.r8(0x12000 + position);
+        let mut attribute = self.collision_attribute(TileWordIndex::new(position));
         let result = if attribute == 0 || attribute == 9 {
             0
         } else {
@@ -6245,7 +6298,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             for row in 0..5 {
                 self.w16(
                     upload + 4 + row * 2,
-                    self.r16(DUNG_BG2 + (destination + xy(0, row)) * 2),
+                    self.bg2_tile(TileWordIndex::new(destination + xy(0, row))),
                 );
             }
             upload += 14;
@@ -6402,10 +6455,10 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             if self.r8(0xee) != 0 {
                 position |= 0x1000;
             }
-            let mut attribute = self.r8(0x12000 + usize::from(position));
+            let mut attribute = self.collision_attribute(TileWordIndex::new(usize::from(position)));
             if attribute & 0xf0 != 0xf0 {
                 position = position.wrapping_add(POS_OFFSETS[direction]);
-                attribute = self.r8(0x12000 + usize::from(position));
+                attribute = self.collision_attribute(TileWordIndex::new(usize::from(position)));
             }
             if attribute & 0xf0 == 0xf0 {
                 let door = usize::from(attribute & 0xf);
@@ -6500,7 +6553,8 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let mut found = None;
         for (marker, delta) in probes {
             position = position.wrapping_add(delta);
-            let attribute = self.r8(0x12000 + usize::from(position)) & 0xfc;
+            let attribute =
+                self.collision_attribute(TileWordIndex::new(usize::from(position))) & 0xfc;
             if attribute == 0x6c || attribute & 0xf0 == 0xf0 {
                 found = Some((marker, attribute));
                 break;
@@ -6513,17 +6567,21 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         if attribute == 0x6c {
             if marker & 0x40 != 0 {
                 position = position.wrapping_sub(64);
-                if self.r8(0x12000 + usize::from(position)) & 0xfc != 0x6c {
+                if self.collision_attribute(TileWordIndex::new(usize::from(position))) & 0xfc
+                    != 0x6c
+                {
                     position = position.wrapping_add(64);
                 }
             }
             if marker & 1 != 0 {
                 position = position.wrapping_sub(1);
-                if self.r8(0x12000 + usize::from(position)) & 0xfc != 0x6c {
+                if self.collision_attribute(TileWordIndex::new(usize::from(position))) & 0xfc
+                    != 0x6c
+                {
                     position = position.wrapping_add(1);
                 }
             }
-            let kind = self.r8(0x12000 + usize::from(position)) & 3;
+            let kind = self.collision_attribute(TileWordIndex::new(usize::from(position))) & 3;
             self.write_attr2(usize::from(position), 0x202);
             self.write_attr2(usize::from(position) + xy(0, 1), 0x202);
             let tiles: [u16; 4] = [0x7ea, 0x80a, 0x80a, 0x82a];
@@ -6577,7 +6635,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let mut position = ((y & 0x1f8) << 3 | (x & 0x1f8) >> 3).wrapping_sub(0x82);
         for _ in 0..3 {
             for probe in 0..3 {
-                let attribute = self.r8(0x12000 + usize::from(position));
+                let attribute = self.collision_attribute(TileWordIndex::new(usize::from(position)));
                 if attribute == 0x62 {
                     if self.r16(0xa0) == 0x65 {
                         self.w16(0x402, self.r16(0x402) | 0x1000);
@@ -6708,7 +6766,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 for row in 0..5 {
                     self.w16(
                         upload + 4 + row * 2,
-                        self.r16(DUNG_BG2 + (usize::from(word_position) + xy(0, row)) * 2),
+                        self.bg2_tile(TileWordIndex::new(usize::from(word_position) + xy(0, row))),
                     );
                 }
                 self.w16(
@@ -6719,7 +6777,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
                 for row in 5..12 {
                     self.w16(
                         upload + 18 + (row - 5) * 2,
-                        self.r16(DUNG_BG2 + (usize::from(word_position) + xy(0, row)) * 2),
+                        self.bg2_tile(TileWordIndex::new(usize::from(word_position) + xy(0, row))),
                     );
                 }
                 destination = destination.wrapping_add(1);
@@ -9055,7 +9113,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             & 0x1f8;
         let position =
             usize::from((y << 3) | (x >> 3) | if self.r8(0xee) != 0 { 0x1000 } else { 0 });
-        let attribute = self.r8(0x12000 + position);
+        let attribute = self.collision_attribute(TileWordIndex::new(position));
         if attribute & 0xf0 != 0x70 {
             return 0xffff;
         }
@@ -9106,7 +9164,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w8(0x641, self.r8(0x641) ^ 1);
         }
         let position = usize::from((tilemap & 0x3fff) >> 1);
-        let attribute = self.r8(0x12000 + position);
+        let attribute = self.collision_attribute(TileWordIndex::new(position));
         if attribute == 0x20 {
             self.w8(0x12e, 0x20);
             let movable = usize::from(self.r16(0x520 + index * 2) >> 2);
@@ -9139,7 +9197,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let position = usize::from(
             ((y & 0x1f8) << 3) | ((x & 0x1f8) >> 3) | if self.r8(0xee) != 0 { 0x1000 } else { 0 },
         );
-        let attribute = self.r8(0x12000 + position);
+        let attribute = self.collision_attribute(TileWordIndex::new(position));
         assert_eq!(attribute & 0x70, 0x70);
         let index = usize::from(attribute & 0xf);
         let replacement = self.r16(0x500 + index * 2);
@@ -9189,7 +9247,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
         let position = usize::from(
             (y & 0x1f8).wrapping_mul(8) + x + if self.r8(0xee) != 0 { 0x1000 } else { 0 },
         );
-        let tile = self.r8(0x12000 + position);
+        let tile = self.collision_attribute(TileWordIndex::new(position));
         if tile & 0xf0 != 0x70 {
             return 0;
         }
@@ -9254,7 +9312,9 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             }
             self.w8(0xb9c, self.r8(0xb9c) | data);
         } else if data != 0x88 {
-            let tile_index = usize::from(self.r8(0x12000 + usize::from(position)) & 0xf);
+            let tile_index = usize::from(
+                self.collision_attribute(TileWordIndex::new(usize::from(position))) & 0xf,
+            );
             let first =
                 tile_index.wrapping_sub(usize::from(self.r16(0x500 + tile_index * 2) & 0xf));
             self.w16(0x42c, (first * 2) as u16);

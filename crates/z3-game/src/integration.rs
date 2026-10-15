@@ -1799,57 +1799,8 @@ impl<S: FrameResourceHooks, LoadTrack> IntegratedFrameHooks<'_, '_, '_, S, LoadT
     }
 }
 
-impl<S: GameServices, LoadTrack> crate::runtime::FrameHooks
-    for IntegratedFrameHooks<'_, '_, '_, S, LoadTrack>
-where
-    LoadTrack: FnMut(u8) -> Option<crate::audio::PcmTrack>,
-{
-    fn initialize(&mut self, ram: &mut Ram<'_>) {
-        self.audio
-            .load_song_bank(self.intro_song_bank)
-            .expect("valid compiled intro song bank");
-        crate::runtime::startup_initialize_memory(ram, self.sram);
-        ram.write_u16(0xadc, 0xa680);
-        ram.write_u16(0xae0, 0xb280);
-        ram.write_u16(0xae2, 0xb2e0);
-    }
-
-    fn run_poly_loop(&mut self, ram: &mut Ram<'_>) {
-        if ram.read_u8(0x1f00) != 0 && ram.read_u8(0x1f0c) == 0 {
-            crate::poly::run_frame(ram);
-            ram.write_u8(0x1f00, 0);
-            ram.write_u8(0x1f0c, 0xff);
-        }
-    }
-
-    fn module_main_routing(&mut self, ram: &mut Ram<'_>) {
-        self.services.sync_vram(&self.ppu.vram);
-        // The C gameplay code reads the recorder's APUI00 WRAM mirror, not the
-        // live APU port. During replay the mirror is patched by the recording.
-        self.services.set_audio_port0(ram.read_u8(0x648));
-        let (state, enabled, actual_track) = self.audio.music_playback_state();
-        self.services.set_music_playback_state(
-            state,
-            enabled,
-            actual_track,
-            ram.read_u8(0x130),
-            ram.read_u16(0x40a) as u8,
-            u16::from(ram.read_u8(0x10e)),
-        );
-        {
-            let mut game = IntegratedGame {
-                sram: self.sram,
-                dma: self.dma,
-                ppu: self.ppu,
-                audio: self.audio,
-                messaging_assets: self.messaging_assets,
-                overworld_assets: self.overworld_assets,
-                enhanced_features0: self.enhanced_features0,
-                services: self.services,
-            };
-            module_main_routing(ram, &mut game);
-        }
-        self.drain_service_device_commands();
+impl<S: GameServices, LoadTrack> IntegratedFrameHooks<'_, '_, '_, S, LoadTrack> {
+    fn drain_host_actions(&mut self, ram: &mut Ram<'_>) {
         let mut host_action_rounds = 0;
         loop {
             let actions = self.services.take_host_actions();
@@ -1970,6 +1921,61 @@ where
                 self.drain_service_device_commands();
             }
         }
+    }
+}
+
+impl<S: GameServices, LoadTrack> crate::runtime::FrameHooks
+    for IntegratedFrameHooks<'_, '_, '_, S, LoadTrack>
+where
+    LoadTrack: FnMut(u8) -> Option<crate::audio::PcmTrack>,
+{
+    fn initialize(&mut self, ram: &mut Ram<'_>) {
+        self.audio
+            .load_song_bank(self.intro_song_bank)
+            .expect("valid compiled intro song bank");
+        crate::runtime::startup_initialize_memory(ram, self.sram);
+        ram.write_u16(0xadc, 0xa680);
+        ram.write_u16(0xae0, 0xb280);
+        ram.write_u16(0xae2, 0xb2e0);
+    }
+
+    fn run_poly_loop(&mut self, ram: &mut Ram<'_>) {
+        if ram.read_u8(0x1f00) != 0 && ram.read_u8(0x1f0c) == 0 {
+            crate::poly::run_frame(ram);
+            ram.write_u8(0x1f00, 0);
+            ram.write_u8(0x1f0c, 0xff);
+        }
+    }
+
+    fn module_main_routing(&mut self, ram: &mut Ram<'_>) {
+        self.services.sync_vram(&self.ppu.vram);
+        // The C gameplay code reads the recorder's APUI00 WRAM mirror, not the
+        // live APU port. During replay the mirror is patched by the recording.
+        self.services.set_audio_port0(ram.read_u8(0x648));
+        let (state, enabled, actual_track) = self.audio.music_playback_state();
+        self.services.set_music_playback_state(
+            state,
+            enabled,
+            actual_track,
+            ram.read_u8(0x130),
+            ram.read_u16(0x40a) as u8,
+            u16::from(ram.read_u8(0x10e)),
+        );
+        {
+            let mut game = IntegratedGame {
+                sram: self.sram,
+                dma: self.dma,
+                ppu: self.ppu,
+                audio: self.audio,
+                messaging_assets: self.messaging_assets,
+                overworld_assets: self.overworld_assets,
+                enhanced_features0: self.enhanced_features0,
+                services: self.services,
+            };
+            module_main_routing(ram, &mut game);
+        }
+        self.drain_service_device_commands();
+        self.drain_host_actions(ram);
     }
 
     fn prepare_sprites_for_nmi(&mut self, ram: &mut Ram<'_>) {
@@ -2466,15 +2472,137 @@ mod tests {
         assert_eq!(ppu.vram[SENTINEL], 0xbeef);
     }
 
+    fn empty_messaging_assets() -> MessagingAssets<'static> {
+        MessagingAssets {
+            dialogue_flags: 0,
+            dictionary: &[],
+            messages: &[],
+            font_tiles: &[],
+            font_widths: &[],
+            light_overworld_tilemap: &[],
+            dungeon_map_floor_layout: &[],
+            dungeon_map_info: &[],
+        }
+    }
+
+    #[test]
+    fn erased_live_vram_is_rebased_before_rewriting_the_old_value() {
+        let asset_bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../zelda3_assets.dat"
+        ))
+        .unwrap();
+        let assets = RuntimeAssets::parse(&asset_bytes).unwrap();
+        let mut services = NativeGameServices::new(&assets);
+        let mut ppu = Ppu::new();
+        ppu.vram.fill(0x1111);
+        ppu.vram[0x4567] = 0xbeef;
+        services.sync_vram(&ppu.vram);
+        let mut bytes = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        let mut sram = [0; SRAM_SIZE];
+        let mut dma = z3_snes::dma::Dma::new();
+        EndingAdapter {
+            sram: &mut sram,
+            dma: &mut dma,
+            ppu: &mut ppu,
+            assets: &assets,
+            messaging_assets: &empty_messaging_assets(),
+            services: &mut services,
+        }
+        .call(EndingCall::EraseTileMapsNormal, &mut ram);
+        assert_eq!(ppu.vram[0x800], 0x1ec);
+        ram.write_u8(0x116, 3);
+        for index in 0..0x400 {
+            ram.write_u16(0x1000 + index * 2, 0x1111);
+        }
+        DungeonHooks::dungeon_nmi_upload_tilemap(&mut services, &mut ram);
+        let commands = services.take_load_gfx_device_commands();
+        assert_eq!(
+            commands.vram_spans,
+            [VramWriteSpan {
+                start: 0x800,
+                words: vec![0x1111; 0x400]
+            }]
+        );
+        for span in commands.vram_spans {
+            ppu.vram[span.start..span.start + span.words.len()].copy_from_slice(&span.words);
+        }
+        assert_eq!(ppu.vram[0x800], 0x1111);
+        assert_eq!(ppu.vram[0x4567], 0xbeef);
+    }
+
+    #[test]
+    fn chained_host_callbacks_observe_each_previous_device_flush() {
+        let asset_bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../zelda3_assets.dat"
+        ))
+        .unwrap();
+        let assets = RuntimeAssets::parse(&asset_bytes).unwrap();
+        let mut services = Services {
+            ending_chain: true,
+            host_actions: vec![
+                NativeHostAction::EndingExternal(EndingCall::EraseTileMapsNormal),
+                NativeHostAction::EndingExternal(EndingCall::DungeonLoadEntrance),
+            ],
+            ..Default::default()
+        };
+        let mut ppu = Ppu::new();
+        ppu.vram.fill(0x1111);
+        ppu.vram[0x4567] = 0xbeef;
+        let mut bytes = [0; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        let mut sram = [0; SRAM_SIZE];
+        let mut dma = z3_snes::dma::Dma::new();
+        let mut audio = crate::audio::AudioRuntime::default();
+        IntegratedFrameHooks {
+            sram: &mut sram,
+            dma: &mut dma,
+            ppu: &mut ppu,
+            audio: &mut audio,
+            nmi_assets: crate::nmi::NmiAssets {
+                link_graphics: &[],
+                bg_tilemaps: [&[]; 6],
+                light_overworld_tilemap: &[],
+            },
+            intro_song_bank: &[],
+            overworld_assets: &assets,
+            messaging_assets: &empty_messaging_assets(),
+            enhanced_features0: 0,
+            services: &mut services,
+            load_pcm_track: |_: u8| None::<crate::audio::PcmTrack>,
+        }
+        .drain_host_actions(&mut ram);
+        assert_eq!(
+            services.ending_observations,
+            [
+                (EndingCall::DungeonLoadEntrance, 0x1ec),
+                (EndingCall::DungeonLoadPalettes, 0x1111),
+                (EndingCall::HudRebuildIndoor, 0xface),
+            ]
+        );
+        assert_eq!(ppu.vram[0x800], 0xface);
+        assert_eq!(ppu.vram[0x4567], 0xbeef);
+        assert!(services.host_actions.is_empty());
+    }
+
     #[derive(Default)]
     struct Services {
         initialized: usize,
         seen_starting_points: Vec<u8>,
         interface_steps: Vec<bool>,
+        host_actions: Vec<NativeHostAction>,
+        device_commands: LoadGfxDeviceCommands,
+        latest_vram_word: u16,
+        ending_chain: bool,
+        ending_observations: Vec<(EndingCall, u16)>,
     }
 
     impl FrameResourceHooks for Services {
-        fn sync_vram(&mut self, _vram: &[u16; z3_core::VRAM_WORDS]) {}
+        fn sync_vram(&mut self, vram: &[u16; z3_core::VRAM_WORDS]) {
+            self.latest_vram_word = vram[0x800];
+        }
         fn set_audio_port0(&mut self, _value: u8) {}
         fn set_music_playback_state(
             &mut self,
@@ -2490,10 +2618,10 @@ mod tests {
             None
         }
         fn take_load_gfx_device_commands(&mut self) -> LoadGfxDeviceCommands {
-            LoadGfxDeviceCommands::default()
+            std::mem::take(&mut self.device_commands)
         }
         fn take_host_actions(&mut self) -> Vec<NativeHostAction> {
-            Vec::new()
+            std::mem::take(&mut self.host_actions)
         }
     }
 
@@ -2549,7 +2677,26 @@ mod tests {
         }
     }
     impl AttractRuntime for Services {}
-    impl EndingRuntime for Services {}
+    impl EndingRuntime for Services {
+        fn call(&mut self, call: EndingCall, _ram: &mut Ram<'_>) {
+            if !self.ending_chain {
+                return;
+            }
+            self.ending_observations.push((call, self.latest_vram_word));
+            let (word, next) = match call {
+                EndingCall::DungeonLoadEntrance => (0x1111, EndingCall::DungeonLoadPalettes),
+                EndingCall::DungeonLoadPalettes => (0xface, EndingCall::HudRebuildIndoor),
+                EndingCall::HudRebuildIndoor => return,
+                _ => panic!("unexpected ending chain operation: {call:?}"),
+            };
+            self.device_commands.vram_spans.push(VramWriteSpan {
+                start: 0x800,
+                words: vec![word],
+            });
+            self.host_actions
+                .push(NativeHostAction::EndingExternal(next));
+        }
+    }
     impl crate::sprite_main_bank0::SpriteMainBank0Runtime for Services {}
     impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for Services {}
     impl crate::sprite_main_bank1::SpriteMainBank1Runtime for Services {}

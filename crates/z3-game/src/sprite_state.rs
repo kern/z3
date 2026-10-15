@@ -4,10 +4,24 @@
 //! slots retain every byte. Values are lossless bytes, including unknown
 //! state/flag values. The canonical WRAM image remains the only storage.
 
+use crate::position::{Height, SplitPosition};
 use crate::ram::Ram;
+use crate::velocity::VelocityByte;
 use z3_core::WRAM_SIZE;
 
 pub const SPRITE_CAPACITY: usize = 16;
+
+const X_POSITION: SplitPosition<16> = SplitPosition::world(
+    layout::SPRITE_X_SUBPIXEL,
+    layout::SPRITE_X_LO,
+    layout::SPRITE_X_HI,
+);
+const Y_POSITION: SplitPosition<16> = SplitPosition::world(
+    layout::SPRITE_Y_SUBPIXEL,
+    layout::SPRITE_Y_LO,
+    layout::SPRITE_Y_HI,
+);
+const HEIGHT: SplitPosition<8> = SplitPosition::height(layout::SPRITE_Z_SUBPOS, layout::SPRITE_Z);
 
 /// A validated slot in the physical sprite pool. Slots are never compacted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -94,6 +108,20 @@ pub struct SpriteMut<'a> {
 }
 
 impl SpriteMut<'_> {
+    pub fn approach_velocity(&mut self, x: u8, y: u8) {
+        for (field, target) in [(SpriteField::VelocityX, x), (SpriteField::VelocityY, y)] {
+            let value = self.as_read_only().field(field);
+            if value != target {
+                self.set_field(
+                    field,
+                    VelocityByte::from_bits(value)
+                        .approaching(VelocityByte::from_bits(target))
+                        .bits(),
+                );
+            }
+        }
+    }
+
     #[must_use]
     pub fn as_read_only(&self) -> SpriteRef<'_> {
         SpriteRef {
@@ -104,6 +132,33 @@ impl SpriteMut<'_> {
 }
 
 impl Ram<'_> {
+    pub fn move_sprite_x(&mut self, index: usize) {
+        let velocity = self.sprite(index).velocity_x() as i8;
+        if velocity == 0 {
+            return;
+        }
+        let position = X_POSITION.load(self, index);
+        X_POSITION.store(self, index, position.advanced(velocity));
+    }
+
+    pub fn move_sprite_y(&mut self, index: usize) {
+        let velocity = self.sprite(index).velocity_y() as i8;
+        if velocity == 0 {
+            return;
+        }
+        let position = Y_POSITION.load(self, index);
+        Y_POSITION.store(self, index, position.advanced(velocity));
+    }
+
+    pub fn move_sprite_z(&mut self, index: usize) {
+        let position = Height::from_parts(
+            u16::from(self.sprite(index).z()),
+            self.sprite(index).subpixel_z(),
+        );
+        let velocity = self.sprite(index).velocity_z() as i8;
+        HEIGHT.store(self, index, position.advanced(velocity));
+    }
+
     #[must_use]
     pub fn sprites(&self) -> SpritePool<'_> {
         SpritePool {
@@ -301,9 +356,189 @@ impl SpriteMut<'_> {
         let address = layout::SPRITE_N + self.index * 2;
         self.bytes[address..address + 2].copy_from_slice(&value.to_le_bytes());
     }
+
+    /// The four action countdowns tick in this order, leaving zero untouched.
+    pub fn tick_action_delays(&mut self) {
+        for field in [
+            SpriteField::MainDelay,
+            SpriteField::Aux1Delay,
+            SpriteField::Aux2Delay,
+            SpriteField::Aux3Delay,
+        ] {
+            let value = self.as_read_only().field(field);
+            if value != 0 {
+                self.set_field(field, value.wrapping_sub(1));
+            }
+        }
+    }
+
+    /// Clears only the forty transient fields reset by sprite preparation.
+    /// Inactive coordinates, kind, room and all other bytes remain live.
+    pub fn reset_transient(&mut self) {
+        use SpriteField::*;
+        for field in [
+            Pause,
+            ScratchE,
+            VelocityX,
+            VelocityY,
+            VelocityZ,
+            SubpixelX,
+            SubpixelY,
+            SubpixelZ,
+            AiState,
+            Graphics,
+            ScratchD,
+            MainDelay,
+            Aux1Delay,
+            Aux2Delay,
+            Aux4Delay,
+            HeadDirection,
+            AnimationClock,
+            ScratchG,
+            HitTimer,
+            WallCollision,
+            Z,
+            Health,
+            ScratchF,
+            RecoilX,
+            RecoilY,
+            ScratchA,
+            ScratchB,
+            ScratchC,
+            Unknown2,
+            Subtype2,
+            IgnoreProjectile,
+            ObjectPriority,
+            OamFlags,
+            Stunned,
+            Damage,
+            Unknown3,
+            Unknown4,
+            Unknown5,
+            Unknown1,
+            ScratchI,
+        ] {
+            self.set_field(field, 0);
+        }
+    }
+
+    pub fn apply_initial_properties(&mut self, properties: SpriteInitialProperties) {
+        use SpriteField::*;
+        for (field, value) in [
+            (Flags2, properties.flags2),
+            (Health, properties.health),
+            (Flags4, properties.flags4),
+            (Flags5, properties.flags5),
+            (DeflectionBits, properties.deflection_bits),
+            (BumpDamage, properties.bump_damage),
+            (Flags, properties.flags),
+            (Flags3, properties.flags3),
+            (OamFlags, properties.oam_flags),
+        ] {
+            self.set_field(field, value);
+        }
+    }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SpriteInitialProperties {
+    pub flags2: u8,
+    pub health: u8,
+    pub flags4: u8,
+    pub flags5: u8,
+    pub deflection_bits: u8,
+    pub bump_damage: u8,
+    pub flags: u8,
+    pub flags3: u8,
+    pub oam_flags: u8,
+}
+
+// Compatibility layout of the twenty-four transition-cache fields. This is
+// not a complete entity snapshot: execution deliberately retains all effects
+// on fields outside this list when the transient fields are restored.
+const TRANSITION_FIELDS: [(SpriteField, usize); 24] = {
+    use SpriteField::*;
+    [
+        (State, 0x1d00),
+        (Kind, 0x1d10),
+        (XLow, 0x1d20),
+        (XHigh, 0x1d30),
+        (YLow, 0x1d40),
+        (YHigh, 0x1d50),
+        (Graphics, 0x1d60),
+        (ScratchA, 0x1d70),
+        (HeadDirection, 0x1d80),
+        (OamFlags, 0x1d90),
+        (ObjectPriority, 0x1da0),
+        (ScratchD, 0x1db0),
+        (Flags2, 0x1dc0),
+        (Floor, 0x1dd0),
+        (AiState, 0x1de0),
+        (Flags3, 0x1df0),
+        (ScratchB, 0x1fa5c),
+        (ScratchC, 0x1fa6c),
+        (ScratchE, 0x1fa7c),
+        (Subtype2, 0x1fa8c),
+        (Z, 0x1fa9c),
+        (MainDelay, 0x1faac),
+        (ScratchI, 0x1facc),
+        (IgnoreProjectile, 0x1fadc),
+    ]
+};
+
+pub struct SpriteTransientSnapshot([u8; 24]);
+
 impl Ram<'_> {
+    pub fn cached_sprite_present(&self, index: usize) -> bool {
+        self.read_u8(TRANSITION_FIELDS[0].1 + index) != 0
+    }
+
+    pub fn clear_cached_sprite(&mut self, index: usize) {
+        self.write_u8(TRANSITION_FIELDS[0].1 + index, 0);
+    }
+
+    /// Saves the original fields before publishing cached fields into the live
+    /// slot. Each write is immediate; this does not install a second authority.
+    pub fn activate_cached_sprite(&mut self, index: usize) -> SpriteTransientSnapshot {
+        let backup = TRANSITION_FIELDS.map(|(field, _)| self.sprite(index).field(field));
+        for (field, cached) in TRANSITION_FIELDS {
+            self.set_sprite_field(index, field, self.read_u8(cached + index));
+        }
+        SpriteTransientSnapshot(backup)
+    }
+
+    pub fn restore_sprite_transient(&mut self, index: usize, snapshot: SpriteTransientSnapshot) {
+        for ((field, _), value) in TRANSITION_FIELDS.into_iter().zip(snapshot.0) {
+            self.set_sprite_field(index, field, value);
+        }
+    }
+
+    /// Captures one transition slot with the original pre-check/post-check
+    /// write order. Paused and special states retain only the first six fields.
+    pub fn cache_sprite_for_transition(&mut self, index: usize) {
+        use SpriteField::*;
+        self.clear_cached_sprite(index);
+        for (field, cached) in [
+            (Kind, 0x1d10),
+            (XLow, 0x1d20),
+            (Graphics, 0x1d60),
+            (XHigh, 0x1d30),
+            (YLow, 0x1d40),
+            (YHigh, 0x1d50),
+        ] {
+            self.write_u8(cached + index, self.sprite(index).field(field));
+        }
+        if self.sprite(index).pause() != 0 || matches!(self.sprite(index).state(), 4 | 10) {
+            return;
+        }
+        for &(field, cached) in TRANSITION_FIELDS
+            .iter()
+            .filter(|(field, _)| !matches!(field, Kind | XLow | XHigh | YLow | YHigh | Graphics))
+        {
+            self.write_u8(cached + index, self.sprite(index).field(field));
+        }
+    }
+
     pub fn set_sprite_field(&mut self, index: usize, field: SpriteField, value: u8) {
         self.sprite_mut(index).set_field(field, value);
     }
@@ -328,6 +563,49 @@ impl Ram<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_delay_tick_preserves_other_fields_and_slots() {
+        for slot in [0, 15] {
+            let mut bytes = [0xa5; WRAM_SIZE];
+            let mut ram = Ram::new(&mut bytes);
+            ram.set_sprite_main_delay(slot, 0);
+            ram.set_sprite_aux1_delay(slot, 1);
+            ram.set_sprite_aux2_delay(slot, 0xff);
+            ram.set_sprite_aux3_delay(slot, 0x80);
+            let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+            expected[0xe00 + slot] = 0;
+            expected[0xe10 + slot] = 0xfe;
+            expected[0xee0 + slot] = 0x7f;
+            ram.sprite_mut(slot).tick_action_delays();
+            assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+        }
+    }
+
+    #[test]
+    fn cache_activation_observes_raw_patches_and_restores_only_declared_fields() {
+        let mut bytes = std::array::from_fn(|index| (index as u8).wrapping_mul(37));
+        let mut ram = Ram::new(&mut bytes);
+        let slot = 15;
+        ram.set_sprite_state(slot, 9);
+        ram.set_sprite_pause(slot, 0);
+        ram.cache_sprite_for_transition(slot);
+        // A replay patch to cached X is visible without any synchronization.
+        ram.write_u8(0x1d20 + slot, 0xee);
+        let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+        let saved = ram.activate_cached_sprite(slot);
+        assert_eq!(ram.sprite(slot).x_low(), 0xee);
+        ram.set_sprite_x_low(slot, 0xa1);
+        ram.set_sprite_aux4_delay(slot, 0x77);
+        ram.set_sprite_unknown3(slot, 0x88);
+        expected[0xf10 + slot] = 0x77;
+        expected[0x1fa1c + slot] = 0x88;
+        ram.restore_sprite_transient(slot, saved);
+        assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+        assert!(ram.cached_sprite_present(slot));
+        ram.clear_cached_sprite(slot);
+        assert!(!ram.cached_sprite_present(slot));
+    }
 
     #[test]
     fn slot_identity_reverse_search_and_inactive_bytes_are_preserved() {

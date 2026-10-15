@@ -4,31 +4,12 @@
 //! WRAM layout is kept explicit so behavior can be compared address-for-address.
 
 use crate::sound::{SoundPort, SoundRequest};
-use crate::sprite_state::SpriteSlot;
-use crate::sprite_state::layout::{
-    SPRITE_A, SPRITE_AI_STATE, SPRITE_ANIM_CLOCK, SPRITE_B, SPRITE_BUMP_DAMAGE, SPRITE_C, SPRITE_D,
-    SPRITE_DEFL_BITS, SPRITE_DELAY_AUX1, SPRITE_DELAY_AUX2, SPRITE_DELAY_AUX3, SPRITE_DELAY_AUX4,
-    SPRITE_DELAY_MAIN, SPRITE_E, SPRITE_F, SPRITE_FLAGS, SPRITE_FLAGS2, SPRITE_FLAGS3,
-    SPRITE_FLAGS4, SPRITE_FLAGS5, SPRITE_FLOOR, SPRITE_G, SPRITE_GIVE_DAMAGE, SPRITE_GRAPHICS,
-    SPRITE_HEAD_DIR, SPRITE_HEALTH, SPRITE_HIT_TIMER, SPRITE_I, SPRITE_IGNORE_PROJECTILE,
-    SPRITE_OAM_FLAGS, SPRITE_OBJ_PRIO, SPRITE_PAUSE, SPRITE_STATE, SPRITE_STUNNED, SPRITE_SUBTYPE2,
-    SPRITE_TYPE, SPRITE_UNK1, SPRITE_UNK2, SPRITE_UNK3, SPRITE_UNK4, SPRITE_UNK5, SPRITE_WALLCOLL,
-    SPRITE_X_HI, SPRITE_X_LO, SPRITE_X_RECOIL, SPRITE_X_SUBPIXEL, SPRITE_X_VEL, SPRITE_Y_HI,
-    SPRITE_Y_LO, SPRITE_Y_RECOIL, SPRITE_Y_SUBPIXEL, SPRITE_Y_VEL, SPRITE_Z, SPRITE_Z_SUBPOS,
-    SPRITE_Z_VEL,
-};
-use crate::{
-    oam,
-    position::{Height, SplitPosition},
-    ram::Ram,
-};
+#[cfg(test)]
+use crate::sprite_state::layout::*;
+use crate::sprite_state::{SpriteField, SpriteInitialProperties, SpriteSlot};
+use crate::velocity::VelocityByte;
+use crate::{oam, ram::Ram};
 use z3_core::WRAM_SIZE;
-
-const SPRITE_X_POSITION: SplitPosition<16> =
-    SplitPosition::world(SPRITE_X_SUBPIXEL, SPRITE_X_LO, SPRITE_X_HI);
-const SPRITE_Y_POSITION: SplitPosition<16> =
-    SplitPosition::world(SPRITE_Y_SUBPIXEL, SPRITE_Y_LO, SPRITE_Y_HI);
-const SPRITE_HEIGHT: SplitPosition<8> = SplitPosition::height(SPRITE_Z_SUBPOS, SPRITE_Z);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PrepOamCoordsRet {
@@ -213,71 +194,50 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     #[must_use]
     pub fn sprite_get_x(&self, slot: usize) -> u16 {
-        SPRITE_X_POSITION.pixels(&self.ram, slot)
+        self.ram.sprite(slot).x()
     }
     #[must_use]
     pub fn sprite_get_y(&self, slot: usize) -> u16 {
-        SPRITE_Y_POSITION.pixels(&self.ram, slot)
+        self.ram.sprite(slot).y()
     }
     pub fn sprite_set_x(&mut self, slot: usize, value: u16) {
-        SPRITE_X_POSITION.set_pixels(&mut self.ram, slot, value);
+        self.ram.set_sprite_x(slot, value);
     }
     pub fn sprite_set_y(&mut self, slot: usize, value: u16) {
-        SPRITE_Y_POSITION.set_pixels(&mut self.ram, slot, value);
+        self.ram.set_sprite_y(slot, value);
     }
     pub fn sprite_approach_target_speed(&mut self, slot: usize, x: u8, y: u8) {
-        for (base, target) in [(SPRITE_X_VEL, x), (SPRITE_Y_VEL, y)] {
-            let value = self.arr(base, slot);
-            if value != target {
-                self.set_arr(
-                    base,
-                    slot,
-                    if (value.wrapping_sub(target) as i8) < 0 {
-                        value.wrapping_add(1)
-                    } else {
-                        value.wrapping_sub(1)
-                    },
-                );
-            }
-        }
+        self.ram.sprite_mut(slot).approach_velocity(x, y);
     }
     pub fn sprite_add_xy(&mut self, slot: usize, x: i16, y: i16) {
         self.sprite_set_x(slot, self.sprite_get_x(slot).wrapping_add_signed(x));
         self.sprite_set_y(slot, self.sprite_get_y(slot).wrapping_add_signed(y));
     }
     pub fn sprite_invert_xy_speeds(&mut self, slot: usize) {
-        self.ram
-            .set_sprite_velocity_x(slot, (-(self.ram.sprite(slot).velocity_x() as i8)) as u8);
-        self.ram
-            .set_sprite_velocity_y(slot, (-(self.ram.sprite(slot).velocity_y() as i8)) as u8);
+        self.ram.set_sprite_velocity_x(
+            slot,
+            VelocityByte::from_bits(self.ram.sprite(slot).velocity_x())
+                .negated()
+                .bits(),
+        );
+        self.ram.set_sprite_velocity_y(
+            slot,
+            VelocityByte::from_bits(self.ram.sprite(slot).velocity_y())
+                .negated()
+                .bits(),
+        );
     }
     pub fn sprite_invert_speed_xy(&mut self, slot: usize) {
         self.sprite_invert_xy_speeds(slot);
     }
     pub fn sprite_move_x(&mut self, slot: usize) {
-        let velocity = self.ram.sprite(slot).velocity_x() as i8;
-        if velocity == 0 {
-            return;
-        }
-        let position = SPRITE_X_POSITION.load(&self.ram, slot);
-        SPRITE_X_POSITION.store(&mut self.ram, slot, position.advanced(velocity));
+        self.ram.move_sprite_x(slot);
     }
     pub fn sprite_move_y(&mut self, slot: usize) {
-        let velocity = self.ram.sprite(slot).velocity_y() as i8;
-        if velocity == 0 {
-            return;
-        }
-        let position = SPRITE_Y_POSITION.load(&self.ram, slot);
-        SPRITE_Y_POSITION.store(&mut self.ram, slot, position.advanced(velocity));
+        self.ram.move_sprite_y(slot);
     }
     pub fn sprite_move_z(&mut self, slot: usize) {
-        // The legacy Z helper reads whole pixels before the fractional byte.
-        let position = Height::from_parts(
-            u16::from(self.ram.sprite(slot).z()),
-            self.ram.sprite(slot).subpixel_z(),
-        );
-        let velocity = self.ram.sprite(slot).velocity_z() as i8;
-        SPRITE_HEIGHT.store(&mut self.ram, slot, position.advanced(velocity));
+        self.ram.move_sprite_z(slot);
     }
     pub fn sprite_move_xy(&mut self, slot: usize) {
         self.sprite_move_x(slot);
@@ -295,22 +255,34 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     pub fn sprite_halve_speed_xy(&mut self, slot: usize) {
         self.ram.set_sprite_velocity_x(
             slot,
-            ((self.ram.sprite(slot).velocity_x() as i8) >> 1) as u8,
+            VelocityByte::from_bits(self.ram.sprite(slot).velocity_x())
+                .arithmetic_half()
+                .bits(),
         );
         self.ram.set_sprite_velocity_y(
             slot,
-            ((self.ram.sprite(slot).velocity_y() as i8) >> 1) as u8,
+            VelocityByte::from_bits(self.ram.sprite(slot).velocity_y())
+                .arithmetic_half()
+                .bits(),
         );
     }
     pub fn sprite_bounce_off_wall(&mut self, slot: usize) {
         let collision = self.ram.sprite(slot).wall_collision();
         if collision & 3 != 0 {
-            self.ram
-                .set_sprite_velocity_x(slot, (-(self.ram.sprite(slot).velocity_x() as i8)) as u8);
+            self.ram.set_sprite_velocity_x(
+                slot,
+                VelocityByte::from_bits(self.ram.sprite(slot).velocity_x())
+                    .negated()
+                    .bits(),
+            );
         }
         if collision & 12 != 0 {
-            self.ram
-                .set_sprite_velocity_y(slot, (-(self.ram.sprite(slot).velocity_y() as i8)) as u8);
+            self.ram.set_sprite_velocity_y(
+                slot,
+                VelocityByte::from_bits(self.ram.sprite(slot).velocity_y())
+                    .negated()
+                    .bits(),
+            );
         }
     }
     fn project_speed(right: PairU8, below: PairU8, mut velocity: u8) -> ProjectSpeedRet {
@@ -343,12 +315,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         ProjectSpeedRet {
             x: if right.a != 0 {
-                (-(xvel as i8)) as u8
+                VelocityByte::from_bits(xvel).negated().bits()
             } else {
                 xvel
             },
             y: if below.a != 0 {
-                (-(yvel as i8)) as u8
+                VelocityByte::from_bits(yvel).negated().bits()
             } else {
                 yvel
             },
@@ -642,17 +614,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.oam_allocate_from_region_a(bytes);
         }
         if self.r8(0x11) | self.r8(0xfc1) == 0 {
-            for base in [
-                SPRITE_DELAY_MAIN,
-                SPRITE_DELAY_AUX1,
-                SPRITE_DELAY_AUX2,
-                SPRITE_DELAY_AUX3,
-            ] {
-                let value = self.arr(base, slot);
-                if value != 0 {
-                    self.set_arr(base, slot, value.wrapping_sub(1));
-                }
-            }
+            self.ram.sprite_mut(slot).tick_action_delays();
             let timer = self.ram.sprite(slot).hit_timer() & 0x7f;
             if timer != 0 {
                 if self.ram.sprite(slot).state() >= 9 && timer == 31 {
@@ -717,7 +679,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         for slot in SpriteSlot::all().rev() {
             let slot = slot.index();
             self.w8(0xfa0, slot as u8);
-            if self.arr(0x1d00, slot) != 0 {
+            if self.ram.cached_sprite_present(slot) {
                 self.uncache_and_execute_sprite(slot);
             }
         }
@@ -772,106 +734,32 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn uncache_and_execute_sprite(&mut self, slot: usize) {
-        const MAP: [(usize, usize); 24] = [
-            (SPRITE_STATE, 0x1d00),
-            (SPRITE_TYPE, 0x1d10),
-            (SPRITE_X_LO, 0x1d20),
-            (SPRITE_X_HI, 0x1d30),
-            (SPRITE_Y_LO, 0x1d40),
-            (SPRITE_Y_HI, 0x1d50),
-            (SPRITE_GRAPHICS, 0x1d60),
-            (SPRITE_A, 0x1d70),
-            (SPRITE_HEAD_DIR, 0x1d80),
-            (SPRITE_OAM_FLAGS, 0x1d90),
-            (SPRITE_OBJ_PRIO, 0x1da0),
-            (SPRITE_D, 0x1db0),
-            (SPRITE_FLAGS2, 0x1dc0),
-            (SPRITE_FLOOR, 0x1dd0),
-            (SPRITE_AI_STATE, 0x1de0),
-            (SPRITE_FLAGS3, 0x1df0),
-            (SPRITE_B, 0x1fa5c),
-            (SPRITE_C, 0x1fa6c),
-            (SPRITE_E, 0x1fa7c),
-            (SPRITE_SUBTYPE2, 0x1fa8c),
-            (SPRITE_Z, 0x1fa9c),
-            (SPRITE_DELAY_MAIN, 0x1faac),
-            (SPRITE_I, 0x1facc),
-            (SPRITE_IGNORE_PROJECTILE, 0x1fadc),
-        ];
-        let backup = MAP.map(|(live, _)| self.arr(live, slot));
-        for (live, cached) in MAP {
-            self.set_arr(live, slot, self.arr(cached, slot));
-        }
+        let backup = self.ram.activate_cached_sprite(slot);
         self.sprite_execute_single(slot);
         if self.ram.sprite(slot).pause() != 0 {
-            self.set_arr(0x1d00, slot, 0);
+            self.ram.clear_cached_sprite(slot);
         }
-        for ((live, _), value) in MAP.into_iter().zip(backup) {
-            self.set_arr(live, slot, value);
-        }
+        self.ram.restore_sprite_transient(slot, backup);
     }
     pub fn sprite_prep_reset_properties(&mut self, slot: usize) {
-        for base in [
-            SPRITE_PAUSE,
-            SPRITE_E,
-            SPRITE_X_VEL,
-            SPRITE_Y_VEL,
-            SPRITE_Z_VEL,
-            SPRITE_X_SUBPIXEL,
-            SPRITE_Y_SUBPIXEL,
-            SPRITE_Z_SUBPOS,
-            SPRITE_AI_STATE,
-            SPRITE_GRAPHICS,
-            SPRITE_D,
-            SPRITE_DELAY_MAIN,
-            SPRITE_DELAY_AUX1,
-            SPRITE_DELAY_AUX2,
-            SPRITE_DELAY_AUX4,
-            SPRITE_HEAD_DIR,
-            SPRITE_ANIM_CLOCK,
-            SPRITE_G,
-            SPRITE_HIT_TIMER,
-            SPRITE_WALLCOLL,
-            SPRITE_Z,
-            SPRITE_HEALTH,
-            SPRITE_F,
-            SPRITE_X_RECOIL,
-            SPRITE_Y_RECOIL,
-            SPRITE_A,
-            SPRITE_B,
-            SPRITE_C,
-            SPRITE_UNK2,
-            SPRITE_SUBTYPE2,
-            SPRITE_IGNORE_PROJECTILE,
-            SPRITE_OBJ_PRIO,
-            SPRITE_OAM_FLAGS,
-            SPRITE_STUNNED,
-            SPRITE_GIVE_DAMAGE,
-            SPRITE_UNK3,
-            SPRITE_UNK4,
-            SPRITE_UNK5,
-            SPRITE_UNK1,
-            SPRITE_I,
-        ] {
-            self.set_arr(base, slot, 0);
-        }
+        self.ram.sprite_mut(slot).reset_transient();
     }
     pub fn sprite_prep_load_properties(&mut self, slot: usize) {
         self.sprite_prep_reset_properties(slot);
         let kind = usize::from(self.ram.sprite(slot).kind());
-        for (base, value) in [
-            (SPRITE_FLAGS2, SPRITE_INIT_FLAGS2[kind]),
-            (SPRITE_HEALTH, SPRITE_INIT_HEALTH[kind]),
-            (SPRITE_FLAGS4, SPRITE_INIT_FLAGS4[kind]),
-            (SPRITE_FLAGS5, SPRITE_INIT_FLAGS5[kind]),
-            (SPRITE_DEFL_BITS, SPRITE_INIT_DEFL_BITS[kind]),
-            (SPRITE_BUMP_DAMAGE, SPRITE_INIT_BUMP_DAMAGE[kind]),
-            (SPRITE_FLAGS, SPRITE_INIT_FLAGS[kind]),
-            (SPRITE_FLAGS3, SPRITE_INIT_FLAGS3[kind]),
-            (SPRITE_OAM_FLAGS, SPRITE_INIT_FLAGS3[kind] & 15),
-        ] {
-            self.set_arr(base, slot, value);
-        }
+        self.ram
+            .sprite_mut(slot)
+            .apply_initial_properties(SpriteInitialProperties {
+                flags2: SPRITE_INIT_FLAGS2[kind],
+                health: SPRITE_INIT_HEALTH[kind],
+                flags4: SPRITE_INIT_FLAGS4[kind],
+                flags5: SPRITE_INIT_FLAGS5[kind],
+                deflection_bits: SPRITE_INIT_DEFL_BITS[kind],
+                bump_damage: SPRITE_INIT_BUMP_DAMAGE[kind],
+                flags: SPRITE_INIT_FLAGS[kind],
+                flags3: SPRITE_INIT_FLAGS3[kind],
+                oam_flags: SPRITE_INIT_FLAGS3[kind] & 15,
+            });
         let room = if self.r8(0x1b) != 0 {
             self.r8(0x48e)
         } else {
@@ -934,10 +822,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         ];
         let sign = usize::from((y >> 7) + (x >> 7) * 2) * 8;
         if (x as i8) < 0 {
-            x = (-(x as i8)) as u8;
+            x = VelocityByte::from_bits(x).negated().bits();
         }
         if (y as i8) < 0 {
-            y = (-(y as i8)) as u8;
+            y = VelocityByte::from_bits(y).negated().bits();
         }
         if x >= y {
             A[usize::from(y >> 2) + sign]
@@ -1200,44 +1088,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         self.w8(0xffa, self.r8(0x1b));
         for slot in SpriteSlot::all().rev() {
-            let slot = slot.index();
-            self.set_arr(0x1d00, slot, 0);
-            for (destination, source) in [
-                (0x1d10, SPRITE_TYPE),
-                (0x1d20, SPRITE_X_LO),
-                (0x1d60, SPRITE_GRAPHICS),
-                (0x1d30, SPRITE_X_HI),
-                (0x1d40, SPRITE_Y_LO),
-                (0x1d50, SPRITE_Y_HI),
-            ] {
-                self.set_arr(destination, slot, self.arr(source, slot));
-            }
-            if self.ram.sprite(slot).pause() != 0 || matches!(self.ram.sprite(slot).state(), 4 | 10)
-            {
-                continue;
-            }
-            for (destination, source) in [
-                (0x1d00, SPRITE_STATE),
-                (0x1d70, SPRITE_A),
-                (0x1d80, SPRITE_HEAD_DIR),
-                (0x1d90, SPRITE_OAM_FLAGS),
-                (0x1da0, SPRITE_OBJ_PRIO),
-                (0x1db0, SPRITE_D),
-                (0x1dc0, SPRITE_FLAGS2),
-                (0x1dd0, SPRITE_FLOOR),
-                (0x1de0, SPRITE_AI_STATE),
-                (0x1df0, SPRITE_FLAGS3),
-                (0x1fa5c, SPRITE_B),
-                (0x1fa6c, SPRITE_C),
-                (0x1fa7c, SPRITE_E),
-                (0x1fa8c, SPRITE_SUBTYPE2),
-                (0x1fa9c, SPRITE_Z),
-                (0x1faac, SPRITE_DELAY_MAIN),
-                (0x1facc, SPRITE_I),
-                (0x1fadc, SPRITE_IGNORE_PROJECTILE),
-            ] {
-                self.set_arr(destination, slot, self.arr(source, slot));
-            }
+            self.ram.cache_sprite_for_transition(slot.index());
         }
     }
 
@@ -1785,9 +1636,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 self.ram
                     .set_sprite_velocity_z(slot, if bounce < 9 { 0 } else { bounce });
             }
-            for base in [SPRITE_X_VEL, SPRITE_Y_VEL] {
-                let velocity = ((self.arr(base, slot) as i8) >> 1) as u8;
-                self.set_arr(base, slot, if velocity == 0xff { 0 } else { velocity });
+            for field in [SpriteField::VelocityX, SpriteField::VelocityY] {
+                let velocity = VelocityByte::from_bits(self.ram.sprite(slot).field(field))
+                    .arithmetic_half()
+                    .bits();
+                self.ram
+                    .set_sprite_field(slot, field, if velocity == 0xff { 0 } else { velocity });
             }
         }
         if (self.ram.sprite(slot).state() != 11 || self.ram.sprite(slot).unknown5() != 0)
@@ -4422,9 +4276,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         };
         let projected = self.sprite_project_speed_towards_link(slot, velocity);
         self.ram
-            .set_sprite_recoil_x(slot, (-(projected.x as i8)) as u8);
+            .set_sprite_recoil_x(slot, VelocityByte::from_bits(projected.x).negated().bits());
         self.ram
-            .set_sprite_recoil_y(slot, (-(projected.y as i8)) as u8);
+            .set_sprite_recoil_y(slot, VelocityByte::from_bits(projected.y).negated().bits());
         self.sprite_apply_recoil_to_link(
             slot,
             if (self.r8(0x3c).wrapping_sub(9) as i8) < 0 {
@@ -4459,9 +4313,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             };
             let velocity = self.sprite_project_speed_towards_link(slot, speed);
             self.ram
-                .set_sprite_recoil_x(slot, (-(velocity.x as i8)) as u8);
+                .set_sprite_recoil_x(slot, VelocityByte::from_bits(velocity.x).negated().bits());
             self.ram
-                .set_sprite_recoil_y(slot, (-(velocity.y as i8)) as u8);
+                .set_sprite_recoil_y(slot, VelocityByte::from_bits(velocity.y).negated().bits());
             self.sprite_calculate_sword_damage(slot);
         }
     }
@@ -5611,11 +5465,6 @@ pub const GARNISH_FUNCS: [u8; 22] = [
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 14, 15, 16, 17, 18, 19, 20, 21, 22,
 ];
 pub const SPRITE_EXECUTE_SINGLE: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-pub const ALT_SPRITE_BASES: [usize; 24] = [
-    0x1d00, 0x1d10, 0x1d20, 0x1d30, 0x1d40, 0x1d50, 0x1d60, 0x1d70, 0x1d80, 0x1d90, 0x1da0, 0x1db0,
-    0x1dc0, 0x1dd0, 0x1de0, 0x1df0, 0x1fa5c, 0x1fa6c, 0x1fa7c, 0x1fa8c, 0x1fa9c, 0x1faac, 0x1facc,
-    0x1fadc,
-];
 pub const SPRITE_FALL_TAB1: [u8; 32] = [
     13, 13, 13, 13, 13, 13, 13, 12, 12, 12, 12, 12, 3, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0,
     0, 0, 0, 0,

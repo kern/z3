@@ -8,7 +8,7 @@ use crate::integration::{
     NativeGameServices, NativeHostAction, OverworldCall, OverworldServices, SpotlightServices,
     UnifiedGameplayServices,
 };
-use crate::load_gfx::{LoadGfx, LoadGfxHooks};
+use crate::load_gfx::{GraphicsCpu, GraphicsUpload, LoadGfx, LoadGfxHooks};
 use crate::messaging::{Messaging, MessagingAssets, MessagingRuntime};
 use crate::misc::{MiscCall, MiscHooks};
 use crate::overworld::{self, PlayerControlHooks, PreOverworldHooks, TransitionHooks};
@@ -51,23 +51,31 @@ impl LoadGfxHooks for NoGfxHooks {
 }
 
 impl NativeGameServices<'_> {
-    fn with_load_gfx(
+    pub(crate) fn with_load_gfx(
         &mut self,
         ram: &mut Ram<'_>,
         operation: impl FnOnce(
-            &mut LoadGfx<'_, crate::assets::RuntimeAssets<'_>, NativeGameServices<'_>>,
+            &mut GraphicsCpu<'_, crate::assets::RuntimeAssets<'_>, NativeGameServices<'_>>,
         ),
     ) {
-        let mut vram =
-            std::mem::replace(&mut self.scratch_vram, Box::new([0; z3_core::VRAM_WORDS]));
         let assets = self.assets;
-        operation(&mut LoadGfx {
+        operation(&mut GraphicsCpu {
             wram: ram.bytes_mut(),
-            vram: vram.as_mut(),
             assets,
             hooks: self,
         });
-        self.scratch_vram = vram;
+    }
+
+    pub(crate) fn with_graphics_upload(
+        &mut self,
+        ram: &mut Ram<'_>,
+        operation: impl FnOnce(&mut GraphicsUpload<'_, crate::assets::RuntimeAssets<'_>>),
+    ) {
+        operation(&mut GraphicsUpload {
+            wram: ram.bytes_mut(),
+            vram: self.scratch_vram.as_mut(),
+            assets: self.assets,
+        });
     }
 }
 
@@ -335,7 +343,7 @@ impl MessagingRuntime for NativeGameServices<'_> {
     fn world_map_exit(&mut self, ram: &mut Ram<'_>) {
         ram.write_u16(0xaa8, 0);
         ram.write_u8(0xab9, 0);
-        self.with_load_gfx(ram, |gfx| gfx.initialize_tilesets());
+        self.with_graphics_upload(ram, |gfx| gfx.initialize_tilesets());
         ram.write_u8(0x15, ram.read_u8(0x15).wrapping_add(1));
         ram.write_u8(0xb2, 0);
         ram.write_u8(0x200, 0);
@@ -449,8 +457,10 @@ impl MessagingRuntime for NativeGameServices<'_> {
             } else {
                 0x5a
             });
-            gfx.initialize_tilesets();
         });
+        services
+            .borrow_mut()
+            .with_graphics_upload(ram, |gfx| gfx.initialize_tilesets());
         overworld::overworld_set_fixed_col_and_scroll(ram);
         ram.write_u16(0xaa8, 0);
         ram.write_u8(0xab9, 0);
@@ -516,7 +526,7 @@ impl MessagingRuntime for NativeGameServices<'_> {
         ram.write_u8(0xaa2, 64);
         ram.write_u8(0x1c, 0x16);
         ram.write_u8(0x1d, 1);
-        self.with_load_gfx(ram, |gfx| {
+        self.with_graphics_upload(ram, |gfx| {
             gfx.erase_tile_maps_dungeonmap();
             gfx.initialize_tilesets();
         });
@@ -832,7 +842,7 @@ impl AttractRuntime for NativeGameServices<'_> {
     }
 
     fn load_common_sprites(&mut self, ram: &mut Ram<'_>) {
-        self.with_load_gfx(ram, |gfx| gfx.load_common_sprites());
+        self.with_graphics_upload(ram, |gfx| gfx.load_common_sprites());
     }
 
     fn dungeon_load_entrance(&mut self, ram: &mut Ram<'_>) {
@@ -849,7 +859,7 @@ impl AttractRuntime for NativeGameServices<'_> {
     }
 
     fn initialize_tilesets(&mut self, ram: &mut Ram<'_>) {
-        self.with_load_gfx(ram, |gfx| gfx.initialize_tilesets());
+        self.with_graphics_upload(ram, |gfx| gfx.initialize_tilesets());
     }
 
     fn palette_bg_and_fixed_color_black(&mut self, ram: &mut Ram<'_>) {
@@ -904,19 +914,17 @@ impl AttractRuntime for NativeGameServices<'_> {
     }
 
     fn intro_initialize_memory_darken(&mut self, ram: &mut Ram<'_>) {
-        self.with_load_gfx(ram, |gfx| {
-            gfx.enable_force_blank();
-            gfx.erase_tile_maps_normal();
-        });
+        self.with_load_gfx(ram, |gfx| gfx.enable_force_blank());
+        self.with_graphics_upload(ram, |gfx| gfx.erase_tile_maps_normal());
         ram.write_u8(0xaa1, 35);
         ram.write_u8(0xaa3, 125);
         ram.write_u8(0xaa2, 81);
         ram.write_u8(0xaa4, 8);
-        self.with_load_gfx(ram, |gfx| {
+        self.with_graphics_upload(ram, |gfx| {
             gfx.load_default_graphics();
             gfx.initialize_tilesets();
-            gfx.decompress_animated_dungeon_tiles(0x5d);
         });
+        self.with_load_gfx(ram, |gfx| gfx.decompress_animated_dungeon_tiles(0x5d));
         ram.write_u16(0xc00d, 2);
         ram.write_u8(0x8a, 0);
         ram.write_u8(0xab6, 0);
@@ -1292,7 +1300,7 @@ impl DungeonHooks for NativeGameServices<'_> {
         Hud { ram, runtime: self }.floor_indicator();
     }
     fn initialize_tilesets(&mut self, ram: &mut Ram<'_>) {
-        self.with_load_gfx(ram, |g| g.initialize_tilesets());
+        self.with_graphics_upload(ram, |g| g.initialize_tilesets());
     }
     fn dungeon_load_palettes(&mut self, ram: &mut Ram<'_>) {
         self.with_load_gfx(ram, |g| g.dungeon_load_palettes());
@@ -2002,10 +2010,10 @@ impl MiscHooks for NativeGameServices<'_> {
             }
             MiscCall::EnableForceBlank => self.with_load_gfx(ram, |gfx| gfx.enable_force_blank()),
             MiscCall::EraseTileMaps => {
-                self.with_load_gfx(ram, |gfx| gfx.erase_tile_maps_normal());
+                self.with_graphics_upload(ram, |gfx| gfx.erase_tile_maps_normal());
             }
             MiscCall::LoadDefaultGraphics => {
-                self.with_load_gfx(ram, |gfx| gfx.load_default_graphics());
+                self.with_graphics_upload(ram, |gfx| gfx.load_default_graphics());
             }
             MiscCall::SpriteLoadGraphicsProperties => {
                 overworld::sprite_load_graphics_properties(ram, self.assets);
@@ -2761,6 +2769,37 @@ impl TransitionHooks for NativeGameServices<'_> {
 #[cfg(test)]
 mod structural_tests {
     use std::collections::BTreeSet;
+
+    #[test]
+    fn nested_cpu_helpers_keep_the_original_vram_allocation_and_contents() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../zelda3_assets.dat"
+        ))
+        .unwrap();
+        let assets = crate::assets::RuntimeAssets::parse(&bytes).unwrap();
+        let mut services = super::NativeGameServices::new(&assets);
+        services.scratch_vram.fill(0xface);
+        let address = services.scratch_vram.as_ptr();
+        let mut wram = Box::new([0; z3_core::WRAM_SIZE]);
+        let mut ram = crate::ram::Ram::new(&mut wram);
+        services.with_load_gfx(&mut ram, |outer| {
+            assert_eq!(outer.hooks.scratch_vram.as_ptr(), address);
+            assert_eq!(outer.hooks.scratch_vram[17], 0xface);
+            outer.hooks.scratch_vram[17] = 0x1234;
+            let mut nested_ram = crate::ram::Ram::new(outer.wram);
+            outer.hooks.with_load_gfx(&mut nested_ram, |inner| {
+                assert_eq!(inner.hooks.scratch_vram.as_ptr(), address);
+                assert_eq!(inner.hooks.scratch_vram[17], 0x1234);
+                inner.hooks.scratch_vram[18] = 0xbeef;
+                inner.enable_force_blank();
+            });
+            assert_eq!(outer.hooks.scratch_vram[18], 0xbeef);
+        });
+        assert_eq!(services.scratch_vram.as_ptr(), address);
+        assert_eq!(&services.scratch_vram[17..19], &[0x1234, 0xbeef]);
+        assert_eq!(ram.read_u8(0x13), 0x80);
+    }
 
     fn method_names(source: &str, marker: &str) -> BTreeSet<String> {
         let block = source

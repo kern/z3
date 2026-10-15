@@ -5,7 +5,6 @@
 
 use crate::ram::Ram;
 use crate::sprite_main_bank0::SPRITE_SIMPLIFIED_TILE_ATTRIBUTE;
-use crate::sprite_state::layout::{SPRITE_X_LO, SPRITE_X_VEL, SPRITE_Y_LO, SPRITE_Y_VEL};
 
 const TMP_COUNTER: usize = 0xfb5;
 
@@ -1019,11 +1018,11 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
     }
 
     fn sprite_prep_roller(&mut self, k: usize, vertical: bool, d: u8) {
-        let coordinate = self.ram.read_u8(if vertical {
-            SPRITE_Y_LO + k
+        let coordinate = if vertical {
+            self.ram.sprite(k).y_low()
         } else {
-            SPRITE_X_LO + k
-        });
+            self.ram.sprite(k).x_low()
+        };
         let state = if vertical {
             (coordinate & 16) >> 4
         } else {
@@ -1692,7 +1691,7 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
         }
         self.runtime.trinexx_components_initialize(self.ram, k);
         for i in 0..16 {
-            self.ram.write_u8(0x1d00 + i, 0);
+            self.ram.clear_cached_sprite(i);
         }
     }
 
@@ -1702,7 +1701,7 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
         }
         self.runtime.helmasaur_king_initialize(self.ram, k);
         for i in 0..16 {
-            self.ram.write_u8(0x1d00 + i, 0);
+            self.ram.clear_cached_sprite(i);
         }
     }
 
@@ -2898,15 +2897,7 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
             tx = tx.wrapping_neg();
             ty = ty.wrapping_neg();
         }
-        for (addr, target) in [(SPRITE_X_VEL + k, tx), (SPRITE_Y_VEL + k, ty)] {
-            let v = self.ram.read_u8(addr) as i8;
-            if v != target {
-                self.ram.write_u8(
-                    addr,
-                    v.wrapping_add(if v.wrapping_sub(target) < 0 { 1 } else { -1 }) as u8,
-                );
-            }
-        }
+        self.ram.sprite_mut(k).approach_velocity(tx as u8, ty as u8);
     }
 
     pub fn sprite_0d_buzzblob(&mut self, k: usize) {
@@ -3050,15 +3041,7 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
             .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
         if (k as u8 ^ self.ram.read_u8(0x1a)) & 15 == 0 {
             let (tx, ty, _, _) = self.runtime.project_speed_towards_link(self.ram, k, 4);
-            for (addr, target) in [(SPRITE_X_VEL + k, tx), (SPRITE_Y_VEL + k, ty)] {
-                let v = self.ram.read_u8(addr) as i8;
-                if v != target {
-                    self.ram.write_u8(
-                        addr,
-                        v.wrapping_add(if v.wrapping_sub(target) < 0 { 1 } else { -1 }) as u8,
-                    );
-                }
-            }
+            self.ram.sprite_mut(k).approach_velocity(tx as u8, ty as u8);
         }
         self.runtime.move_xy(self.ram, k);
         if self.runtime.check_damage_to_link(self.ram, k) {

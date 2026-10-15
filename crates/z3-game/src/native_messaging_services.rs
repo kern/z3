@@ -8,42 +8,22 @@ use crate::{
     dungeon::{Dungeon, DungeonHooks},
     hud::Hud,
     integration::NativeGameServices,
-    load_gfx::LoadGfx,
     messaging::MessagingRuntime,
     overworld,
     ram::Ram,
 };
 
-fn with_gfx(
-    services: &mut NativeGameServices<'_>,
-    ram: &mut Ram<'_>,
-    action: impl FnOnce(&mut LoadGfx<'_, crate::assets::RuntimeAssets<'_>, NativeGameServices<'_>>),
-) {
-    let mut vram = std::mem::replace(
-        &mut services.scratch_vram,
-        Box::new([0; z3_core::VRAM_WORDS]),
-    );
-    let assets = services.assets;
-    action(&mut LoadGfx {
-        wram: ram.bytes_mut(),
-        vram: vram.as_mut(),
-        assets,
-        hooks: services,
-    });
-    services.scratch_vram = vram;
-}
-
 /// Exact `DungeonMap_RecoverGFX` body.
 pub fn dungeon_map_recover_graphics(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>) {
     let hdma = ram.read_u8(0x9b);
     ram.write_u8(0x9b, 0);
-    with_gfx(services, ram, |gfx| gfx.erase_tile_maps_normal());
+    services.with_graphics_upload(ram, |gfx| gfx.erase_tile_maps_normal());
     ram.write_u8(0x1c, ram.read_u8(0xc211));
     ram.write_u8(0x1d, ram.read_u8(0xc212));
     ram.write_u8(0xaa1, ram.read_u8(0xc20e));
     ram.write_u8(0xaa3, ram.read_u8(0xc20f));
     ram.write_u8(0xaa2, ram.read_u8(0xc210));
-    with_gfx(services, ram, |gfx| gfx.initialize_tilesets());
+    services.with_graphics_upload(ram, |gfx| gfx.initialize_tilesets());
     ram.write_u16(0xaa8, 0);
     ram.write_u8(0xab2, 0);
     Hud {
@@ -79,7 +59,7 @@ pub fn dungeon_map_recover_graphics(services: &mut NativeGameServices<'_>, ram: 
     }
     ram.write_u8(0x12f, 16);
     ram.write_u8(0x12c, 0xf3);
-    with_gfx(services, ram, |gfx| gfx.recover_peg_gfx_from_mapping());
+    services.with_load_gfx(ram, |gfx| gfx.recover_peg_gfx_from_mapping());
     ram.write_u8(0x15, ram.read_u8(0x15).wrapping_add(1));
     ram.write_u8(0x200, ram.read_u8(0x200).wrapping_add(1));
     ram.write_u8(0x13, 0);
@@ -96,7 +76,7 @@ pub fn dungeon_map_terminal_step(
     match state {
         6 => dungeon_map_recover_graphics(services, ram),
         7 | 0x1b => {
-            with_gfx(services, ram, |gfx| gfx.dungeon_restore_star_tile_chr());
+            services.with_load_gfx(ram, |gfx| gfx.dungeon_restore_star_tile_chr());
             ram.write_u8(0x200, ram.read_u8(0x200).wrapping_add(1));
         }
         _ => return false,
@@ -146,14 +126,14 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
     match state {
         // `GameOver_DelayBeforeIris` calls this after its local timer and letter
         // initialization have completed.
-        2 => with_gfx(services, ram, |gfx| gfx.iris_spotlight_close()),
+        2 => services.with_load_gfx(ram, |gfx| gfx.iris_spotlight_close()),
         3 => {
-            with_gfx(services, ram, |gfx| {
+            services.with_load_gfx(ram, |gfx| {
                 gfx.palette_filter_restore_bg_subtractive_strict()
             });
             ram.write_u16(0xc500, ram.read_u16(0xc540));
             let main_module = ram.read_u8(0x10);
-            with_gfx(services, ram, |gfx| gfx.iris_spotlight_configure_table());
+            services.with_load_gfx(ram, |gfx| gfx.iris_spotlight_configure_table());
             ram.write_u8(0x10, main_module);
             if ram.read_u8(0x11) != 0 {
                 return;
@@ -165,7 +145,7 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
             }
             ram.write_u16(0xc500, 0x18);
             ram.write_u16(0xc540, 0x18);
-            with_gfx(services, ram, |gfx| gfx.iris_spotlight_reset_table());
+            services.with_load_gfx(ram, |gfx| gfx.iris_spotlight_reset_table());
             ram.write_u8(0x9c, 0x20);
             ram.write_u8(0x9d, 0x40);
             ram.write_u8(0x9e, 0x80);
@@ -184,7 +164,7 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
             death_prep_faint(services, ram);
         }
         5 => {
-            with_gfx(services, ram, |gfx| {
+            services.with_load_gfx(ram, |gfx| {
                 gfx.palette_filter_restore_bg_subtractive_strict()
             });
             ram.write_u16(0xc500, ram.read_u16(0xc540));
@@ -199,7 +179,7 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
                     ram.write_u8(0xf35c + i, 2);
                     ram.write_u8(0xc8, 12);
                     ram.write_u8(0xaaa, 15);
-                    with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
+                    services.with_load_gfx(ram, |gfx| gfx.graphics_load_chr_half_slot());
                     ram.write_u8(0xaaa, 0);
                     ram.write_u8(0x11, 10);
                     return;
@@ -214,11 +194,11 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
         6 => {
             ram.write_u8(0xc8, 12);
             ram.write_u8(0xaaa, 15);
-            with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
+            services.with_load_gfx(ram, |gfx| gfx.graphics_load_chr_half_slot());
             ram.write_u8(0xaaa, 0);
             ram.write_u8(0xab1, 5);
             ram.write_u16(0xaa8, 0x200);
-            with_gfx(services, ram, |gfx| {
+            services.with_load_gfx(ram, |gfx| {
                 gfx.palette_load_sprite_environment_dungeon();
                 gfx.palette_load_sprite_main();
             });
@@ -264,7 +244,7 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
         }
         13 => {
             ram.write_u8(0xaaa, 1);
-            with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
+            services.with_load_gfx(ram, |gfx| gfx.graphics_load_chr_half_slot());
             let fixed_color = ram.read_u8(0xc017);
             Dungeon::new(ram.bytes_mut(), services)
                 .dungeon_approach_fixed_color_variable(fixed_color);
@@ -277,14 +257,12 @@ pub fn death_step(services: &mut NativeGameServices<'_>, ram: &mut Ram<'_>, stat
             .refill_logic();
         }
         14 => {
-            with_gfx(services, ram, |gfx| gfx.graphics_load_chr_half_slot());
+            services.with_load_gfx(ram, |gfx| gfx.graphics_load_chr_half_slot());
             ram.write_u8(0x1d, ram.read_u8(0xc212));
             ram.write_u8(0x11, ram.read_u8(0x11).wrapping_add(1));
         }
         15 => {
-            with_gfx(services, ram, |gfx| {
-                gfx.palette_filter_restore_bg_additive_strict()
-            });
+            services.with_load_gfx(ram, |gfx| gfx.palette_filter_restore_bg_additive_strict());
             ram.write_u16(0xc500, ram.read_u16(0xc540));
             if ram.read_u8(0xc007) != 32 {
                 return;

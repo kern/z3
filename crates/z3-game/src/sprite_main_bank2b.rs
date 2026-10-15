@@ -13,7 +13,6 @@
 
 use crate::sprite::SpriteHitBox;
 use crate::sprite_state::SpriteField;
-use crate::sprite_state::layout::{SPRITE_X_VEL, SPRITE_Y_VEL};
 use crate::{oam, ram::Ram};
 
 const FRAME_COUNTER: usize = 0x1a;
@@ -7397,13 +7396,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             0
         };
         self.ram.set_sprite_velocity_z(k, rebound);
-        for base in [SPRITE_X_VEL, SPRITE_Y_VEL] {
-            let v = self.ram.read_i8(base + k);
-            if v != 0 {
-                self.ram
-                    .write_i8(base + k, v.wrapping_add(if v < 0 { 1 } else { -1 }));
-            }
-        }
+        self.ram.sprite_mut(k).approach_velocity(0, 0);
     }
 
     pub fn shop_item_check_for_a_press(&mut self, k: usize) -> bool {

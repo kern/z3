@@ -21,24 +21,14 @@ fn with_gfx(
     services: &mut NativeGameServices<'_>,
     ram: &mut Ram<'_>,
     action: impl FnOnce(
-        &mut crate::load_gfx::LoadGfx<'_, crate::assets::RuntimeAssets<'_>, NativeGameServices<'_>>,
+        &mut crate::load_gfx::GraphicsCpu<
+            '_,
+            crate::assets::RuntimeAssets<'_>,
+            NativeGameServices<'_>,
+        >,
     ),
 ) {
-    let assets = services.assets;
-    let mut scratch_vram = std::mem::replace(
-        &mut services.scratch_vram,
-        Box::new([0; z3_core::VRAM_WORDS]),
-    );
-    {
-        let mut gfx = crate::load_gfx::LoadGfx {
-            wram: ram.bytes_mut(),
-            vram: scratch_vram.as_mut(),
-            assets,
-            hooks: services,
-        };
-        action(&mut gfx);
-    }
-    services.scratch_vram = scratch_vram;
+    services.with_load_gfx(ram, action);
 }
 
 fn with_dungeon(
