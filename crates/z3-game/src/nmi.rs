@@ -4,6 +4,10 @@
 //! This module deliberately does the same instead of inventing transient
 //! [`z3_snes::dma::Dma`] state that does not occur in the reference port.
 
+use crate::graphics_upload::{
+    ScrollUploadStream, StripeStream, TransferBounds, TransferLayout, UploadPacketStream,
+    VramUpload, VramWordAddress,
+};
 use crate::ram::Ram;
 use crate::sound::SoundPort;
 use core::fmt;
@@ -59,51 +63,33 @@ fn checked<'a>(
 
 #[track_caller]
 fn write_vram_bytes(ppu: &mut Ppu, word_addr: usize, src: &[u8]) -> Result<(), NmiError> {
-    let byte_addr = word_addr
-        .checked_mul(2)
-        .ok_or(NmiError::InvalidVramTarget(word_addr))?;
-    if byte_addr.saturating_add(src.len()) > ppu.vram.len() * 2 {
-        eprintln!(
-            "invalid VRAM DMA caller={} target={word_addr:04x} len={:x}",
-            core::panic::Location::caller(),
-            src.len()
-        );
-        return Err(NmiError::InvalidVramTarget(word_addr));
+    VramUpload {
+        destination: VramWordAddress::new(word_addr),
+        layout: TransferLayout::PackedBytes,
+        bounds: TransferBounds::Strict,
+        bytes: src,
     }
-    for (i, &value) in src.iter().enumerate() {
-        let absolute = byte_addr + i;
-        let word = &mut ppu.vram[absolute >> 1];
-        if absolute & 1 == 0 {
-            *word = (*word & 0xff00) | u16::from(value);
-        } else {
-            *word = (*word & 0xff) | (u16::from(value) << 8);
-        }
-    }
-    Ok(())
+    .apply(&mut ppu.vram)
 }
 
 fn write_vertical(ppu: &mut Ppu, word_addr: usize, src: &[u8]) -> Result<(), NmiError> {
-    if src.len() & 1 != 0 {
-        return Err(NmiError::TruncatedData);
+    VramUpload {
+        destination: VramWordAddress::new(word_addr),
+        layout: TransferLayout::ColumnWords,
+        bounds: TransferBounds::Strict,
+        bytes: src,
     }
-    for (i, pair) in src.chunks_exact(2).enumerate() {
-        let address = word_addr + i * 32;
-        *ppu.vram
-            .get_mut(address)
-            .ok_or(NmiError::InvalidVramTarget(address))? = u16::from_le_bytes([pair[0], pair[1]]);
-    }
-    Ok(())
+    .apply(&mut ppu.vram)
 }
 
 fn write_low(ppu: &mut Ppu, word_addr: usize, src: &[u8]) -> Result<(), NmiError> {
-    let dst = ppu
-        .vram
-        .get_mut(word_addr..word_addr.saturating_add(src.len()))
-        .ok_or(NmiError::InvalidVramTarget(word_addr))?;
-    for (word, &value) in dst.iter_mut().zip(src) {
-        *word = (*word & 0xff00) | u16::from(value);
+    VramUpload {
+        destination: VramWordAddress::new(word_addr),
+        layout: TransferLayout::LowBytes,
+        bounds: TransferBounds::Strict,
+        bytes: src,
     }
-    Ok(())
+    .apply(&mut ppu.vram)
 }
 
 fn copy_ram_words(ram: &Ram<'_>, address: usize, dst: &mut [u16]) {
@@ -275,25 +261,21 @@ pub fn do_updates(
             } else {
                 usize::from(ram.read_u16(address))
             };
-            let data = ram.slice(source, len).to_vec();
-            write_vram_bytes(ppu, dst, &data)?;
+            write_vram_bytes(ppu, dst, ram.slice(source, len))?;
         }
         if ram.read_u8(0xaf4) != 0 {
             for (dst, address) in [(0x40e0, 0xaf6), (0x41e0, 0xaf8)] {
                 let source = usize::from(ram.read_u16(address));
-                let data = ram.slice(source, 0x40).to_vec();
-                write_vram_bytes(ppu, dst, &data)?;
+                write_vram_bytes(ppu, dst, ram.slice(source, 0x40))?;
             }
         }
         let source = usize::from(ram.read_u16(0xadc));
         let dst = usize::from(ram.read_u16(0x134));
-        let data = ram.slice(source, 0x400).to_vec();
-        write_vram_bytes(ppu, dst, &data)?;
+        write_vram_bytes(ppu, dst, ram.slice(source, 0x400))?;
     }
     if ram.read_u8(0x16) != 0 {
         let dst = usize::from(ram.read_u16(0x219));
-        let data = ram.slice(0xc700, 330).to_vec();
-        write_vram_bytes(ppu, dst, &data)?;
+        write_vram_bytes(ppu, dst, ram.slice(0xc700, 330))?;
     }
     if ram.read_u8(0x15) != 0 {
         copy_ram_words(ram, 0xc500, &mut ppu.cgram);
@@ -303,21 +285,11 @@ pub fn do_updates(
     copy_ram_words(ram, 0x800, &mut ppu.oam);
     let bg = ram.read_u8(0x14);
     if bg != 0 {
-        let owned;
         let source = match bg {
-            1 => {
-                owned = ram.slice(0x1002, 0xeffe).to_vec();
-                &owned[..]
-            }
-            2 => {
-                owned = ram.slice(0x1000, 0xf000).to_vec();
-                &owned[..]
-            }
+            1 => ram.slice(0x1002, 0xeffe),
+            2 => ram.slice(0x1000, 0xf000),
             3 => assets.bg_tilemaps[0],
-            4 => {
-                owned = ram.slice(0x21b, z3_core::WRAM_SIZE - 0x21b).to_vec();
-                &owned[..]
-            }
+            4 => ram.slice(0x21b, z3_core::WRAM_SIZE - 0x21b),
             5..=9 => assets.bg_tilemaps[usize::from(bg - 4)],
             other => return Err(NmiError::InvalidBackgroundSource(other)),
         };
@@ -339,8 +311,7 @@ pub fn do_updates(
     let tile_dst = ram.read_u8(0x19);
     if tile_dst != 0 {
         let source = 0x10000 + usize::from(ram.read_u16(0x118));
-        let data = ram.slice(source, 0x200).to_vec();
-        write_vram_bytes(ppu, usize::from(tile_dst) * 256, &data)?;
+        write_vram_bytes(ppu, usize::from(tile_dst) * 256, ram.slice(source, 0x200))?;
         ram.write_u8(0x19, 0);
     }
     if ram.read_u8(0x18) != 0 {
@@ -355,23 +326,11 @@ pub fn do_updates(
 
 fn copy_packets(ram: &Ram<'_>, ppu: &mut Ppu) -> Result<(), NmiError> {
     // `uvram.data` follows the 0x100-byte pad in UploadVram_3.
-    let mut cursor = 0x1100;
-    loop {
-        if ram.read_u16(cursor) == 0xffff {
-            return Ok(());
-        }
-        let dst = usize::from(ram.read_u16(cursor));
-        let mode = ram.read_u8(cursor + 2);
-        let len = usize::from(ram.read_u8(cursor + 3));
-        cursor += 4;
-        let data = ram.slice(cursor, len);
-        match mode {
-            0x80 => write_vram_bytes(ppu, dst, data)?,
-            0x81 => write_vertical(ppu, dst, data)?,
-            other => return Err(NmiError::UnsupportedVmain(other)),
-        }
-        cursor += len;
+    let mut stream = UploadPacketStream::new(ram.slice(0x1100, z3_core::WRAM_SIZE - 0x1100));
+    while let Some(upload) = stream.next_upload()? {
+        upload.apply(&mut ppu.vram)?;
     }
+    Ok(())
 }
 
 pub fn dispatch_update(
@@ -475,33 +434,9 @@ fn upload_tilemap(ram: &mut Ram<'_>, ppu: &mut Ppu) -> Result<(), NmiError> {
 
 fn update_ow_scroll(ram: &mut Ram<'_>, ppu: &mut Ppu) -> Result<(), NmiError> {
     // C starts at `uvram.data`, not at the containing struct's base.
-    let mut cursor = 0x1100;
-    let header = ram.read_u16(cursor);
-    let vertical = header & 0x8000 != 0;
-    let len = usize::from(header & 0x3fff);
-    let copy_len = len & !1;
-    cursor += 2;
-    loop {
-        let dst = usize::from(ram.read_u16(cursor));
-        cursor += 2;
-        let data = ram.slice(cursor, copy_len);
-        if vertical {
-            // The C port writes through a raw pointer into its 0x8000-word VRAM
-            // buffer. An OW column can run past its end at the screen edge;
-            // those writes land outside VRAM (which is the final Ppu field),
-            // not at wrapped VRAM addresses. Preserve the in-range writes.
-            for (i, pair) in data.chunks_exact(2).enumerate() {
-                if let Some(word) = ppu.vram.get_mut(dst + i * 32) {
-                    *word = u16::from_le_bytes([pair[0], pair[1]]);
-                }
-            }
-        } else {
-            write_vram_bytes(ppu, dst, data)?
-        }
-        cursor += copy_len;
-        if ram.read_u8(cursor + 1) & 0x80 != 0 {
-            break;
-        }
+    let mut stream = ScrollUploadStream::new(ram.slice(0x1100, z3_core::WRAM_SIZE - 0x1100));
+    while let Some(upload) = stream.next_upload() {
+        upload.apply(&mut ppu.vram)?;
     }
     ram.write_u8(0x710, 0);
     Ok(())
@@ -520,16 +455,13 @@ fn arbitrary(
         // VRAM pointer. Some transitions leave an address beyond its final
         // 0x8000-word Ppu field; those bytes do not enter observable VRAM.
         let data = ram.slice(src, 0x80);
-        for (offset, &value) in data.iter().enumerate() {
-            let address = dst * 2 + offset;
-            if let Some(word) = ppu.vram.get_mut(address >> 1) {
-                if address & 1 == 0 {
-                    *word = (*word & 0xff00) | u16::from(value);
-                } else {
-                    *word = (*word & 0xff) | (u16::from(value) << 8);
-                }
-            }
+        VramUpload {
+            destination: VramWordAddress::new(dst),
+            layout: TransferLayout::PackedBytes,
+            bounds: TransferBounds::ClipOutsideVram,
+            bytes: data,
         }
+        .apply(&mut ppu.vram)?;
         src += 0x80;
         i += 2;
         if i == end {
@@ -567,42 +499,11 @@ fn dark_map(ram: &Ram<'_>, ppu: &mut Ppu) -> Result<(), NmiError> {
 }
 
 pub fn handle_stripes14(ppu: &mut Ppu, data: &[u8]) -> Result<(), NmiError> {
-    let mut cursor = 0;
-    loop {
-        if data.get(cursor).ok_or(NmiError::TruncatedData)? & 0x80 != 0 {
-            return Ok(());
-        }
-        let h = data
-            .get(cursor..cursor + 4)
-            .ok_or(NmiError::TruncatedData)?;
-        let dst = usize::from(u16::from_be_bytes([h[0], h[1]]));
-        let vertical = h[2] & 0x80 != 0;
-        let fill = h[2] & 0x40 != 0;
-        let len = usize::from(u16::from_be_bytes([h[2], h[3]]) & 0x3fff) + 1;
-        cursor += 4;
-        if fill {
-            let pair = data
-                .get(cursor..cursor + 2)
-                .ok_or(NmiError::TruncatedData)?;
-            let repeated = pair.repeat((len + 1) >> 1);
-            if vertical {
-                write_vertical(ppu, dst, &repeated)?
-            } else {
-                write_vram_bytes(ppu, dst, &repeated)?
-            }
-            cursor += 2;
-        } else {
-            let source = data
-                .get(cursor..cursor + len)
-                .ok_or(NmiError::TruncatedData)?;
-            if vertical {
-                write_vertical(ppu, dst, source)?
-            } else {
-                write_vram_bytes(ppu, dst, source)?
-            }
-            cursor += len;
-        }
+    let mut stream = StripeStream::new(data);
+    while let Some(stripe) = stream.next_stripe()? {
+        stripe.apply(&mut ppu.vram)?;
     }
+    Ok(())
 }
 
 pub fn update_irq_gfx(ram: &mut Ram<'_>, ppu: &mut Ppu) -> Result<(), NmiError> {

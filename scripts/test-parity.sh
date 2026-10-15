@@ -4,6 +4,7 @@ set -eu
 scripts/test-c-oracle.sh
 cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
+ruby scripts/test-replay-ranges.rb
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
@@ -26,6 +27,8 @@ cargo run -q -p z3-verify --bin check_player_oam_main -- \
   build/c-oracle/player_oam_main_oracle
 cargo run -q -p z3-verify --bin check_positions -- \
   build/c-oracle/position_oracle
+cargo run -q -p z3-verify --bin check_stripes -- \
+  build/c-oracle/stripe_oracle
 cargo run -q -p z3-verify --bin check_tile_detect -- \
   build/c-oracle/tile_detect_oracle
 cargo run -q -p z3-verify --bin check_overlord -- \

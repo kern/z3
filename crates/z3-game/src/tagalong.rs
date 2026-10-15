@@ -1,5 +1,5 @@
 //! Native follower logic. State addresses match `src/variables.h`.
-use crate::{oam, ram::Ram};
+use crate::{oam, position::SplitCoordinate, ram::Ram};
 
 const MAIN: usize = 0x10;
 const SUB: usize = 0x11;
@@ -95,6 +95,12 @@ const SORT_SPRITES: usize = 0xfb3;
 const DIALOGUE: usize = 0x1cf0;
 const SAVE_DUNG_INFO: usize = 0xf000;
 const SAVE_OW_INFO: usize = 0xf280;
+const HISTORY_X: SplitCoordinate = SplitCoordinate::new(XLO, XHI);
+const HISTORY_Y: SplitCoordinate = SplitCoordinate::new(YLO, YHI);
+const ANCILLA_X: SplitCoordinate = SplitCoordinate::new(ANC_X_LO, ANC_X_HI);
+const ANCILLA_Y: SplitCoordinate = SplitCoordinate::new(ANC_Y_LO, ANC_Y_HI);
+const SPRITE_X: SplitCoordinate = SplitCoordinate::new(SPR_X_LO, SPR_X_HI);
+const SPRITE_Y: SplitCoordinate = SplitCoordinate::new(SPR_Y_LO, SPR_Y_HI);
 
 const TAB5: [u8; 15] = [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 const TAB4: [u8; 15] = [0, 0, 3, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -297,8 +303,8 @@ pub fn validate_message_freedom(r: &Ram<'_>) -> bool {
 pub fn initialize<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &H) {
     let y = r.read_u16(LINK_Y);
     let x = r.read_u16(LINK_X);
-    set16(r, YLO, YHI, 0, y);
-    set16(r, XLO, XHI, 0, x);
+    HISTORY_Y.set_pixels(r, 0, y);
+    HISTORY_X.set_pixels(r, 0, x);
     r.write_u8(
         LAYER,
         FLAGS[usize::from(r.read_u8(LOWER))] >> 2 | r.read_u8(DIR) >> 1,
@@ -329,8 +335,8 @@ pub fn move_towards_link<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
         r.write_u8(ANC_Y_VEL + 9, speed.y);
         hooks.ancilla_move_y(r, 9);
         hooks.ancilla_move_x(r, 9);
-        let x = get16(r, ANC_X_LO, ANC_X_HI, 9);
-        let y = get16(r, ANC_Y_LO, ANC_Y_HI, 9);
+        let x = ANCILLA_X.pixels(r, 9);
+        let y = ANCILLA_Y.pixels(r, 9);
         if ad(x, r.read_u16(LINK_X)) < 2 && ad(y, r.read_u16(LINK_Y)) < 2 {
             return;
         }
@@ -340,18 +346,18 @@ pub fn move_towards_link<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
             return;
         }
         let k = usize::from(k);
-        set16(r, YLO, YHI, k, y);
-        set16(r, XLO, XHI, k, x);
+        HISTORY_Y.set_pixels(r, k, y);
+        HISTORY_X.set_pixels(r, k, x);
         r.write_u8(LAYER + k, FLAGS[usize::from(r.read_u8(LOWER))] >> 2 | 1);
     }
 }
 
 pub fn sprite_become_follower<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H, k: usize) {
     r.write_u8(VAR5, 0);
-    let y = get16(r, SPR_Y_LO, SPR_Y_HI, k).wrapping_sub(6);
-    let x = get16(r, SPR_X_LO, SPR_X_HI, k).wrapping_add(1);
-    set16(r, YLO, YHI, 0, y);
-    set16(r, XLO, XHI, 0, x);
+    let y = SPRITE_Y.pixels(r, k).wrapping_sub(6);
+    let x = SPRITE_X.pixels(r, k).wrapping_add(1);
+    HISTORY_Y.set_pixels(r, 0, y);
+    HISTORY_X.set_pixels(r, 0, x);
     r.write_u8(LAYER, FLAGS[usize::from(r.read_u8(LOWER))] >> 2 | 1);
     r.write_u8(REACQUIRE, 64);
     for a in [VAR1, VAR2, VAR3, VAR4, SPEED, VAR5, DROPPED] {
@@ -438,8 +444,9 @@ fn drop_follower<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
 #[must_use]
 pub fn check_blind_trigger(r: &Ram<'_>) -> bool {
     let k = usize::from(r.read_u8(VAR2));
-    let x = get16(r, XLO, XHI, k).wrapping_add(8);
-    let y = get16(r, YLO, YHI, k)
+    let x = HISTORY_X.pixels(r, k).wrapping_add(8);
+    let y = HISTORY_Y
+        .pixels(r, k)
         .wrapping_add(i16::from(r.read_i8(Z + k)) as u16)
         .wrapping_add(12);
     ad(0x1568, y) < 24 && ad(0x1980, x) < 24
@@ -484,14 +491,8 @@ pub fn check_game_mode<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
         }
         let i = usize::from(k);
         r.write_u8(Z + i, z);
-        set16(
-            r,
-            YLO,
-            YHI,
-            i,
-            r.read_u16(LINK_Y).wrapping_sub(u16::from(z)),
-        );
-        set16(r, XLO, XHI, i, r.read_u16(LINK_X));
+        HISTORY_Y.set_pixels(r, i, r.read_u16(LINK_Y).wrapping_sub(u16::from(z)));
+        HISTORY_X.set_pixels(r, i, r.read_u16(LINK_X));
         let mut l = r.read_u8(DIR) >> 1 | FLAGS[usize::from(r.read_u8(LOWER))] >> 2;
         if r.read_u8(PLAYER_STATE) == 4 {
             l |= 0x20
@@ -520,8 +521,8 @@ pub fn disable(r: &mut Ram<'_>) {
 }
 pub fn drop_snapshot(r: &mut Ram<'_>) {
     let k = usize::from(r.read_u8(VAR2));
-    r.write_u16(SAVED_Y, get16(r, YLO, YHI, k));
-    r.write_u16(SAVED_X, get16(r, XLO, XHI, k));
+    r.write_u16(SAVED_Y, HISTORY_Y.pixels(r, k));
+    r.write_u16(SAVED_X, HISTORY_X.pixels(r, k));
     r.write_u8(SAVED_FLOOR, r.read_u8(LOWER));
     r.write_u8(SAVED_INDOORS, r.read_u8(INDOORS));
     r.write_u8(DROPPED, 128)
@@ -599,8 +600,8 @@ pub fn draw<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
         (r.read_u8(LAYER + priority_k) & 0xc) << 2
     };
     r.write_u16(OAM_PRIORITY, u16::from(priority) << 8);
-    let x = get16(r, XLO, XHI, k);
-    let y = get16(r, YLO, YHI, k);
+    let x = HISTORY_X.pixels(r, k);
+    let y = HISTORY_Y.pixels(r, k);
     animate_movement(r, hooks, r.read_u8(LAYER + k), x, y);
 }
 
@@ -777,8 +778,8 @@ fn set_oam_follower(
 pub fn blind_spawn_from_maiden<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H, x: u16, y: u16) {
     r.write_u8(SPR_STATE, 9);
     r.write_u8(SPR_TYPE, 206);
-    set16(r, SPR_X_LO, SPR_X_HI, 0, x);
-    set16(r, SPR_Y_LO, SPR_Y_HI, 0, y.wrapping_sub(16));
+    SPRITE_X.set_pixels(r, 0, x);
+    SPRITE_Y.set_pixels(r, 0, y.wrapping_sub(16));
     hooks.sprite_prep_load_properties(r, 0);
     r.write_u8(SPR_DELAY_AUX2, 192);
     r.write_u8(SPR_GRAPHICS, 21);
@@ -802,20 +803,8 @@ pub fn kiki_spawn_handler_monke<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H
         let dir = r.read_u8(LAYER + k) & 3;
         r.write_u8(SPR_HEAD_DIR + j, dir);
         r.write_u8(SPR_D + j, dir);
-        set16(
-            r,
-            SPR_X_LO,
-            SPR_X_HI,
-            j,
-            get16(r, XLO, XHI, k).wrapping_add(2),
-        );
-        set16(
-            r,
-            SPR_Y_LO,
-            SPR_Y_HI,
-            j,
-            get16(r, YLO, YHI, k).wrapping_add(2),
-        );
+        SPRITE_X.set_pixels(r, j, HISTORY_X.pixels(r, k).wrapping_add(2));
+        SPRITE_Y.set_pixels(r, j, HISTORY_Y.pixels(r, k).wrapping_add(2));
         r.write_u8(SPR_FLOOR + j, r.read_u8(LOWER));
         r.write_u8(SPR_IGNORE_PROJECTILE + j, 1);
         r.write_u8(SPR_FLOOR + j, 2);
@@ -858,8 +847,8 @@ pub fn basic_mover<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
         && check_blind_trigger(r)
     {
         let k = usize::from(r.read_u8(VAR2));
-        let x = get16(r, XLO, XHI, k);
-        let y = get16(r, YLO, YHI, k);
+        let x = HISTORY_X.pixels(r, k);
+        let y = HISTORY_Y.pixels(r, k);
         r.write_u8(FOLLOWER, 0);
         blind_spawn_from_maiden(r, hooks, x, y);
         r.write_u8(TRAPDOORS_DOWN, r.read_u8(TRAPDOORS_DOWN).wrapping_add(1));
@@ -893,8 +882,8 @@ pub fn basic_mover<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
             advance = true;
         } else {
             r.write_u8(Z + k, 0);
-            set16(r, YLO, YHI, k, r.read_u16(LINK_Y));
-            set16(r, XLO, XHI, k, r.read_u16(LINK_X));
+            HISTORY_Y.set_pixels(r, k, r.read_u16(LINK_Y));
+            HISTORY_X.set_pixels(r, k, r.read_u16(LINK_X));
         }
     }
     if advance
@@ -965,8 +954,8 @@ pub fn old_man<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
                 r.write_u8(FOLLOWER, TAB4[follower]);
                 r.write_u8(REACQUIRE, 64);
                 let k = usize::from(r.read_u8(VAR2));
-                r.write_u16(SAVED_Y, get16(r, YLO, YHI, k));
-                r.write_u16(SAVED_X, get16(r, XLO, XHI, k));
+                r.write_u16(SAVED_Y, HISTORY_Y.pixels(r, k));
+                r.write_u16(SAVED_X, HISTORY_X.pixels(r, k));
                 r.write_u8(SAVED_FLOOR, r.read_u8(LOWER));
                 old_man_unused(r, hooks);
                 return;
@@ -1012,13 +1001,6 @@ pub fn do_layers<H: TagalongHooks>(r: &mut Ram<'_>, hooks: &mut H) {
     };
     animate_movement(r, hooks, a, r.read_u16(SAVED_X), r.read_u16(SAVED_Y));
 }
-fn get16(r: &Ram<'_>, lo: usize, hi: usize, k: usize) -> u16 {
-    u16::from(r.read_u8(lo + k)) | u16::from(r.read_u8(hi + k)) << 8
-}
-fn set16(r: &mut Ram<'_>, lo: usize, hi: usize, k: usize, v: u16) {
-    r.write_u8(lo + k, v as u8);
-    r.write_u8(hi + k, (v >> 8) as u8)
-}
 fn abs(v: u16) -> u16 {
     if (v as i16) < 0 { v.wrapping_neg() } else { v }
 }
@@ -1043,6 +1025,24 @@ fn add_i8(v: u16, delta: i8) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_coordinate_updates_preserve_neighbors_and_other_history_fields() {
+        let mut bytes = [0xa5; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        for slot in [0, 19] {
+            let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+            HISTORY_X.set_pixels(&mut ram, slot, 0xffff);
+            HISTORY_Y.set_pixels(&mut ram, slot, 0x100);
+            expected[0x1a28 + slot] = 0xff;
+            expected[0x1a3c + slot] = 0xff;
+            expected[0x1a00 + slot] = 0;
+            expected[0x1a14 + slot] = 1;
+            assert_eq!(HISTORY_X.pixels(&ram, slot), 0xffff);
+            assert_eq!(HISTORY_Y.pixels(&ram, slot), 0x100);
+            assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+        }
+    }
     use z3_core::WRAM_SIZE;
     struct Hooks {
         features: u32,
@@ -1097,8 +1097,8 @@ mod tests {
         r.write_u8(LOWER, 1);
         r.write_u8(DIR, 6);
         initialize(&mut r, &Hooks::default());
-        assert_eq!(get16(&r, XLO, XHI, 0), 0x1234);
-        assert_eq!(get16(&r, YLO, YHI, 0), 0xabcd);
+        assert_eq!(HISTORY_X.pixels(&r, 0), 0x1234);
+        assert_eq!(HISTORY_Y.pixels(&r, 0), 0xabcd);
         assert_eq!(r.read_u8(LAYER), 7);
         assert_eq!(r.read_u8(REACQUIRE), 64)
     }
@@ -1140,8 +1140,8 @@ mod tests {
         blind_spawn_from_maiden(&mut r, &mut hooks, 0x345, 0x678);
         assert_eq!(r.read_u8(SPR_STATE), 9);
         assert_eq!(r.read_u8(SPR_TYPE), 206);
-        assert_eq!(get16(&r, SPR_X_LO, SPR_X_HI, 0), 0x345);
-        assert_eq!(get16(&r, SPR_Y_LO, SPR_Y_HI, 0), 0x668);
+        assert_eq!(SPRITE_X.pixels(&r, 0), 0x345);
+        assert_eq!(SPRITE_Y.pixels(&r, 0), 0x668);
         assert_eq!(r.read_u8(SPR_DELAY_AUX2), 192);
         assert_eq!(r.read_u16(DUNG_SAVE_BITS), 0x2000);
         assert_eq!(hooks.preps, 1);
@@ -1155,13 +1155,13 @@ mod tests {
             spawn: 3,
             ..Hooks::default()
         };
-        set16(&mut r, XLO, XHI, 7, 0x1111);
-        set16(&mut r, YLO, YHI, 7, 0x2222);
+        HISTORY_X.set_pixels(&mut r, 7, 0x1111);
+        HISTORY_Y.set_pixels(&mut r, 7, 0x2222);
         r.write_u8(LAYER + 7, 0x23);
         r.write_u8(LOWER, 1);
         assert_eq!(kiki_spawn_handler_monke(&mut r, &mut hooks, 7), 3);
-        assert_eq!(get16(&r, SPR_X_LO, SPR_X_HI, 3), 0x1113);
-        assert_eq!(get16(&r, SPR_Y_LO, SPR_Y_HI, 3), 0x2224);
+        assert_eq!(SPRITE_X.pixels(&r, 3), 0x1113);
+        assert_eq!(SPRITE_Y.pixels(&r, 3), 0x2224);
         assert_eq!(r.read_u8(SPR_HEAD_DIR + 3), 3);
         assert_eq!(r.read_u8(SPR_FLOOR + 3), 2);
     }
@@ -1219,8 +1219,8 @@ mod tests {
         r.write_u8(FOLLOWER, 1);
         r.write_u8(VAR2, 0x80);
         r.write_u8(Z + 0x80, 1);
-        set16(&mut r, XLO, XHI, 0, 0x40);
-        set16(&mut r, YLO, YHI, 0, 0x80);
+        HISTORY_X.set_pixels(&mut r, 0, 0x40);
+        HISTORY_Y.set_pixels(&mut r, 0, 0x80);
         r.write_u16(LINK_Y, 0x80);
 
         draw(&mut r, &mut hooks);

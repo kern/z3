@@ -1,11 +1,13 @@
 //! Native Zelda runtime translated from `src/`.
 
 pub mod ancilla;
+pub mod ancilla_state;
 pub mod assets;
 pub mod attract;
 pub mod audio;
 pub mod dungeon;
 pub mod ending;
+pub mod graphics_upload;
 pub mod host;
 pub mod hud;
 pub mod integration;
@@ -34,5 +36,6 @@ pub mod sprite_main_bank0;
 pub mod sprite_main_bank1;
 pub mod sprite_main_bank2a;
 pub mod sprite_main_bank2b;
+pub mod sprite_state;
 pub mod tagalong;
 pub mod tile_detect;

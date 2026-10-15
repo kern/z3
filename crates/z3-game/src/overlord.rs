@@ -4,7 +4,7 @@
 //! into the sprite allocator, tile system, random source, garnish allocator,
 //! and sound system are represented by [`OverlordHooks`].
 
-use crate::ram::Ram;
+use crate::{position::SplitCoordinate, ram::Ram};
 
 const OVERLORD_TYPE: usize = 0x0b00;
 const OVERLORD_X_LO: usize = 0x0b08;
@@ -16,6 +16,8 @@ const OVERLORD_GEN2: usize = 0x0b30;
 const OVERLORD_GEN3: usize = 0x0b38;
 const OVERLORD_FLOOR: usize = 0x0b40;
 const OVERLORD_OFFSET_SPRITE_POS: usize = 0x0b48;
+const CONTROLLER_X: SplitCoordinate = SplitCoordinate::new(OVERLORD_X_LO, OVERLORD_X_HI);
+const CONTROLLER_Y: SplitCoordinate = SplitCoordinate::new(OVERLORD_Y_LO, OVERLORD_Y_HI);
 
 const SPRITE_IGNORE_PROJECTILE: usize = 0x0ba0;
 const SPRITE_FLAGS5: usize = 0x0be0;
@@ -141,24 +143,20 @@ fn add_i8(value: u16, offset: i8) -> u16 {
 
 #[must_use]
 pub fn get_x(ram: &Ram<'_>, k: usize) -> u16 {
-    u16::from(read_index(ram, OVERLORD_X_LO, k))
-        | (u16::from(read_index(ram, OVERLORD_X_HI, k)) << 8)
+    CONTROLLER_X.pixels(ram, k)
 }
 
 #[must_use]
 pub fn get_y(ram: &Ram<'_>, k: usize) -> u16 {
-    u16::from(read_index(ram, OVERLORD_Y_LO, k))
-        | (u16::from(read_index(ram, OVERLORD_Y_HI, k)) << 8)
+    CONTROLLER_Y.pixels(ram, k)
 }
 
 pub fn set_x(ram: &mut Ram<'_>, k: usize, value: u16) {
-    write_index(ram, OVERLORD_X_LO, k, value as u8);
-    write_index(ram, OVERLORD_X_HI, k, (value >> 8) as u8);
+    CONTROLLER_X.set_pixels(ram, k, value);
 }
 
 pub fn set_y(ram: &mut Ram<'_>, k: usize, value: u16) {
-    write_index(ram, OVERLORD_Y_LO, k, value as u8);
-    write_index(ram, OVERLORD_Y_HI, k, (value >> 8) as u8);
+    CONTROLLER_Y.set_pixels(ram, k, value);
 }
 
 #[must_use]
@@ -182,13 +180,11 @@ pub fn armos_sin(hooks: &impl OverlordHooks, angle: u16, radius: u8) -> i8 {
 }
 
 fn sprite_set_x(ram: &mut Ram<'_>, k: usize, value: u16) {
-    write_index(ram, SPRITE_X_LO, k, value as u8);
-    write_index(ram, SPRITE_X_HI, k, (value >> 8) as u8);
+    SplitCoordinate::new(SPRITE_X_LO, SPRITE_X_HI).set_pixels(ram, k, value);
 }
 
 fn sprite_set_y(ram: &mut Ram<'_>, k: usize, value: u16) {
-    write_index(ram, SPRITE_Y_LO, k, value as u8);
-    write_index(ram, SPRITE_Y_HI, k, (value >> 8) as u8);
+    SplitCoordinate::new(SPRITE_Y_LO, SPRITE_Y_HI).set_pixels(ram, k, value);
 }
 
 pub fn main(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks) {
@@ -910,6 +906,28 @@ pub fn armos_coordinator_disable_coercion(ram: &mut Ram<'_>) {
 mod tests {
     use super::*;
     use z3_core::WRAM_SIZE;
+
+    #[test]
+    fn split_controller_coordinates_touch_only_selected_low_and_high_bytes() {
+        let mut bytes = [0xa5; WRAM_SIZE];
+        let mut ram = Ram::new(&mut bytes);
+        for slot in [0, 7] {
+            for value in [0, 0xff, 0x100, 0xffff] {
+                let mut expected = ram.slice(0, WRAM_SIZE).to_vec();
+                set_x(&mut ram, slot, value);
+                set_y(&mut ram, slot, value.wrapping_add(1));
+                let [x_low, x_high] = value.to_le_bytes();
+                let [y_low, y_high] = value.wrapping_add(1).to_le_bytes();
+                expected[0xb08 + slot] = x_low;
+                expected[0xb10 + slot] = x_high;
+                expected[0xb18 + slot] = y_low;
+                expected[0xb20 + slot] = y_high;
+                assert_eq!(get_x(&ram, slot), value);
+                assert_eq!(get_y(&ram, slot), value.wrapping_add(1));
+                assert_eq!(ram.slice(0, WRAM_SIZE), expected);
+            }
+        }
+    }
 
     #[derive(Default)]
     struct Hooks {

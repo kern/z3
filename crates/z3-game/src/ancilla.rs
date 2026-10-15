@@ -1,8 +1,8 @@
 //! Ancilla (projectile/effect) runtime translated from `src/ancilla.c`.
 //!
-//! Ancillae deliberately retain their original structure-of-arrays WRAM layout.
-//! All fixed-point movement is performed as a 24-bit wrapping operation, just
-//! like the 65816/C implementation.
+//! Named live effect views retain the original structure-of-arrays WRAM layout.
+//! World and height movement keep their respective 24-bit and 16-bit wrapping
+//! fixed-point behavior.
 
 use crate::{oam, position::SplitPosition, ram::Ram};
 
@@ -10,30 +10,25 @@ use crate::{oam, position::SplitPosition, ram::Ram};
 mod handlers_0;
 
 pub const ANCILLA_COUNT: usize = 10;
-const OBJPRIO: usize = 0x280;
+#[cfg(test)]
 const Z_VEL: usize = 0x294;
 const Z: usize = 0x29e;
 const Z_SUBPIXEL: usize = 0x2a8;
-const ARR4: usize = 0xbf0;
 const Y_LO: usize = 0xbfa;
 const X_LO: usize = 0xc04;
 const Y_HI: usize = 0xc0e;
 const X_HI: usize = 0xc18;
+#[cfg(test)]
 const Y_VEL: usize = 0xc22;
+#[cfg(test)]
 const X_VEL: usize = 0xc2c;
 const Y_SUBPIXEL: usize = 0xc36;
 const X_SUBPIXEL: usize = 0xc40;
 const X_POSITION: SplitPosition<16> = SplitPosition::world(X_SUBPIXEL, X_LO, X_HI);
 const Y_POSITION: SplitPosition<16> = SplitPosition::world(Y_SUBPIXEL, Y_LO, Y_HI);
 const HEIGHT: SplitPosition<8> = SplitPosition::height(Z_SUBPIXEL, Z);
+#[cfg(test)]
 const TYPE: usize = 0xc4a;
-const STEP: usize = 0xc54;
-const ITEM_TO_LINK: usize = 0xc5e;
-const TIMER: usize = 0xc68;
-const DIRECTION: usize = 0xc72;
-const FLOOR: usize = 0xc7c;
-const OAM_INDEX: usize = 0xc86;
-const NUM_SPRITES: usize = 0xc90;
 const OAM_CUR_PTR: usize = 0x90;
 const FEATURES0: usize = 0x64c;
 const FEATURE_EXTEND_SCREEN_64: u32 = 1;
@@ -97,10 +92,10 @@ pub trait AncillaRuntime {
     fn terminate_sparkle_objects(&mut self, ram: &mut Ram<'_>) {
         for slot in 0..5 {
             if matches!(
-                ram.read_u8(TYPE + slot),
+                ram.ancilla(slot).kind(),
                 0x2a | 0x2b | 0x30 | 0x31 | 0x18 | 0x19 | 0x0c
             ) {
-                ram.write_u8(TYPE + slot, 0);
+                ram.ancilla_mut(slot).set_kind(0);
             }
         }
     }
@@ -272,26 +267,24 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     #[must_use]
     pub fn alloc_high(&self) -> Option<usize> {
-        (0..ANCILLA_COUNT)
-            .rev()
-            .find(|&k| self.ram.read_u8(TYPE + k) == 0)
+        (0..ANCILLA_COUNT).rev().find(|&k| self.kind(k) == 0)
     }
 
     pub fn move_x(&mut self, k: usize) {
         let position = X_POSITION.load(self.ram, k);
-        let velocity = self.ram.read_i8(X_VEL + k);
+        let velocity = self.x_velocity(k) as i8;
         X_POSITION.store(self.ram, k, position.advanced(velocity));
     }
 
     pub fn move_y(&mut self, k: usize) {
         let position = Y_POSITION.load(self.ram, k);
-        let velocity = self.ram.read_i8(Y_VEL + k);
+        let velocity = self.y_velocity(k) as i8;
         Y_POSITION.store(self.ram, k, position.advanced(velocity));
     }
 
     pub fn move_z(&mut self, k: usize) {
         let position = HEIGHT.load(self.ram, k);
-        let velocity = self.ram.read_i8(Z_VEL + k);
+        let velocity = self.z_velocity(k) as i8;
         HEIGHT.store(self.ram, k, position.advanced(velocity));
     }
 
@@ -349,7 +342,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn execute_all(&mut self) {
         for k in (0..ANCILLA_COUNT).rev() {
             self.ram.write_u8(0xfa0, k as u8);
-            let kind = self.ram.read_u8(TYPE + k);
+            let kind = self.kind(k);
             if kind != 0 {
                 self.execute_one(kind, k)
             }
@@ -375,14 +368,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn execute_one(&mut self, kind: u8, k: usize) {
         assert!((1..=67).contains(&kind));
         if k < 6 {
-            let size = self.ram.read_u8(NUM_SPRITES + k);
+            let size = self.sprite_count(k);
             let index = self.runtime.allocate_oam(self.ram, k, size);
-            self.ram.write_u8(OAM_INDEX + k, index);
+            self.set_oam_index(k, index);
         }
         if self.ram.read_u8(0x11) == 0 {
-            let timer = self.ram.read_u8(TIMER + k);
+            let timer = self.timer(k);
             if timer != 0 {
-                self.ram.write_u8(TIMER + k, timer - 1)
+                self.set_timer(k, timer - 1)
             }
         }
         self.dispatch(kind, k);
@@ -416,40 +409,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub(crate) fn write(&mut self, address: usize, value: u8) {
         self.ram.write_u8(address, value)
     }
+    #[cfg(test)]
     pub(crate) fn type_address(k: usize) -> usize {
         TYPE + k
     }
     pub fn clear(&mut self, k: usize) {
-        self.ram.write_u8(TYPE + k, 0);
-    }
-
-    #[must_use]
-    pub fn kind(&self, k: usize) -> u8 {
-        self.ram.read_u8(TYPE + k)
-    }
-    #[must_use]
-    pub fn step(&self, k: usize) -> u8 {
-        self.ram.read_u8(STEP + k)
-    }
-    #[must_use]
-    pub fn direction(&self, k: usize) -> u8 {
-        self.ram.read_u8(DIRECTION + k)
-    }
-    #[must_use]
-    pub fn floor(&self, k: usize) -> u8 {
-        self.ram.read_u8(FLOOR + k)
-    }
-    #[must_use]
-    pub fn item_to_link(&self, k: usize) -> u8 {
-        self.ram.read_u8(ITEM_TO_LINK + k)
-    }
-    #[must_use]
-    pub fn object_priority(&self, k: usize) -> u8 {
-        self.ram.read_u8(OBJPRIO + k)
-    }
-    #[must_use]
-    pub fn arr4(&self, k: usize) -> u8 {
-        self.ram.read_u8(ARR4 + k)
+        self.set_kind(k, 0);
     }
 }
 

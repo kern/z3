@@ -8,10 +8,7 @@ use crate::sound::{SoundPort, SoundRequest};
 use crate::{misc, oam};
 use z3_core::c_types::PairU8;
 
-const ANCILLA_U: usize = 0x28a;
 const ANCILLA_ALLOC_ROTATE: usize = 0x3c4;
-const ANCILLA_FLOOR2: usize = 0x3ca;
-const ANCILLA_TILE_ATTR: usize = 0x3e4;
 
 const RECEIVE_ITEM_SIZE: [u8; 76] = [
     0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 0, 2, 0, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2,
@@ -479,8 +476,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             let y = self.get_y(k).wrapping_add(i16::from(Y[j]) as u16);
             let priority = self.object_priority(k);
             self.check_tile_collision_targeted(k, x, y);
-            self.write(0x280 + k, priority);
-            if matches!(self.read(ANCILLA_TILE_ATTR + k), 0xb6 | 0xbc) {
+            self.set_object_priority(k, priority);
+            if matches!(self.tile_attribute(k), 0xb6 | 0xbc) {
                 self.set_xy(k, x, y);
                 self.add_somaria_platform_poof(k);
                 return;
@@ -544,9 +541,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0x64a) >= 1 {
             self.write(0x0e, limit.wrapping_add(1));
         }
-        let count = (0..5)
-            .filter(|&i| self.read(Self::type_address(i)) == kind)
-            .count() as u8;
+        let count = (0..5).filter(|&i| self.kind(i) == kind).count() as u8;
         if limit.wrapping_add(1) == count {
             return None;
         }
@@ -555,10 +550,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         } else {
             4
         };
-        if let Some(k) = (0..=first)
-            .rev()
-            .find(|&k| self.read(Self::type_address(k)) == 0)
-        {
+        if let Some(k) = (0..=first).rev().find(|&k| self.kind(k) == 0) {
             return Some(k);
         }
         let mut k = i32::from(self.read(ANCILLA_ALLOC_ROTATE));
@@ -567,10 +559,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             if k < 0 {
                 k = i32::from(limit);
             }
-            if matches!(
-                self.read(Self::type_address(k as usize)),
-                0x3c | 0x13 | 0x0a
-            ) {
+            if matches!(self.kind(k as usize), 0x3c | 0x13 | 0x0a) {
                 self.write(ANCILLA_ALLOC_ROTATE, k as u8);
                 return Some(k as usize);
             }
@@ -584,14 +573,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn add_ancilla(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.alloc_init(kind, limit)?;
-        self.write(Self::type_address(k), kind);
-        self.write(0xc7c + k, self.read(0xee));
-        self.write(ANCILLA_FLOOR2 + k, self.read(0x476));
-        self.write(0xc22 + k, 0);
-        self.write(0xc2c + k, 0);
-        self.write(0x280 + k, 0);
-        self.write(ANCILLA_U + k, 0);
-        self.write(0xc90 + k, PFLAGS[usize::from(kind)]);
+        self.set_kind(k, kind);
+        self.set_floor(k, self.read(0xee));
+        self.set_floor2(k, self.read(0x476));
+        self.set_y_velocity(k, 0);
+        self.set_x_velocity(k, 0);
+        self.set_object_priority(k, 0);
+        self.set_state_u(k, 0);
+        self.set_sprite_count(k, PFLAGS[usize::from(kind)]);
         Some(k)
     }
 
@@ -600,11 +589,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [4, 4, 6, 0];
         const Y: [i8; 4] = [20, 4, 16, 16];
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc54 + k, flag);
-        self.write(0xc5e + k, 0);
-        self.write(0xc68 + k, 3);
+        self.set_step(k, flag);
+        self.set_item_to_link(k, 0);
+        self.set_timer(k, 3);
         let direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
+        self.set_direction(k, direction as u8);
         let link_x = self.ram.read_u16(0x22);
         let link_y = self.ram.read_u16(0x20);
         if flag == 0 {
@@ -706,11 +695,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         }
         if let Some(k) = self.add_ancilla(0x27, 4) {
-            self.write(0xc68 + k, 0x78);
-            self.write(0x385 + k, 0);
-            self.write(0x294 + k, 0);
-            self.write(0x29e + k, 0);
-            self.write(0xc54 + k, 0);
+            self.set_timer(k, 0x78);
+            self.set_state_l(k, 0);
+            self.set_z_velocity(k, 0);
+            self.set_height(k, 0);
+            self.set_step(k, 0);
             self.add_bird_common(k);
         }
     }
@@ -848,7 +837,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 y: self
                     .get_y(k)
                     .wrapping_sub(24)
-                    .wrapping_sub(u16::from(self.read(0x29e + k))),
+                    .wrapping_sub(u16::from(self.height(k))),
                 width: 48,
                 height: 48,
             };
@@ -885,8 +874,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             x = adjusted_x;
             attribute
         };
-        self.write(ANCILLA_TILE_ATTR + k, tile_attr);
-        if tile_attr == 3 && self.read(ANCILLA_FLOOR2 + k) != 0 {
+        self.set_tile_attribute(k, tile_attr);
+        if tile_attr == 3 && self.floor2(k) != 0 {
             return false;
         }
         let mut collision = TILE_COLL0_ATTRS[usize::from(tile_attr)];
@@ -902,7 +891,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 }
                 2 => return self.runtime.sloped_tile_collision(self.ram, x, y),
                 3 => {
-                    if self.read(ANCILLA_FLOOR2 + k) != 0 {
+                    if self.floor2(k) != 0 {
                         self.write(0xfdc, 3);
                         return true;
                     }
@@ -911,13 +900,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 _ => {}
             }
         }
-        let cooldown = self.read(ANCILLA_U + k).wrapping_sub(1);
-        self.write(ANCILLA_U + k, cooldown);
+        let cooldown = self.state_u(k).wrapping_sub(1);
+        self.set_state_u(k, cooldown);
         if (cooldown as i8) < 0 {
-            self.write(ANCILLA_U + k, 0);
+            self.set_state_u(k, 0);
             if collision == 4 {
-                self.write(ANCILLA_U + k, 6);
-                self.write(0x280 + k, self.object_priority(k) ^ 1);
+                self.set_state_u(k, 6);
+                self.set_object_priority(k, self.object_priority(k) ^ 1);
             }
         }
         false
@@ -940,7 +929,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn check_tile_collision(&mut self, k: usize) -> u8 {
         if self.read(0x1b) == 0 && self.object_priority(k) != 0 {
-            self.write(ANCILLA_TILE_ATTR + k, 0);
+            self.set_tile_attribute(k, 0);
             return 0;
         }
         let dungeon_collision = self.read(0x46c);
@@ -966,9 +955,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             old_x.wrapping_add(x_offset),
             old_y.wrapping_add(y_offset),
         );
-        self.write(0xc7c + k, 1);
+        self.set_floor(k, 1);
         let upper = self.check_tile_collision_one_floor(k) as u8;
-        self.write(0xc7c + k, 0);
+        self.set_floor(k, 0);
         self.set_xy(k, old_x, old_y);
         (upper << 1) | self.check_tile_collision_one_floor(k) as u8
     }
@@ -1005,9 +994,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             old_x.wrapping_add(x_offset),
             old_y.wrapping_add(y_offset),
         );
-        self.write(0xc7c + k, 1);
+        self.set_floor(k, 1);
         let upper = self.check_tile_collision_class2_inner(k);
-        self.write(0xc7c + k, 0);
+        self.set_floor(k, 0);
         self.set_xy(k, old_x, old_y);
         upper | self.check_tile_collision_class2_inner(k)
     }
@@ -1033,22 +1022,22 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             x = adjusted_x;
             attribute
         };
-        self.write(ANCILLA_TILE_ATTR + k, tile_attr);
-        if tile_attr == 3 && self.read(ANCILLA_FLOOR2 + k) != 0 {
+        self.set_tile_attribute(k, tile_attr);
+        if tile_attr == 3 && self.floor2(k) != 0 {
             return false;
         }
         match TILE_COLL_ATTRS[usize::from(tile_attr)] {
             0 => false,
             2 => self.runtime.sloped_tile_collision(self.ram, x, y),
             4 => {
-                if self.read(ANCILLA_FLOOR2 + k) != 0 {
+                if self.floor2(k) != 0 {
                     true
                 } else {
-                    self.write(0x280 + k, 1);
+                    self.set_object_priority(k, 1);
                     false
                 }
             }
-            3 => self.read(ANCILLA_FLOOR2 + k) != 0,
+            3 => self.floor2(k) != 0,
             _ => true,
         }
     }
@@ -1093,11 +1082,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const XY: [i8; 12] = [21, -11, 21, 11, 3, -6, 21, 5, 16, -14, 16, 14];
         const X2: [i8; 6] = [-3, 19, 2, 13, -6, 22];
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 2);
-        self.write(0x39f + k, 1);
-        self.write(0xc22 + k, 0);
-        self.write(0xc2c + k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 2);
+        self.set_arr3(k, 1);
+        self.set_y_velocity(k, 0);
+        self.set_x_velocity(k, 0);
         let step = if self.read(0x301) != 0 {
             usize::from(self.read(0x2f) >> 1) + 2
         } else if self.read(0x37a) != 0 {
@@ -1105,13 +1094,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         } else {
             usize::from(kind)
         };
-        self.write(0xc54 + k, step as u8);
+        self.set_step(k, step as u8);
         let x2 = self
             .ram
             .read_u16(0x22)
             .wrapping_add(i16::from(X2[step]) as u16);
-        self.write(0x38a + k, x2 as u8);
-        self.write(0x38f + k, (x2 >> 8) as u8);
+        self.set_state_a(k, x2 as u8);
+        self.set_state_b(k, (x2 >> 8) as u8);
         self.set_xy(
             k,
             self.ram
@@ -1147,14 +1136,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 }
             }
         };
-        self.write(Self::type_address(k), kind);
-        self.write(0xc7c + k, self.read(0xee));
-        self.write(ANCILLA_FLOOR2 + k, self.read(0x476));
-        self.write(0xc22 + k, 0);
-        self.write(0xc2c + k, 0);
-        self.write(0x280 + k, 0);
-        self.write(ANCILLA_U + k, 0);
-        self.write(0xc90 + k, PFLAGS[usize::from(kind)]);
+        self.set_kind(k, kind);
+        self.set_floor(k, self.read(0xee));
+        self.set_floor2(k, self.read(0x476));
+        self.set_y_velocity(k, 0);
+        self.set_x_velocity(k, 0);
+        self.set_object_priority(k, 0);
+        self.set_state_u(k, 0);
+        self.set_sprite_count(k, PFLAGS[usize::from(kind)]);
         Some(k)
     }
 
@@ -1180,12 +1169,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let k = self.arrow_find_slot(kind, arrow_limit)?;
         self.write(0x12e, misc::link_calculate_sfx_pan(self.ram) | 7);
-        self.write(0x3c5 + k, 0);
-        self.write(0xc5e + k, 8);
+        self.set_state_h(k, 0);
+        self.set_item_to_link(k, 8);
         let j = usize::from(direction >> 1);
-        self.write(0xc72 + k, j as u8 | 4);
-        self.write(0xc22 + k, Y_VEL[j] as u8);
-        self.write(0xc2c + k, X_VEL[j] as u8);
+        self.set_direction(k, j as u8 | 4);
+        self.set_y_velocity(k, Y_VEL[j] as u8);
+        self.set_x_velocity(k, X_VEL[j] as u8);
         self.set_xy(
             k,
             x.wrapping_add(i16::from(X[j]) as u16),
@@ -1199,9 +1188,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let k = (0..10)
             .rev()
             .find(|&slot| matches!(self.kind(slot), 0 | 0x3c))?;
-        self.write(Self::type_address(k), 13);
-        self.write(0xc7c + k, self.read(0xee));
-        self.write(0xc68 + k, 6);
+        self.set_kind(k, 13);
+        self.set_floor(k, self.read(0xee));
+        self.set_timer(k, 6);
         Some(k)
     }
 
@@ -1216,10 +1205,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const ARR10: [u8; 12] = [48, 18, 32, 20, 22, 24, 32, 20, 24, 22, 20, 32];
 
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0x3b1 + k, 10);
-        self.write(0x394 + k, 128);
-        self.write(0xc54 + k, 0);
-        self.write(0x39f + k, 0);
+        self.set_aux_timer(k, 10);
+        self.set_state_g(k, 128);
+        self.set_step(k, 0);
+        self.set_arr3(k, 0);
         self.write(0x12e, 0);
         self.write(0x12c, 0xf2);
         self.write(0x12d, 0x17);
@@ -1273,12 +1262,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x309, 0);
         self.write(0x2f, 0);
         self.write(0x2e, 0);
-        self.write(0x294 + k, 20);
-        self.write(0xc22 + k, (-40_i8) as u8);
-        self.write(0xc2c + k, 0);
-        self.write(0x29e + k, 0);
-        self.write(0xc68 + k, 16);
-        self.write(0xc5e + k, item);
+        self.set_z_velocity(k, 20);
+        self.set_y_velocity(k, (-40_i8) as u8);
+        self.set_x_velocity(k, 0);
+        self.set_height(k, 0);
+        self.set_timer(k, 16);
+        self.set_item_to_link(k, item);
         self.set_xy(
             k,
             self.ram
@@ -1347,20 +1336,20 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x2d8, prize_index);
         let k = self.add_ancilla(kind, limit)?;
         let item = ITEM[prize];
-        self.write(0xc5e + k, item);
+        self.set_item_to_link(k, item);
         if matches!(item, 0x10 | 0x0f) {
             self.runtime
                 .decode_animated_sprite_tile(self.ram, RECEIVE_ITEM_GFX[usize::from(item)]);
         }
-        self.write(0x294 + k, (-48_i8) as u8);
-        self.write(0xc22 + k, 0);
-        self.write(0xc2c + k, 0);
-        self.write(0xc54 + k, 0);
-        self.write(0x29e + k, Z[prize]);
-        self.write(0x3b1 + k, 9);
-        self.write(0x39f + k, 0);
-        self.write(0x385 + k, 0);
-        self.write(0x394 + k, G[prize] as u8);
+        self.set_z_velocity(k, (-48_i8) as u8);
+        self.set_y_velocity(k, 0);
+        self.set_x_velocity(k, 0);
+        self.set_step(k, 0);
+        self.set_height(k, Z[prize]);
+        self.set_aux_timer(k, 9);
+        self.set_arr3(k, 0);
+        self.set_state_l(k, 0);
+        self.set_state_g(k, G[prize] as u8);
         self.write(0x2d8, item);
         let (x, y) = if !matches!(prize_index, 0 | 5) {
             if self.read(0x40c) == 20 {
@@ -1399,10 +1388,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [u8; 4] = [0, 3, 4, 5];
         const Y: [u8; 4] = [5, 12, 8, 8];
         let k = self.alloc_high()?;
-        self.write(Self::type_address(k), 0x3c);
-        self.write(0xc5e + k, 0);
-        self.write(0xc68 + k, 4);
-        self.write(0xc7c + k, self.read(0xee));
+        self.set_kind(k, 0x3c);
+        self.set_item_to_link(k, 0);
+        self.set_timer(k, 4);
+        self.set_floor(k, self.read(0xee));
         let direction = usize::from(self.read(0x2f) >> 1);
         let mut x = 0_i8;
         let mut y = 0_i8;
@@ -1438,21 +1427,21 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn add_blanket(&mut self, kind: u8) {
-        self.write(Self::type_address(0), kind);
-        self.write(0xc90, super::PFLAGS[usize::from(kind)]);
-        self.write(0xc7c, self.read(0xee));
-        self.write(0x3ca, self.read(0x476));
-        self.write(0x280, 0);
+        self.set_kind(0, kind);
+        self.set_sprite_count(0, super::PFLAGS[usize::from(kind)]);
+        self.set_floor(0, self.read(0xee));
+        self.set_floor2(0, self.read(0x476));
+        self.set_object_priority(0, 0);
         self.set_xy(0, 0x938, 0x2162);
     }
 
     pub fn add_snoring(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0xc22 + k, (-8_i8) as u8);
-        self.write(0x3b1 + k, 7);
-        self.write(0xc2c + k, 8);
-        self.write(0xc54 + k, 0xff);
+        self.set_item_to_link(k, 0);
+        self.set_y_velocity(k, (-8_i8) as u8);
+        self.set_aux_timer(k, 7);
+        self.set_x_velocity(k, 8);
+        self.set_step(k, 0xff);
         self.set_xy(
             k,
             self.ram.read_u16(0x22).wrapping_add(16),
@@ -1476,20 +1465,20 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if bombs == 1 {
             self.runtime.hud_refresh_icon(self.ram);
         }
-        self.write(0x3ea + k, 0);
-        self.write(0xc54 + k, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x385 + k, 0);
-        self.write(0x39f + k, super::BOMB_FRAME_DELAYS[0]);
-        self.write(0x746 + k, 0);
-        self.write(0x741 + k, 7);
-        self.write(0x29e + k, 0);
-        self.write(0xc68 + k, 8);
+        self.set_state_r(k, 0);
+        self.set_step(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_state_l(k, 0);
+        self.set_arr3(k, super::BOMB_FRAME_DELAYS[0]);
+        self.set_arr25(k, 0);
+        self.set_arr26(k, 7);
+        self.set_height(k, 0);
+        self.set_timer(k, 8);
         let direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
-        self.write(0x3d5 + k, 0);
-        self.write(0x3cf + k, 0);
-        self.write(0x74b + k, 0);
+        self.set_direction(k, direction as u8);
+        self.set_state_t(k, 0);
+        self.set_arr23(k, 0);
+        self.set_arr22(k, 0);
         let collision = self.check_initial_tile_collision_class2(k);
         let (x, y) = if collision {
             (X0[direction], Y0[direction])
@@ -1525,22 +1514,22 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let Some(k) = self.add_ancilla(kind, limit) else {
             return 0;
         };
-        self.write(0x3b1 + k, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x380 + k, 0);
-        self.write(0x29e + k, 0);
-        self.write(0x385 + k, self.read(0xc90 + k));
+        self.set_aux_timer(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_state_k(k, 0);
+        self.set_height(k, 0);
+        self.set_state_l(k, self.sprite_count(k));
         self.write(0x35f, 1);
         let boomerang = self.read(0xf341).wrapping_sub(1);
-        self.write(0x394 + k, boomerang);
-        self.write(0xc54 + k, STEP[usize::from(boomerang)]);
-        self.write(0x39f + k, ARR3[usize::from(boomerang)]);
+        self.set_state_g(k, boomerang);
+        self.set_step(k, STEP[usize::from(boomerang)]);
+        self.set_arr3(k, ARR3[usize::from(boomerang)]);
 
         let joy = self.read(0xf0);
         let diagonal = (joy & 0x0c != 0 && joy & 3 != 0) as usize;
         let speed_index = usize::from(boomerang) * 2 + diagonal;
         let speed = SPEED[speed_index];
-        self.write(0x3c5 + k, speed);
+        self.set_state_h(k, speed);
         let input = if joy & 0x0f != 0 {
             joy & 0x0f
         } else {
@@ -1553,39 +1542,39 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             } else {
                 speed
             };
-            self.write(0xc22 + k, velocity);
+            self.set_y_velocity(k, velocity);
             let direction = usize::from((velocity as i8) >= 0);
-            self.write(0xc72 + k, direction as u8);
+            self.set_direction(k, direction as u8);
             self.write(0x39d, DIRECTION_MASK[direction]);
         }
-        self.write(0x3a9 + k, 0);
+        self.set_state_s(k, 0);
         if input & 3 != 0 {
             if input & 2 == 0 {
-                self.write(0x3a9 + k, 1);
+                self.set_state_s(k, 1);
             }
             let velocity = if input & 2 != 0 {
                 speed.wrapping_neg()
             } else {
                 speed
             };
-            self.write(0xc2c + k, velocity);
+            self.set_x_velocity(k, velocity);
             let direction = if (velocity as i8) < 0 { 2 } else { 3 };
-            self.write(0xc72 + k, direction as u8);
+            self.set_direction(k, direction as u8);
             self.write(0x39d, self.read(0x39d) | DIRECTION_MASK[direction]);
         }
 
         let mut offset = INPUT.iter().position(|&value| value == input).unwrap_or(0);
-        self.write(0x3a4 + k, ARR1[offset]);
-        self.write(0x3cf + k, (offset * 2) as u8);
+        self.set_arr1(k, ARR1[offset]);
+        self.set_arr23(k, (offset * 2) as u8);
         if self.read(0x3c) >= 9 {
-            self.write(0x3b1 + k, self.read(0x3b1 + k).wrapping_add(1));
+            self.set_aux_timer(k, self.aux_timer(k).wrapping_add(1));
         } else if speed_index != 0 || joy & 0x0f == 0 {
             offset = usize::from(self.read(0x2f) >> 1);
         }
 
         let collision = self.check_initial_tile_a(k);
         if collision < 0 {
-            let (x_offset, y_offset) = if self.read(0x3b1 + k) != 0 {
+            let (x_offset, y_offset) = if self.aux_timer(k) != 0 {
                 (X_FAR[offset], Y_FAR[offset])
             } else {
                 (X_NEAR[offset], Y_NEAR[offset])
@@ -1603,11 +1592,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         } else {
             self.clear(k);
             self.write(0x35f, 0);
-            let sfx = if self.read(ANCILLA_TILE_ATTR + k) != 0xf0 {
-                5
-            } else {
-                6
-            };
+            let sfx = if self.tile_attribute(k) != 0xf0 { 5 } else { 6 };
             self.write(
                 0x12e,
                 misc::calculate_sfx_pan(self.ram, self.get_x(k)) | sfx,
@@ -1626,30 +1611,30 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.step(0) == 0 || self.step(k) == 2 {
             return;
         }
-        let timer = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, timer);
+        let timer = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, timer);
         if (timer as i8) >= 0 {
             return;
         }
-        self.write(0x39f + k, 0);
+        self.set_arr3(k, 0);
         self.runtime.allocate_oam_region(
             self.ram,
             if self.read(0xfb3) == 0 { b'A' } else { b'D' },
             16,
         );
-        let auxiliary = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, auxiliary);
+        let auxiliary = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, auxiliary);
         if (auxiliary as i8) < 0 {
-            self.write(0x3b1 + k, 3);
+            self.set_aux_timer(k, 3);
             if self.item_to_link(k) == 9 {
-                self.write(0x39f + k, 32);
-                self.write(0xc54 + k, self.step(k).wrapping_add(1));
-                self.write(0xc5e + k, 2);
+                self.set_arr3(k, 32);
+                self.set_step(k, self.step(k).wrapping_add(1));
+                self.set_item_to_link(k, 2);
                 return;
             }
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
-            self.write(0x746 + k, POWDER_FRAME[30 + usize::from(frame)]);
+            self.set_item_to_link(k, frame);
+            self.set_arr25(k, POWDER_FRAME[30 + usize::from(frame)]);
         }
         self.magic_powder_draw(k);
     }
@@ -1684,27 +1669,27 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let k = 1;
         if self.step(k) == 0 {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if timer == 0 {
-                self.write(0x39f + k, timer.wrapping_add(1));
-                self.write(0x294 + k, 4);
+                self.set_arr3(k, timer.wrapping_add(1));
+                self.set_z_velocity(k, 4);
                 self.move_z(k);
-                if self.read(0x29e + k) >= 16 {
-                    self.write(0xc54 + k, self.step(k).wrapping_add(1));
-                    self.write(0x294 + k, 2);
+                if self.height(k) >= 16 {
+                    self.set_step(k, self.step(k).wrapping_add(1));
+                    self.set_z_velocity(k, 2);
                 }
             }
         } else {
-            let timer = self.read(0x380 + k).wrapping_sub(1);
-            self.write(0x380 + k, timer);
+            let timer = self.state_k(k).wrapping_sub(1);
+            self.set_state_k(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x380 + k, 32);
-                self.write(0x294 + k, self.read(0x294 + k).wrapping_neg());
+                self.set_state_k(k, 32);
+                self.set_z_velocity(k, self.z_velocity(k).wrapping_neg());
             }
             self.move_z(k);
         }
-        self.write(0x24, self.read(0x29e + k));
+        self.write(0x24, self.height(k));
     }
 
     pub fn revival_fairy_main(&mut self) {
@@ -1714,64 +1699,64 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let mut draw = true;
         match self.step(k) {
             0 => {
-                let timer = self.read(0x39f + k).wrapping_sub(1);
-                self.write(0x39f + k, timer);
+                let timer = self.arr3(k).wrapping_sub(1);
+                self.set_arr3(k, timer);
                 if timer == 0 {
                     let step = self.step(k).wrapping_add(1);
-                    self.write(0xc54 + k, step);
-                    self.write(0x39f + k, DELAY[usize::from(step)]);
-                    self.write(0x380 + k, 0);
-                    self.write(0x294 + k, 0);
+                    self.set_step(k, step);
+                    self.set_arr3(k, DELAY[usize::from(step)]);
+                    self.set_state_k(k, 0);
+                    self.set_z_velocity(k, 0);
                 } else {
                     self.move_z(k);
                 }
             }
             1 => {
-                let timer = self.read(0x39f + k).wrapping_sub(1);
-                self.write(0x39f + k, timer);
+                let timer = self.arr3(k).wrapping_sub(1);
+                self.set_arr3(k, timer);
                 if timer == 0 {
-                    self.write(0xc54 + k, self.step(k).wrapping_add(1));
-                    self.write(0x294 + k, 0);
-                    self.write(0xc2c + k, 0);
+                    self.set_step(k, self.step(k).wrapping_add(1));
+                    self.set_z_velocity(k, 0);
+                    self.set_x_velocity(k, 0);
                 } else {
                     if matches!(timer, 0x4f | 0x8f) {
-                        self.write(0x385 + k, self.read(0x385 + k).wrapping_add(1));
+                        self.set_state_l(k, self.state_l(k).wrapping_add(1));
                         self.sfx2_pan(k, 0x31);
                     }
-                    if self.read(0x385 + k) != 0 {
-                        let animation = self.read(0x394 + k).wrapping_sub(1);
-                        self.write(0x394 + k, animation);
+                    if self.state_l(k) != 0 {
+                        let animation = self.state_g(k).wrapping_sub(1);
+                        self.set_state_g(k, animation);
                         if (animation as i8) < 0 {
-                            self.write(0x394 + k, 5);
+                            self.set_state_g(k, 5);
                             let frame = self.item_to_link(k).wrapping_add(1);
                             if frame == 3 {
-                                self.write(0xc5e + k, 0);
-                                self.write(0x385 + k, 0);
+                                self.set_item_to_link(k, 0);
+                                self.set_state_l(k, 0);
                             } else {
-                                self.write(0xc5e + k, frame);
+                                self.set_item_to_link(k, frame);
                             }
                         }
                     }
-                    self.write(
-                        0x294 + k,
-                        if self.read(0x380 + k) != 0 {
-                            self.read(0x294 + k).wrapping_add(1)
+                    self.set_z_velocity(
+                        k,
+                        if self.state_k(k) != 0 {
+                            self.z_velocity(k).wrapping_add(1)
                         } else {
-                            self.read(0x294 + k).wrapping_sub(1)
+                            self.z_velocity(k).wrapping_sub(1)
                         },
                     );
-                    if (self.read(0x294 + k) as i8).unsigned_abs() == 8 {
-                        self.write(0x380 + k, self.read(0x380 + k) ^ 1);
+                    if (self.z_velocity(k) as i8).unsigned_abs() == 8 {
+                        self.set_state_k(k, self.state_k(k) ^ 1);
                     }
                     self.move_z(k);
                 }
             }
             2 => {
-                if self.read(0x294 + k) < 24 {
-                    self.write(0x294 + k, self.read(0x294 + k).wrapping_add(1));
+                if self.z_velocity(k) < 24 {
+                    self.set_z_velocity(k, self.z_velocity(k).wrapping_add(1));
                 }
-                if self.read(0xc2c + k) < 16 {
-                    self.write(0xc2c + k, self.read(0xc2c + k).wrapping_add(1));
+                if self.x_velocity(k) < 16 {
+                    self.set_x_velocity(k, self.x_velocity(k).wrapping_add(1));
                 }
                 self.move_x(k);
                 self.move_z(k);
@@ -1782,7 +1767,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if draw {
             self.runtime.allocate_oam_region(self.ram, b'C', 12);
             let (x, y) = self.prep_oam_coord(k);
-            let mut frame = if self.step(k) == 1 && self.read(0x385 + k) != 0 {
+            let mut frame = if self.step(k) == 1 && self.state_l(k) != 0 {
                 self.item_to_link(k).wrapping_add(1)
             } else {
                 0
@@ -1796,13 +1781,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.set_oam(
                 index,
                 x,
-                y.wrapping_sub(i16::from(self.read(0x29e + k) as i8) as u16),
+                y.wrapping_sub(i16::from(self.height(k) as i8) as u16),
                 CHAR[usize::from(frame)],
                 0x74,
                 2,
             );
             if oam::read(self.ram, index).y == 0xf0 {
-                self.write(0xc54 + k, 3);
+                self.set_step(k, 3);
                 self.write(0x11, self.read(0x11).wrapping_add(1));
                 self.write(0x1c, self.read(0xc211));
             }
@@ -1841,12 +1826,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn add_super_bomb_explosion(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0x3ea + k, 0);
-        self.write(0xc54 + k, 0);
-        self.write(0x746 + k, 0);
-        self.write(0x385 + k, 0);
-        self.write(0x39f + k, super::BOMB_FRAME_DELAYS[1]);
-        self.write(0xc5e + k, 1);
+        self.set_state_r(k, 0);
+        self.set_step(k, 0);
+        self.set_arr25(k, 0);
+        self.set_state_l(k, 0);
+        self.set_arr3(k, super::BOMB_FRAME_DELAYS[1]);
+        self.set_item_to_link(k, 1);
         let history = usize::from(self.ram.read_u16(0x2cf));
         let y = u16::from_le_bytes([self.read(0x1a00 + history), self.read(0x1a14 + history)]);
         let x = u16::from_le_bytes([self.read(0x1a28 + history), self.read(0x1a3c + history)]);
@@ -1860,27 +1845,27 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6,
         ];
         self.write(0x109, 80);
-        self.write(0x39f, 64);
-        self.write(0xc54, 0);
-        self.write(0x294, 8);
-        self.write(0x385, 0);
-        self.write(0x394, 5);
-        self.write(0xc5e, 0);
-        self.write(0x380, 0);
+        self.set_arr3(0, 64);
+        self.set_step(0, 0);
+        self.set_z_velocity(0, 8);
+        self.set_state_l(0, 0);
+        self.set_state_g(0, 5);
+        self.set_item_to_link(0, 0);
+        self.set_state_k(0, 0);
         self.set_xy(0, self.ram.read_u16(0x22), self.ram.read_u16(0x20));
-        self.write(0x29e, 0);
+        self.set_height(0, 0);
 
-        self.write(0x29e + 1, 0);
-        self.write(0x39f + 1, 240);
-        self.write(0xc54 + 1, 0);
-        self.write(0x380 + 1, 0);
+        self.set_height(1, 0);
+        self.set_arr3(1, 240);
+        self.set_step(1, 0);
+        self.set_state_k(1, 0);
 
-        self.write(0xc5e + 2, 2);
-        self.write(0x3b1 + 2, 3);
-        self.write(0x39f + 2, 8);
-        self.write(0xc54 + 2, 0);
-        self.write(0xc72 + 2, 3);
-        self.write(0x746 + 2, POWDER_FRAME[32]);
+        self.set_item_to_link(2, 2);
+        self.set_aux_timer(2, 3);
+        self.set_arr3(2, 8);
+        self.set_step(2, 0);
+        self.set_direction(2, 3);
+        self.set_arr25(2, POWDER_FRAME[32]);
         self.set_xy(
             2,
             self.ram.read_u16(0x22).wrapping_add(20),
@@ -1892,11 +1877,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [0, 0, -20, 18];
         const Y: [i8; 4] = [-16, 24, 4, 4];
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 0);
-        self.write(0xc68 + k, 23);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 0);
+        self.set_timer(k, 23);
         let direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
+        self.set_direction(k, direction as u8);
         self.set_xy(
             k,
             self.ram
@@ -1915,9 +1900,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn add_master_sword_cutscene(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 2);
-        self.write(0xc68 + k, 64);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 2);
+        self.set_timer(k, 64);
         self.set_xy(
             k,
             self.ram.read_u16(0x22).wrapping_add(8),
@@ -1933,14 +1918,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn add_bunny_poof(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
         self.write(0x4b, 0x0c);
-        self.write(0xc54 + k, 0);
+        self.set_step(k, 0);
         self.write(
             0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22))
                 | if self.read(0x2e0) == 0 { 0x14 } else { 0x15 },
         );
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 7);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 7);
         self.set_xy(
             k,
             self.ram.read_u16(0x22),
@@ -1951,13 +1936,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn add_cape_poof(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc54 + k, 1);
+        self.set_step(k, 1);
         self.write(0x2e1, 1);
         self.write(0x50, self.read(0x50) | 1);
         self.write(0x67, 0);
         self.write(0x26, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 7);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 7);
         self.set_xy(
             k,
             self.ram.read_u16(0x22),
@@ -1973,9 +1958,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22))
                 | if self.read(0xf3cc) == 8 { 0x14 } else { 0x15 },
         );
-        self.write(0xc5e + k, 0);
-        self.write(0xc54 + k, 0);
-        self.write(0x3b1 + k, 7);
+        self.set_item_to_link(k, 0);
+        self.set_step(k, 0);
+        self.set_aux_timer(k, 7);
         self.write(0x2f9, 1);
         let history = usize::from(self.read(0x2cf));
         let x = u16::from_le_bytes([self.read(0x1a28 + history), self.read(0x1a3c + history)]);
@@ -1989,8 +1974,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         }
         let k = self.add_ancilla(0x3f, 4)?;
-        self.write(0xc5e + k, 0);
-        self.write(0xc68 + k, 7);
+        self.set_item_to_link(k, 0);
+        self.set_timer(k, 7);
         self.write(
             0x12e,
             misc::calculate_sfx_pan(self.ram, self.ram.read_u16(0x22)) | 21,
@@ -2001,13 +1986,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn add_ether_spell(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x746 + k, 0);
-        self.write(0xc54 + k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_arr25(k, 0);
+        self.set_step(k, 0);
         self.write(0x112, 1);
-        self.write(0x3b1 + k, 2);
-        self.write(0x39f + k, 3);
-        self.write(0xc22 + k, 127);
+        self.set_aux_timer(k, 2);
+        self.set_arr3(k, 3);
+        self.set_y_velocity(k, 127);
         self.write(0x15808, 40);
         self.write(0xaaa, 9);
         self.write(0x15812, 0x40);
@@ -2035,9 +2020,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         }
         let k = self.add_ancilla(0x3b, 0)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x39f + k, 1);
-        self.write(0x3b1 + k, 34);
+        self.set_item_to_link(k, 0);
+        self.set_arr3(k, 1);
+        self.set_aux_timer(k, 34);
         Some(k)
     }
 
@@ -2048,13 +2033,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const Y1: [i8; 4] = [1, 40, 22, 22];
         const FRAME: [u8; 4] = [13, 10, 16, 7];
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x29e + k, 0);
-        self.write(0x3b1 + k, 1);
+        self.set_item_to_link(k, 0);
+        self.set_height(k, 0);
+        self.set_aux_timer(k, 1);
         self.write(0x109, 80);
         let direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
-        self.write(0x746 + k, FRAME[direction]);
+        self.set_direction(k, direction as u8);
+        self.set_arr25(k, FRAME[direction]);
         self.set_xy(
             k,
             self.ram
@@ -2065,7 +2050,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 .wrapping_add(i16::from(Y[direction]) as u16),
         );
         self.check_tile_collision(k);
-        self.write(0x333, self.read(ANCILLA_TILE_ATTR + k));
+        self.write(0x333, self.tile_attribute(k));
         if self.read(0x304) == 9 {
             self.clear(k);
             return Some(k);
@@ -2090,8 +2075,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [11, 10, -12, 29];
         const Y: [i8; 4] = [-4, 32, 17, 17];
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 5);
-        self.write(0x3b1 + k, 1);
+        self.set_item_to_link(k, 5);
+        self.set_aux_timer(k, 1);
         let direction = usize::from(self.read(0x2f) >> 1);
         self.set_xy(
             k,
@@ -2107,9 +2092,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn add_sword_swing_sparkle(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 1);
-        self.write(0xc72 + k, self.read(0x2f) >> 1);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 1);
+        self.set_direction(k, self.read(0x2f) >> 1);
         self.set_xy(k, self.ram.read_u16(0x22), self.ram.read_u16(0x20));
         Some(k)
     }
@@ -2121,10 +2106,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         }
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc5e + k, 16);
-        self.write(0x385 + k, 0);
+        self.set_item_to_link(k, 16);
+        self.set_state_l(k, 0);
         let direction = DIRECTION[usize::from(self.read(0x2f) >> 1)];
-        self.write(0xc72 + k, direction);
+        self.set_direction(k, direction);
         let screen_y = self
             .ram
             .read_u16(0x20)
@@ -2159,11 +2144,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         }
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc68 + k, 0x78);
-        self.write(0x385 + k, 0);
-        self.write(0x294 + k, 0);
-        self.write(0x29e + k, 0);
-        self.write(0xc54 + k, 0);
+        self.set_timer(k, 0x78);
+        self.set_state_l(k, 0);
+        self.set_z_velocity(k, 0);
+        self.set_height(k, 0);
+        self.set_step(k, 0);
         self.add_bird_common(k);
         Some(k)
     }
@@ -2179,24 +2164,24 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x3c, 0);
         self.write(0x3d, 0);
         self.write(0x50, self.read(0x50) & !1);
-        self.write(0x385 + k, 1);
+        self.set_state_l(k, 1);
         let features = u32::from_le_bytes(self.ram.slice(0x64c, 4).try_into().unwrap());
         if features & 1 != 0 {
-            self.write(0x294 + k, 58);
-            self.write(0x29e + k, (-105_i8) as u8);
+            self.set_z_velocity(k, 58);
+            self.set_height(k, (-105_i8) as u8);
         } else {
-            self.write(0x294 + k, 40);
-            self.write(0x29e + k, (-51_i8) as u8);
+            self.set_z_velocity(k, 40);
+            self.set_height(k, (-51_i8) as u8);
         }
-        self.write(0xc54 + k, 2);
+        self.set_step(k, 2);
         self.add_bird_common(k);
         Some(k)
     }
 
     pub fn add_quake_spell(&mut self, kind: u8, limit: u8) -> Option<usize> {
         let k = self.add_ancilla(kind, limit)?;
-        self.write(0xc54 + k, 0);
-        self.write(0xc5e + k, 0);
+        self.set_step(k, 0);
+        self.set_item_to_link(k, 0);
         self.write(0xaaa, 13);
         self.write(0x12e, 0x35);
         for i in 0..5 {
@@ -2205,7 +2190,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         self.write(0x1580a, 0);
         self.write(0x112, 1);
-        self.write(0xc68 + k, 2);
+        self.set_timer(k, 2);
         self.ram
             .write_u16(0x1580b, self.ram.read_u16(0x20).wrapping_add(26));
         self.ram
@@ -2223,10 +2208,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.clear(slot);
             }
         }
-        self.write(0xc5e + k, 0);
-        self.write(0xc54 + k, step);
-        self.write(0xc68 + k, 4);
-        self.write(0x3b1 + k, 3);
+        self.set_item_to_link(k, 0);
+        self.set_step(k, step);
+        self.set_timer(k, 4);
+        self.set_aux_timer(k, 3);
         let direction = usize::from(self.read(0x2f) >> 1);
         self.set_xy(
             k,
@@ -2258,15 +2243,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if kind != 1 {
             misc::ancilla_sfx2_near(self.ram, 0x0e);
         }
-        self.write(Self::type_address(k), kind);
-        self.write(0xc90 + k, PFLAGS[usize::from(kind)]);
-        self.write(0xc68 + k, 3);
-        self.write(0xc54 + k, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x280 + k, 0);
-        self.write(ANCILLA_U + k, 0);
+        self.set_kind(k, kind);
+        self.set_sprite_count(k, PFLAGS[usize::from(kind)]);
+        self.set_timer(k, 3);
+        self.set_step(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_object_priority(k, 0);
+        self.set_state_u(k, 0);
         let mut direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
+        self.set_direction(k, direction as u8);
         if self.check_initial_tile_a(k) < 0 {
             self.set_xy(
                 k,
@@ -2278,23 +2263,23 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     .wrapping_add(i16::from(Y[direction]) as u16),
             );
             if kind != 1 {
-                self.write(0xc2c + k, X_VEL[direction] as u8);
-                self.write(0xc22 + k, Y_VEL[direction] as u8);
+                self.set_x_velocity(k, X_VEL[direction] as u8);
+                self.set_y_velocity(k, Y_VEL[direction] as u8);
             } else {
                 direction += usize::from(self.read(0xf359).wrapping_sub(2)) * 4;
-                self.write(0xc2c + k, X_VEL2[direction] as u8);
-                self.write(0xc22 + k, Y_VEL2[direction] as u8);
+                self.set_x_velocity(k, X_VEL2[direction] as u8);
+                self.set_y_velocity(k, Y_VEL2[direction] as u8);
             }
-            self.write(0xc7c + k, self.read(0xee));
-            self.write(ANCILLA_FLOOR2 + k, self.read(0x476));
+            self.set_floor(k, self.read(0xee));
+            self.set_floor2(k, self.read(0x476));
         } else if kind == 1 {
-            self.write(Self::type_address(k), 4);
-            self.write(0xc68 + k, 7);
-            self.write(0xc90 + k, 16);
+            self.set_kind(k, 4);
+            self.set_timer(k, 7);
+            self.set_sprite_count(k, 16);
         } else {
-            self.write(0xc54 + k, 1);
-            self.write(0xc68 + k, 31);
-            self.write(0xc90 + k, 8);
+            self.set_step(k, 1);
+            self.set_timer(k, 31);
+            self.set_sprite_count(k, 8);
             k = usize::from(self.read(0x2f) >> 1);
             self.sfx2_pan(k, 0x2a);
         }
@@ -2313,16 +2298,16 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         };
         self.write(0x12e, misc::link_calculate_sfx_pan(self.ram) | 15);
-        self.write(0xc54 + k, 0);
-        self.write(0x746 + k, 0);
-        self.write(0xc5e + k, 0xff);
-        self.write(0x385 + k, 1);
-        self.write(0x3b1 + k, 3);
-        self.write(0x39f + k, 6);
+        self.set_step(k, 0);
+        self.set_arr25(k, 0);
+        self.set_item_to_link(k, 0xff);
+        self.set_state_l(k, 1);
+        self.set_aux_timer(k, 3);
+        self.set_arr3(k, 6);
         let direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
-        self.write(0xc22 + k, Y_VEL[direction] as u8);
-        self.write(0xc2c + k, X_VEL[direction] as u8);
+        self.set_direction(k, direction as u8);
+        self.set_y_velocity(k, Y_VEL[direction] as u8);
+        self.set_x_velocity(k, X_VEL[direction] as u8);
 
         if self.check_initial_tile_a(k) < 0 {
             let x = self
@@ -2341,10 +2326,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
             self.set_xy(k, x, y);
         } else {
-            self.write(Self::type_address(k), 0x11);
-            self.write(0xc90 + k, PFLAGS[0x11]);
-            self.write(0xc5e + k, 0);
-            self.write(0x3b1 + k, 4);
+            self.set_kind(k, 0x11);
+            self.set_sprite_count(k, PFLAGS[0x11]);
+            self.set_item_to_link(k, 0);
+            self.set_aux_timer(k, 4);
         }
         Some(k)
     }
@@ -2356,8 +2341,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return true;
         };
         self.write(0x12e, misc::link_calculate_sfx_pan(self.ram) | 0x24);
-        self.write(0xc5e + k, 0);
-        self.write(0x3b1 + k, 2);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 2);
         if self.read(0x1b) != 0 && self.read(0x345) == 0 {
             self.write(0xee, 0);
         }
@@ -2436,8 +2421,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.write(0x48, 4);
                 self.write(0x3e9, 1);
                 let lifted_y = y.wrapping_sub(18);
-                self.write(0x38a + k, lifted_y as u8);
-                self.write(0x38f + k, (lifted_y >> 8) as u8);
+                self.set_state_a(k, lifted_y as u8);
+                self.set_state_b(k, (lifted_y >> 8) as u8);
                 self.set_xy(k, X1[j], y.wrapping_sub(2));
                 return Some(k);
             }
@@ -2456,8 +2441,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         }
         let k = self.add_ancilla(0x41, 4)?;
-        self.write(0xc68 + k, 2);
-        self.write(0xc5e + k, 0);
+        self.set_timer(k, 2);
+        self.set_item_to_link(k, 0);
         Some(k)
     }
 
@@ -2491,9 +2476,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             .palette_load_sprite_environment_dungeon(self.ram);
         self.write(0x15, self.read(0x15).wrapping_add(1));
         self.write(0x2e4, 1);
-        self.write(0xc36 + k, 0);
-        self.write(0xc40 + k, 0);
-        self.write(0xc54 + k, 0);
+        self.set_y_fraction(k, 0);
+        self.set_x_fraction(k, 0);
+        self.set_step(k, 0);
         self.write(0x15812, 240);
         self.write(0x15808, 0);
         for (i, angle) in [0, 10, 22, 32, 42, 54].into_iter().enumerate() {
@@ -2513,19 +2498,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const DELTA_Y: [i8; 4] = [0, 0, -16, 16];
         const OFFSETS: [i8; 16] = [-8, 0, -8, 16, 16, 0, 16, 16, 0, -8, 16, -8, 0, 16, 16, 16];
         const SFX_PAN: [u8; 8] = [0x80, 0x80, 0x80, 0, 0, 0x40, 0x40, 0x40];
-        self.write(Self::type_address(0), 0x33);
-        self.write(Self::type_address(1), 0x33);
+        self.set_kind(0, 0x33);
+        self.set_kind(1, 0x33);
         for k in 2..=5 {
             self.clear(k);
         }
-        self.write(0xc5e, 0);
+        self.set_item_to_link(0, 0);
         self.write(0x2ec, 0);
         self.write(0x308, 0);
         self.write(0x50, 0);
-        self.write(0x380, 0);
-        self.write(0xc7c, self.read(0xee));
+        self.set_state_k(0, 0);
+        self.set_floor(0, self.read(0xee));
         self.write(0xc7d, self.read(0xee));
-        self.write(ANCILLA_FLOOR2, self.read(0x476));
+        self.set_floor2(0, self.read(0x476));
         self.write(0x10010, 0);
         self.write(0x10009, 0);
         self.write(0x10001, 0);
@@ -2570,8 +2555,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     /// Exact port of `AncillaAdd_DoorDebris`.
     pub fn add_door_debris(&mut self) -> Option<usize> {
         let k = self.add_ancilla(8, 1)?;
-        self.write(0x746 + k, 0);
-        self.write(0x741 + k, 7);
+        self.set_arr25(k, 0);
+        self.set_arr26(k, 7);
         Some(k)
     }
 
@@ -2617,15 +2602,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     /// Exact port of `AncillaAdd_ExplodingSomariaBlock`.
     pub fn add_exploding_somaria_block(&mut self, k: usize) {
-        self.write(Self::type_address(k), 0x2e);
-        self.write(0xc90 + k, PFLAGS[0x2e]);
-        self.write(0x3b1 + k, 3);
-        self.write(0xc54 + k, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x39f + k, 0);
-        self.write(0x3a4 + k, 0);
-        self.write(0x3ea + k, 0);
-        self.write(0x280 + k, 0);
+        self.set_kind(k, 0x2e);
+        self.set_sprite_count(k, PFLAGS[0x2e]);
+        self.set_aux_timer(k, 3);
+        self.set_step(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_arr3(k, 0);
+        self.set_arr1(k, 0);
+        self.set_state_r(k, 0);
+        self.set_object_priority(k, 0);
         self.write(0x646, 0);
         self.write(0x12f, misc::calculate_sfx_pan(self.ram, self.get_x(k)) | 1);
     }
@@ -2655,29 +2640,25 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
 
         misc::ancilla_sfx3_near(self.ram, 0x2a);
-        for (address, value) in [
-            (0xc54, 0),
-            (0xc22, 0),
-            (0xc2c, 0),
-            (0xc5e, 0),
-            (0x3b1, 0),
-            (0x39f, 0),
-            (0x3a4, 0),
-            (0x3c5, 0),
-            (0x394, 12),
-            (0xc68, 18),
-            (0x385, 0),
-            (0x29e, 0),
-            (0x380, 0),
-            (0x3ea, 0),
-            (0xbf0, 0),
-            (0x3a9, 9),
-            (0x3d5, 0),
-        ] {
-            self.write(address + k, value);
-        }
+        self.set_step(k, 0);
+        self.set_y_velocity(k, 0);
+        self.set_x_velocity(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_aux_timer(k, 0);
+        self.set_arr3(k, 0);
+        self.set_arr1(k, 0);
+        self.set_state_h(k, 0);
+        self.set_state_g(k, 12);
+        self.set_timer(k, 18);
+        self.set_state_l(k, 0);
+        self.set_height(k, 0);
+        self.set_state_k(k, 0);
+        self.set_state_r(k, 0);
+        self.set_arr4(k, 0);
+        self.set_state_s(k, 9);
+        self.set_state_t(k, 0);
         let direction = usize::from(self.read(0x2f) >> 1);
-        self.write(0xc72 + k, direction as u8);
+        self.set_direction(k, direction as u8);
         let link_x = self.ram.read_u16(0x22);
         let link_y = self.ram.read_u16(0x20);
         if self.check_initial_tile_collision_class2(k) {
@@ -2723,7 +2704,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const Y: [i8; 4] = [-15, -4, -8, -8];
         const X_VEL: [i8; 4] = [0, 0, -40, 40];
         const Y_VEL: [i8; 4] = [-40, 40, 0, 0];
-        let z = match self.read(0x29e + k) {
+        let z = match self.height(k) {
             0xff => 0,
             z => z,
         };
@@ -2731,22 +2712,22 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let y = self.get_y(k).wrapping_sub(u16::from(z));
         for direction in (0..4).rev() {
             if let Some(j) = self.alloc_init(1, 4) {
-                self.write(Self::type_address(j), 1);
-                self.write(0xc90 + j, PFLAGS[1]);
-                self.write(0xc54 + j, 4);
-                self.write(0xc5e + j, 0);
-                self.write(0x280 + j, 0);
-                self.write(0xc72 + j, direction as u8);
+                self.set_kind(j, 1);
+                self.set_sprite_count(j, PFLAGS[1]);
+                self.set_step(j, 4);
+                self.set_item_to_link(j, 0);
+                self.set_object_priority(j, 0);
+                self.set_direction(j, direction as u8);
                 self.set_xy(
                     j,
                     x.wrapping_add(i16::from(X[direction]) as u16),
                     y.wrapping_add(i16::from(Y[direction]) as u16),
                 );
                 self.terminate_if_offscreen(j);
-                self.write(0xc2c + j, X_VEL[direction] as u8);
-                self.write(0xc22 + j, Y_VEL[direction] as u8);
-                self.write(0xc7c + j, self.floor(k));
-                self.write(ANCILLA_FLOOR2 + j, self.read(0x476));
+                self.set_x_velocity(j, X_VEL[direction] as u8);
+                self.set_y_velocity(j, Y_VEL[direction] as u8);
+                self.set_floor(j, self.floor(k));
+                self.set_floor2(j, self.read(0x476));
             }
         }
         self.write(0xfb5, 0xff);
@@ -2818,8 +2799,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn return_if_outside_bounds(&mut self, k: usize) -> Option<super::AncillaOamInfo> {
-        let x = self.read(0xc04 + k).wrapping_sub(self.read(0xe2));
-        let y = self.read(0xbfa + k).wrapping_sub(self.read(0xe8));
+        let x = self.x_low(k).wrapping_sub(self.read(0xe2));
+        let y = self.y_low(k).wrapping_sub(self.read(0xe8));
         if x >= 0xf4 || y >= 0xf0 {
             self.clear(k);
             None
@@ -2839,7 +2820,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0x83, 0x83, 0x83, 0x83, 0xb6, 0x80, 0xb6, 0x80, 0xb7, 0xb6, 0xb7, 0xb6, 0xb7, 0xb6,
             0xb7, 0xb6,
         ];
-        if self.read(0xc68 + k) == 0 {
+        if self.timer(k) == 0 {
             self.clear(k);
         }
         if self.read(0x11) == 0 {
@@ -2861,7 +2842,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         };
         self.runtime.allocate_oam_region(self.ram, region, 0x10);
         let index = self.current_oam_index();
-        let frame = usize::from(self.read(0xc68 + k) & 0x1c);
+        let frame = usize::from(self.timer(k) & 0x1c);
         for (oam_offset, i) in (0..4).rev().enumerate() {
             oam::set_plain(
                 self.ram,
@@ -2882,21 +2863,21 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         }
         let counter = self.arr4(k).wrapping_sub(1);
-        self.write(0xbf0 + k, counter);
+        self.set_arr4(k, counter);
         if (counter as i8) >= 0 {
             return;
         }
-        self.write(0xbf0 + k, 5);
+        self.set_arr4(k, 5);
         if let Some(j) = self.alloc_high() {
-            self.write(Self::type_address(j), 0x13);
-            self.write(0xc68 + j, 15);
+            self.set_kind(j, 0x13);
+            self.set_timer(j, 15);
             let direction = usize::from(self.direction(k));
-            self.write(0xc2c + j, X_VEL[direction] as u8);
-            self.write(0xc22 + j, Y_VEL[direction] as u8);
-            self.write(0xc04 + j, self.read(0xc04 + k));
-            self.write(0xbfa + j, self.read(0xbfa + k));
-            self.write(0xc7c + j, self.floor(k));
-            self.write(0xc90 + j, 0);
+            self.set_x_velocity(j, X_VEL[direction] as u8);
+            self.set_y_velocity(j, Y_VEL[direction] as u8);
+            self.set_x_low(j, self.x_low(k));
+            self.set_y_low(j, self.y_low(k));
+            self.set_floor(j, self.floor(k));
+            self.set_sprite_count(j, 0);
         }
     }
 
@@ -2940,7 +2921,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0xcaa + sprite) & 0x10 != 0 {
             const OPPOSITE: [u8; 4] = [2, 3, 0, 1];
             let direction = self.direction(k) & 3;
-            self.write(0xc72 + k, direction);
+            self.set_direction(k, direction);
             if direction == OPPOSITE[usize::from(direction)] {
                 self.write(0xbb0 + sprite, self.kind(k));
                 self.write(0xfdc, 3);
@@ -3001,7 +2982,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             y: self
                 .get_y(k)
                 .wrapping_sub(8)
-                .wrapping_sub(u16::from(self.read(0x29e + k))),
+                .wrapping_sub(u16::from(self.height(k))),
             width: 15,
             height: 15,
         }
@@ -3029,7 +3010,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let y = self
             .get_y(k)
             .wrapping_sub(8)
-            .wrapping_sub(u16::from(self.read(0x29e + k)));
+            .wrapping_sub(u16::from(self.height(k)));
         let speed = self
             .runtime
             .sprite_project_speed_towards_location(self.ram, sprite, x, y, 80);
@@ -3075,12 +3056,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let Some(info) = self.return_if_outside_bounds(k) else {
             return;
         };
-        if self.read(0xc68 + k) == 0 {
+        if self.timer(k) == 0 {
             self.clear(k);
             return;
         }
         let index = self.current_oam_index();
-        let frame = usize::from(self.read(0xc68 + k) >> 1) * 4;
+        let frame = usize::from(self.timer(k) >> 1) * 4;
         let ancilla_x = self.get_x(k);
         let ancilla_y = self.get_y(k);
         let r7 = ancilla_x.wrapping_sub(self.ram.read_u16(0xe2)) as u8;
@@ -3112,18 +3093,18 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0x1b) != 0 || self.read(0x8a) & 0x40 == 0 {
             return;
         }
-        self.write(Self::type_address(0), 0x34);
+        self.set_kind(0, 0x34);
         for slot in 1..=5 {
             self.clear(slot);
         }
         self.write(0x35f, 0);
-        self.write(0xc90, PFLAGS[0x34]);
+        self.set_sprite_count(0, PFLAGS[0x34]);
         for (i, value) in [253, 254, 255, 0].into_iter().enumerate() {
             self.write(0x10000 + i, value);
             self.write(0x10008 + i, 5);
         }
         self.write(0x10010, 0);
-        self.write(0x3b1, 5);
+        self.set_aux_timer(0, 5);
         self.ram.write_u16(0x10018, 0x100);
         self.ram.write_u16(0x10026, 0x100);
         self.ram.write_u16(0x1001a, 0x98);
@@ -3131,10 +3112,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x4c6, 2);
         self.write(0xb0, 0);
         self.write(0xc8, 0);
-        self.write(0xc7c, self.read(0xee));
-        self.write(ANCILLA_FLOOR2, self.read(0x476));
-        self.write(0xc5e, 0);
-        self.write(0xc54, 0);
+        self.set_floor(0, self.read(0xee));
+        self.set_floor2(0, self.read(0x476));
+        self.set_item_to_link(0, 0);
+        self.set_step(0, 0);
     }
 
     pub fn fire_shot_draw(&mut self, k: usize) {
@@ -3165,34 +3146,34 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn fire_rod_shot(&mut self, k: usize) {
         if self.step(k) == 0 {
             if self.read(0x11) == 0 {
-                self.write(0x385 + k, 0);
+                self.set_state_l(k, 0);
                 self.move_x(k);
                 self.move_y(k);
                 let mut collided = self.check_sprite_collision(k).is_some();
                 if !collided {
-                    self.write(0xc72 + k, self.direction(k) | 8);
+                    self.set_direction(k, self.direction(k) | 8);
                     collided = self.check_tile_collision(k) != 0;
-                    self.write(0x385 + k, self.read(ANCILLA_TILE_ATTR + k));
+                    self.set_state_l(k, self.tile_attribute(k));
                     if !collided {
-                        self.write(0xc72 + k, self.direction(k) | 12);
-                        let saved = self.read(ANCILLA_U + k);
+                        self.set_direction(k, self.direction(k) | 12);
+                        let saved = self.state_u(k);
                         collided = self.check_tile_collision(k) != 0;
-                        self.write(ANCILLA_U + k, saved);
+                        self.set_state_u(k, saved);
                     }
                 }
                 if collided {
-                    self.write(0xc54 + k, self.step(k).wrapping_add(1));
-                    self.write(0xc68 + k, 31);
-                    self.write(0xc90 + k, 8);
+                    self.set_step(k, self.step(k).wrapping_add(1));
+                    self.set_timer(k, 31);
+                    self.set_sprite_count(k, 8);
                     self.sfx2_pan(k, 0x2a);
                 }
-                self.write(0xc5e + k, self.item_to_link(k).wrapping_add(1));
-                self.write(0xc72 + k, self.direction(k) & !0x0c);
-                let attr_l = self.read(0x385 + k);
+                self.set_item_to_link(k, self.item_to_link(k).wrapping_add(1));
+                self.set_direction(k, self.direction(k) & !0x0c);
+                let attr_l = self.state_l(k);
                 self.write(0x333, attr_l);
                 let mut torch = attr_l & 0xf0 == 0xc0;
                 if !torch {
-                    let attr = self.read(ANCILLA_TILE_ATTR + k);
+                    let attr = self.tile_attribute(k);
                     self.write(0x333, attr);
                     torch = attr & 0xf0 == 0xc0;
                 }
@@ -3208,16 +3189,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         };
         let index = self.current_oam_index();
-        if self.read(0xc68 + k) == 0 {
+        if self.timer(k) == 0 {
             let old_type = self.kind(k);
             self.clear(k);
-            if old_type != 0x2f && self.read(0x8a) == 64 && self.read(ANCILLA_TILE_ATTR + k) == 0x43
-            {
+            if old_type != 0x2f && self.read(0x8a) == 64 && self.tile_attribute(k) == 0x43 {
                 self.fire_rod_shot_become_skull_woods_fire();
             }
             return;
         }
-        let frame = self.read(0xc68 + k) >> 3;
+        let frame = self.timer(k) >> 3;
         if frame != 0 {
             oam::set_plain(
                 self.ram,
@@ -3287,8 +3267,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.ram.write_u16(0x39b, x);
         self.ram.write_u16(0x399, y);
         if let Some(k) = self.add_ancilla(6, 1) {
-            self.write(0xc5e + k, 0);
-            self.write(0x39f + k, 1);
+            self.set_item_to_link(k, 0);
+            self.set_arr3(k, 1);
             let direction = usize::from(OFFSET[usize::from(self.read(0x39d))] >> 1);
             self.set_xy(
                 k,
@@ -3299,18 +3279,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn add_sword_charge_sparkle(&mut self, source: usize) {
-        let Some(k) = (0..10)
-            .rev()
-            .find(|&slot| self.read(Self::type_address(slot)) == 0)
-        else {
+        let Some(k) = (0..10).rev().find(|&slot| self.kind(slot) == 0) else {
             return;
         };
-        self.write(Self::type_address(k), 60);
-        self.write(0xc7c + k, self.read(0xee));
-        self.write(0xc5e + k, 0);
-        self.write(0xc68 + k, 4);
+        self.set_kind(k, 60);
+        self.set_floor(k, self.read(0xee));
+        self.set_item_to_link(k, 0);
+        self.set_timer(k, 4);
         let random = misc::get_random_number(self.ram);
-        let mut z = self.read(0x29e + source);
+        let mut z = self.height(source);
         if z >= 0xf8 {
             z = 0;
         }
@@ -3377,7 +3354,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let (x0, y0) = self.prep_oam_coord(k);
         if self.item_to_link(k) != 0 {
             let floor = self.read(0xee);
-            self.write(0xc7c + k, floor);
+            self.set_floor(k, floor);
             self.ram.write_u16(
                 0x64,
                 u16::from([0x20_u8, 0x10, 0x30, 0x20][usize::from(floor)]) << 8,
@@ -3386,19 +3363,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.object_priority(k) != 0 {
             self.ram.write_u16(0x64, 0x3000);
         }
-        if self.read(0x11) == 0 && self.read(0x3b1 + k) != 0 {
-            let countdown = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, countdown);
+        if self.read(0x11) == 0 && self.aux_timer(k) != 0 {
+            let countdown = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, countdown);
             if (countdown as i8) < 0 {
-                self.write(0x39f + k, [3, 2][usize::from(self.read(0x394 + k))]);
-                let delta = if self.read(0x3a9 + k) != 0 { 0xff } else { 1 };
-                self.write(0x3a4 + k, self.read(0x3a4 + k).wrapping_add(delta) & 3);
+                self.set_arr3(k, [3, 2][usize::from(self.state_g(k))]);
+                let delta = if self.state_s(k) != 0 { 0xff } else { 1 };
+                self.set_arr1(k, self.arr1(k).wrapping_add(delta) & 3);
             }
         }
-        let frame = usize::from(self.read(0x3a4 + k));
+        let frame = usize::from(self.arr1(k));
         let x = x0.wrapping_add(i16::from(XY[frame * 2 + 1]) as u16);
         let y = y0.wrapping_add(i16::from(XY[frame * 2]) as u16);
-        if self.read(0x3b1 + k) == 0 {
+        if self.aux_timer(k) == 0 {
             let offset = [0x180_u16, 0xd0][usize::from(self.read(0xfb3))];
             self.ram.write_u16(0x92, (offset >> 2) + 0xa20);
             self.ram.write_u16(0x90, offset + 0x800);
@@ -3408,7 +3385,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             x,
             y,
             0x26,
-            (FLAGS[usize::from(self.read(0x394 + k)) * 4 + frame] & !0x30)
+            (FLAGS[usize::from(self.state_g(k)) * 4 + frame] & !0x30)
                 | (self.ram.read_u16(0x64) >> 8) as u8,
             2,
         );
@@ -3424,7 +3401,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0x1a) & 7 == 0 {
             self.sfx2_pan(k, 9);
         }
-        if self.read(0x3b1 + k) == 0 {
+        if self.aux_timer(k) == 0 {
             if self.read(0x3c) < 9 && self.read(0x300) == 0 {
                 let features = u32::from_le_bytes(self.ram.slice(0x64c, 4).try_into().unwrap());
                 if self.read(0x2e0) != 0
@@ -3437,7 +3414,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.boomerang_draw(k);
                 return;
             }
-            let direction = usize::from(self.read(0x3cf + k) >> 1);
+            let direction = usize::from(self.arr23(k) >> 1);
             self.set_xy(
                 k,
                 self.ram
@@ -3448,71 +3425,58 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     .wrapping_add(8)
                     .wrapping_add(i16::from(Y[direction]) as u16),
             );
-            self.write(0x3b1 + k, 1);
+            self.set_aux_timer(k, 1);
         }
-        if self.read(0x394 + k) != 0 && self.read(0x1a) & 1 == 0 {
+        if self.state_g(k) != 0 && self.read(0x1a) & 1 == 0 {
             self.add_sword_charge_sparkle(k);
         }
         if self.item_to_link(k) != 0 {
-            if self.read(0x380 + k) != 0 {
-                self.write(0x380 + k, self.read(0x380 + k).wrapping_add(1));
+            if self.state_k(k) != 0 {
+                self.set_state_k(k, self.state_k(k).wrapping_add(1));
             }
             let old_link_y = self.ram.read_u16(0x20);
-            self.ram.write_u16(0x38a + k, old_link_y);
+            self.set_carried_player_y(k, old_link_y);
             self.ram.write_u16(0x20, old_link_y.wrapping_add(8));
-            let mut speed = self.project_speed_towards_player(k, self.read(0x3c5 + k));
+            let mut speed = self.project_speed_towards_player(k, self.state_h(k));
             self.boomerang_cheat(k, &mut speed);
-            self.write(0xc2c + k, speed.x);
-            self.write(0xc22 + k, speed.y);
-            self.ram.write_u16(0x20, self.ram.read_u16(0x38a + k));
+            self.set_x_velocity(k, speed.x);
+            self.set_y_velocity(k, speed.y);
+            self.ram.write_u16(0x20, self.carried_player_y(k));
         }
-        if self.read(0xc22 + k) != 0 {
-            self.write(
-                0xc22 + k,
-                self.read(0xc22 + k).wrapping_add(self.read(0x380 + k)),
-            );
+        if self.y_velocity(k) != 0 {
+            self.set_y_velocity(k, self.y_velocity(k).wrapping_add(self.state_k(k)));
         }
         self.move_y(k);
-        if self.read(0xc2c + k) != 0 {
-            self.write(
-                0xc2c + k,
-                self.read(0xc2c + k).wrapping_add(self.read(0x380 + k)),
-            );
+        if self.x_velocity(k) != 0 {
+            self.set_x_velocity(k, self.x_velocity(k).wrapping_add(self.state_k(k)));
         }
         self.move_x(k);
         let hit_sprite = self.check_sprite_collision(k).is_some();
         if self.item_to_link(k) == 0 {
             if hit_sprite {
-                self.write(0xc5e + k, 1);
+                self.set_item_to_link(k, 1);
             } else if self.check_tile_collision(k) != 0 {
                 self.add_boomerang_wall_clink(k);
-                self.sfx2_pan(
-                    k,
-                    if self.read(ANCILLA_TILE_ATTR + k) == 0xf0 {
-                        6
-                    } else {
-                        5
-                    },
-                );
-                self.write(0xc5e + k, 1);
+                self.sfx2_pan(k, if self.tile_attribute(k) == 0xf0 { 6 } else { 5 });
+                self.set_item_to_link(k, 1);
             } else if self.boomerang_screen_edge(k) {
-                self.write(0xc5e + k, 1);
+                self.set_item_to_link(k, 1);
             } else {
                 let step = self.step(k).wrapping_sub(1);
-                self.write(0xc54 + k, step);
+                self.set_step(k, step);
                 if step == 0 {
-                    self.write(0xc5e + k, 1);
+                    self.set_item_to_link(k, 1);
                 } else if step < 5 {
-                    self.write(0x380 + k, self.read(0x380 + k).wrapping_sub(1));
+                    self.set_state_k(k, self.state_k(k).wrapping_sub(1));
                 }
             }
         } else {
             let priority = self.object_priority(k);
             let floor = self.floor(k);
-            self.write(0xc7c + k, 0);
+            self.set_floor(k, 0);
             self.check_tile_collision(k);
-            self.write(0xc7c + k, floor);
-            self.write(0x280 + k, priority);
+            self.set_floor(k, floor);
+            self.set_object_priority(k, priority);
             self.boomerang_stop_offscreen(k);
         }
         self.boomerang_draw(k);
@@ -3556,32 +3520,32 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn wall_hit(&mut self, k: usize) {
-        let countdown = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, countdown);
+        let countdown = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, countdown);
         if (countdown as i8) < 0 {
             let frame = self.item_to_link(k).wrapping_add(1);
             if frame == 5 {
                 self.clear(k);
                 return;
             }
-            self.write(0xc5e + k, frame);
-            self.write(0x39f + k, 1);
+            self.set_item_to_link(k, frame);
+            self.set_arr3(k, 1);
         }
         self.wall_hit_draw(k);
     }
 
     pub fn sword_wall_hit(&mut self, k: usize) {
         self.write(0xfdc, 3);
-        let countdown = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, countdown);
+        let countdown = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, countdown);
         if (countdown as i8) < 0 {
             let frame = self.item_to_link(k).wrapping_add(1);
             if frame == 8 {
                 self.clear(k);
                 return;
             }
-            self.write(0xc5e + k, frame);
-            self.write(0x3b1 + k, 1);
+            self.set_item_to_link(k, frame);
+            self.set_aux_timer(k, 1);
         }
         self.wall_hit_draw(k);
     }
@@ -3606,7 +3570,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             .ram
             .read_u16(0x728 + k * 2)
             .wrapping_sub(self.ram.read_u16(0xe2));
-        let frame = usize::from(self.read(0x746 + k)) + usize::from(self.read(0x73c + k)) * 4;
+        let frame = usize::from(self.arr25(k)) + usize::from(self.read(0x73c + k)) * 4;
         let mut index = self.current_oam_index();
         for i in 0..2 {
             let t = frame * 2 + i;
@@ -3625,12 +3589,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn door_debris(&mut self, k: usize) {
         self.door_debris_draw(k);
-        let countdown = self.read(0x741 + k).wrapping_sub(1);
-        self.write(0x741 + k, countdown);
+        let countdown = self.arr26(k).wrapping_sub(1);
+        self.set_arr26(k, countdown);
         if (countdown as i8) < 0 {
-            self.write(0x741 + k, 7);
-            let frame = self.read(0x746 + k).wrapping_add(1);
-            self.write(0x746 + k, frame);
+            self.set_arr26(k, 7);
+            let frame = self.arr25(k).wrapping_add(1);
+            self.set_arr25(k, frame);
             if frame == 4 {
                 self.clear(k);
             }
@@ -3643,10 +3607,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let Some(k) = self.alloc_high() else {
             return;
         };
-        self.write(Self::type_address(k), 0x3c);
-        self.write(0xc5e + k, 0);
-        self.write(0xc68 + k, 4);
-        self.write(0xc7c + k, self.read(0xee));
+        self.set_kind(k, 0x3c);
+        self.set_item_to_link(k, 0);
+        self.set_timer(k, 4);
+        self.set_floor(k, self.read(0xee));
         let random = misc::get_random_number(self.ram);
         let direction = usize::from(self.direction(source) & 3);
         self.set_xy(
@@ -3685,7 +3649,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.object_priority(k) != 0 {
             self.ram.write_u16(0x64, 0x3000);
         }
-        if self.read(0x3c5 + k) != 0 {
+        if self.state_h(k) != 0 {
             x = x.wrapping_add(
                 self.ram
                     .read_u16(0xe8)
@@ -3735,33 +3699,30 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         }
         let animation = self.item_to_link(k).wrapping_sub(1);
-        self.write(0xc5e + k, animation);
+        self.set_item_to_link(k, animation);
         if (animation as i8) >= 0 {
             if animation >= 4 {
                 return;
             }
         } else {
-            self.write(0xc5e + k, 0xff);
+            self.set_item_to_link(k, 0xff);
         }
         self.move_y(k);
         self.move_x(k);
         if self.read(0xf340) & 4 != 0 && self.read(0x1a) & 1 == 0 {
             self.add_silver_arrow_sparkle(k);
         }
-        self.write(0x3a9 + k, 0xff);
+        self.set_state_s(k, 0xff);
         let mut j;
         if let Some(sprite) = self.check_sprite_collision(k) {
-            self.write(
-                0xc2c + k,
-                self.read(0xc04 + k).wrapping_sub(self.read(0xd10 + sprite)),
-            );
-            self.write(
-                0xc22 + k,
-                self.read(0xbfa + k)
+            self.set_x_velocity(k, self.x_low(k).wrapping_sub(self.read(0xd10 + sprite)));
+            self.set_y_velocity(
+                k,
+                self.y_low(k)
                     .wrapping_sub(self.read(0xd00 + sprite))
                     .wrapping_add(self.read(0xf70 + sprite)),
             );
-            self.write(0x3a9 + k, sprite as u8);
+            self.set_state_s(k, sprite as u8);
             if self.read(0xe20 + sprite) == 0x65 {
                 if self.read(0xd90 + sprite) == 1 {
                     self.write(0x12f, 0x2d);
@@ -3786,7 +3747,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.arrow_draw(k);
                 return;
             }
-            self.write(0x3c5 + k, collision >> 1);
+            self.set_state_h(k, collision >> 1);
             j = usize::from(self.direction(k) & 3);
             self.set_xy(
                 k,
@@ -3799,18 +3760,18 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0xe20 + j) != 0x1b {
             self.sfx2_pan(k, 8);
         }
-        self.write(0xc5e + k, 0);
-        self.write(Self::type_address(k), 10);
-        self.write(0x3b1 + k, 1);
-        if self.read(0x3c5 + k) != 0 {
-            self.write(
-                0xc04 + k,
-                self.read(0xc04 + k)
+        self.set_item_to_link(k, 0);
+        self.set_kind(k, 10);
+        self.set_aux_timer(k, 1);
+        if self.state_h(k) != 0 {
+            self.set_x_low(
+                k,
+                self.x_low(k)
                     .wrapping_add(self.read(0xe0).wrapping_sub(self.read(0xe2))),
             );
-            self.write(
-                0xbfa + k,
-                self.read(0xbfa + k)
+            self.set_y_low(
+                k,
+                self.y_low(k)
                     .wrapping_add(self.read(0xe6).wrapping_sub(self.read(0xe8))),
             );
         }
@@ -3818,7 +3779,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn arrow_in_wall(&mut self, k: usize) {
-        let sprite = self.read(0x3a9 + k);
+        let sprite = self.state_s(k);
         if (sprite as i8) >= 0 {
             let sprite = usize::from(sprite);
             if self.read(0xdd0 + sprite) < 9
@@ -3835,25 +3796,25 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 u16::from_le_bytes([self.read(0xd00 + sprite), self.read(0xd20 + sprite)]);
             self.set_xy(
                 k,
-                sprite_x.wrapping_add(i16::from(self.read(0xc2c + k) as i8) as u16),
+                sprite_x.wrapping_add(i16::from(self.x_velocity(k) as i8) as u16),
                 sprite_y
-                    .wrapping_add(i16::from(self.read(0xc22 + k) as i8) as u16)
+                    .wrapping_add(i16::from(self.y_velocity(k) as i8) as u16)
                     .wrapping_sub(u16::from(self.read(0xf70 + sprite))),
             );
         }
         if self.read(0x11) == 0 {
-            let countdown = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, countdown);
+            let countdown = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, countdown);
             if countdown == 0 {
-                self.write(0x3b1 + k, 2);
+                self.set_aux_timer(k, 2);
                 let frame = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, frame);
+                self.set_item_to_link(k, frame);
                 if frame == 9 {
                     self.clear(k);
                     return;
                 }
                 if frame & 8 != 0 {
-                    self.write(0x3b1 + k, 0x80);
+                    self.set_aux_timer(k, 0x80);
                 }
             }
         }
@@ -3862,16 +3823,16 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn ice_rod_shot(&mut self, k: usize) {
         if self.read(0x11) == 0 {
-            let countdown = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, countdown);
+            let countdown = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, countdown);
             if (countdown as i8) < 0 {
                 let animation = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, animation);
+                self.set_item_to_link(k, animation);
                 if animation & !1 != 0 {
-                    self.write(0xc54 + k, 1);
-                    self.write(0xc5e + k, animation & 7 | 4);
+                    self.set_step(k, 1);
+                    self.set_item_to_link(k, animation & 7 | 4);
                 }
-                self.write(0x3b1 + k, 3);
+                self.set_aux_timer(k, 3);
             }
             if self.step(k) != 0 {
                 if self.return_if_outside_bounds(k).is_none() {
@@ -3880,10 +3841,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.move_y(k);
                 self.move_x(k);
                 if self.check_sprite_collision(k).is_some() || self.check_tile_collision(k) != 0 {
-                    self.write(Self::type_address(k), 0x11);
-                    self.write(0xc90 + k, PFLAGS[0x11]);
-                    self.write(0xc5e + k, 0);
-                    self.write(0x3b1 + k, 4);
+                    self.set_kind(k, 0x11);
+                    self.set_sprite_count(k, PFLAGS[0x11]);
+                    self.set_item_to_link(k, 0);
+                    self.set_aux_timer(k, 4);
                 }
             }
         }
@@ -3899,7 +3860,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0, 0, 0, 8, 8, 0, 8, 8, 0xf8, 0xf8, 0xf8, 0x10, 0x10, 0xf8, 0x10, 0x10,
         ];
         let (x0, y0) = self.prep_oam_coord(k);
-        self.runtime.allocate_oam(self.ram, k, self.read(0xc90 + k));
+        self.runtime.allocate_oam(self.ram, k, self.sprite_count(k));
         let original = self.current_oam_index();
         let mut index = original;
         let mut frame = usize::from(self.item_to_link(k)) * 4;
@@ -3929,12 +3890,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn ice_rod_wall_hit(&mut self, k: usize) {
-        let countdown = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, countdown);
+        let countdown = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, countdown);
         if (countdown as i8) < 0 {
-            self.write(0x3b1 + k, 7);
+            self.set_aux_timer(k, 7);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 2 {
                 self.clear(k);
                 return;
@@ -3953,7 +3914,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let y = self
             .get_y(k)
             .wrapping_add(Y_OFFSET[class] as u16)
-            .wrapping_add(i16::from(self.read(0x29e + k) as i8) as u16);
+            .wrapping_add(i16::from(self.height(k) as i8) as u16);
         let x = self.get_x(k).wrapping_add(X_OFFSET[class] as u16);
         let r4 = self
             .ram
@@ -3980,9 +3941,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn transmute_to_splash(&mut self, k: usize) {
-        self.write(Self::type_address(k), 0x3d);
-        self.write(0xc5e + k, 0);
-        self.write(0xc68 + k, 6);
+        self.set_kind(k, 0x3d);
+        self.set_item_to_link(k, 0);
+        self.set_timer(k, 6);
         self.set_xy(
             k,
             self.get_x(k).wrapping_sub(8),
@@ -4019,10 +3980,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn item_splash(&mut self, k: usize) {
         self.allocate_oam_from_region_a_d_f(k, 8);
-        if self.read(0x11) == 0 && self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 6);
+        if self.read(0x11) == 0 && self.timer(k) == 0 {
+            self.set_timer(k, 6);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 5 {
                 self.clear(k);
                 return;
@@ -4064,14 +4025,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     fn wish_pond_item_draw(&mut self, k: usize) {
         let (x, y) = self.prep_adjusted_oam_coord(k);
         if self.item_to_link(k) == 1 {
-            self.write(0xbf0 + k, 5);
+            self.set_arr4(k, 5);
         }
-        let index = self.receive_item_draw(
-            k,
-            x,
-            y.wrapping_sub(i16::from(self.read(0x29e + k) as i8) as u16),
-        );
-        let z_velocity = self.read(0x294 + k);
+        let index =
+            self.receive_item_draw(k, x, y.wrapping_sub(i16::from(self.height(k) as i8) as u16));
+        let z_velocity = self.z_velocity(k);
         if self.read(0x309) != 2 || (z_velocity as i8) >= 0 && z_velocity >= 2 {
             return;
         }
@@ -4087,16 +4045,16 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn wish_pond_item(&mut self, k: usize) {
         self.allocate_oam_from_region_a_d_f(k, 0x10);
-        if self.read(0x11) == 0 && self.read(0xc68 + k) == 0 {
+        if self.read(0x11) == 0 && self.timer(k) == 0 {
             self.write(0x309, 2);
             self.write(0x308, 0);
-            self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(2));
+            self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(2));
             self.move_z(k);
             self.move_y(k);
             self.move_x(k);
-            let z = self.read(0x29e + k);
+            let z = self.height(k);
             if (z as i8) < 0 && z < 228 {
-                self.write(0x29e + k, 228);
+                self.set_height(k, 228);
                 let generated = self.runtime.generated_wish_pond_item(self.item_to_link(k));
                 self.set_xy(
                     k,
@@ -4147,44 +4105,44 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.allocate_oam_from_region_a_d_f(k, 0x10);
         self.happiness_pond_get_state(k, pond);
         if self.step(k) != 0 {
-            if self.read(0x11) == 0 && self.read(0xc68 + k) == 0 {
-                self.write(0xc68 + k, 6);
+            if self.read(0x11) == 0 && self.timer(k) == 0 {
+                self.set_timer(k, 6);
                 let frame = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, frame);
+                self.set_item_to_link(k, frame);
                 if frame == 5 {
-                    self.write(0xc54 + k, self.step(k).wrapping_add(1));
+                    self.set_step(k, self.step(k).wrapping_add(1));
                 } else {
                     self.object_splash_draw(k);
                 }
             } else {
                 self.object_splash_draw(k);
             }
-        } else if self.read(0x11) == 0 && self.read(0xc68 + k) == 0 {
-            self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(2));
+        } else if self.read(0x11) == 0 && self.timer(k) == 0 {
+            self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(2));
             self.move_y(k);
             self.move_x(k);
             self.move_z(k);
-            let z = self.read(0x29e + k);
+            let z = self.height(k);
             if (z as i8) < 0 && z < 0xe4 {
-                self.write(0x29e + k, 0xe4);
+                self.set_height(k, 0xe4);
                 self.set_xy(
                     k,
                     self.get_x(k).wrapping_sub(4),
                     self.get_y(k).wrapping_add(30),
                 );
-                self.write(0xc5e + k, 0);
-                self.write(0xc68 + k, 6);
+                self.set_item_to_link(k, 0);
+                self.set_timer(k, 6);
                 self.sfx2_pan(k, 0x28);
-                self.write(0xc54 + k, self.step(k).wrapping_add(1));
+                self.set_step(k, self.step(k).wrapping_add(1));
                 self.object_splash_draw(k);
             } else {
-                self.write(0xbf0 + k, 2);
-                self.write(0xc7c + k, 0);
+                self.set_arr4(k, 2);
+                self.set_floor(k, 0);
                 self.wish_pond_item_draw(k);
             }
         } else {
-            self.write(0xbf0 + k, 2);
-            self.write(0xc7c + k, 0);
+            self.set_arr4(k, 2);
+            self.set_floor(k, 0);
             self.wish_pond_item_draw(k);
         }
         self.happiness_pond_save_state(pond, k);
@@ -4243,12 +4201,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn link_poof(&mut self, k: usize) {
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 7);
+            self.set_aux_timer(k, 7);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 3 {
                 self.clear(k);
                 self.write(0x2e1, 0);
@@ -4272,12 +4230,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn dwarf_poof(&mut self, k: usize) {
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 7);
+            self.set_aux_timer(k, 7);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 3 {
                 self.clear(k);
                 self.write(0x2f9, 0);
@@ -4297,10 +4255,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const FLAGS: [u8; 16] = [
             0, 0, 0, 0, 0, 0x40, 0x80, 0xc0, 0, 0, 0, 0, 0xc0, 0x80, 0x40, 0,
         ];
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 7);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 7);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 4 {
                 self.clear(k);
                 return;
@@ -4346,12 +4304,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0, 0x80, 0xff, 0xff, 0, 0, 0xff, 0, 0, 0, 0x80, 0x80, 0, 0x80, 0xff, 0xff, 0, 0, 0xff,
             0, 0, 0, 0x80, 0x80, 0, 0x80, 0xff, 0xff,
         ];
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 0);
+            self.set_aux_timer(k, 0);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 4 {
                 self.clear(k);
                 return;
@@ -4383,8 +4341,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [4, 4, -13, 20];
         const PRIORITY: [u8; 4] = [0x20, 0x10, 0x30, 0x20];
         self.allocate_oam_from_region_a_d_f(k, 4);
-        self.write(0xc86 + k, self.read(0x90));
-        if self.read(0xc68 + k) == 0 {
+        self.set_oam_index(k, self.read(0x90));
+        if self.timer(k) == 0 {
             self.clear(k);
             return;
         }
@@ -4408,15 +4366,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const Z_VELOCITY: [u8; 4] = [0x18, 0x10, 0x0a, 0];
         if self.read(0x11) == 0 {
             if self.step(k) != 3 {
-                self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(2));
+                self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(2));
                 self.move_x(k);
                 self.move_z(k);
-                let z = self.read(0x29e + k);
+                let z = self.height(k);
                 if (z as i8) < 0 || z >= 0xf0 {
                     let step = self.step(k).wrapping_add(1);
-                    self.write(0xc54 + k, step);
-                    self.write(0x294 + k, Z_VELOCITY[usize::from(step)]);
-                    self.write(0x29e + k, 0);
+                    self.set_step(k, step);
+                    self.set_z_velocity(k, Z_VELOCITY[usize::from(step)]);
+                    self.set_height(k, 0);
                 }
             } else if self.check_link_collision(k, 2).is_some()
                 && self.read(0x37e) == 0
@@ -4433,7 +4391,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.set_oam(
             index,
             x,
-            y.wrapping_sub(i16::from(self.read(0x29e + k) as i8) as u16),
+            y.wrapping_sub(i16::from(self.height(k) as i8) as u16),
             0x24,
             (self.ram.read_u16(0x64) >> 8) as u8 | 4,
             2,
@@ -4450,7 +4408,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const Y: [i8; 12] = [-3, 0, 0, 0, 0, 0, 8, 8, 0, 8, 0, 0];
         const X: [i8; 12] = [4, 10, 0, 0, 1, 9, 2, 7, 4, 4, 0, 0];
         let (x, y) = self.prep_adjusted_oam_coord(k);
-        let timer = self.read(0xc68 + k);
+        let timer = self.timer(k);
         if timer == 0 {
             self.clear(k);
             return;
@@ -4495,9 +4453,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if (animation.wrapping_sub(6) as i8) >= 0 {
             self.write(0x2e, animation - 6);
         }
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 2);
-            self.write(0xc5e + k, self.item_to_link(k).wrapping_add(1) & 3);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 2);
+            self.set_item_to_link(k, self.item_to_link(k).wrapping_add(1) & 3);
         }
         let link_y = self.ram.read_u16(0x20);
         self.set_y(
@@ -4554,19 +4512,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const Y: [i8; 6] = [-4, -1, -4, -4, -4, -4];
         const CHAR: [u8; 6] = [0x92, 0xff, 0xf9, 0xf9, 0xf9, 0xf9];
         const FLAGS: [u8; 6] = [6, 0xff, 0x86, 0xc6, 0x86, 0xc6];
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 3);
+            self.set_aux_timer(k, 3);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 3 {
                 self.clear(k);
                 return;
             }
         }
         let (x, y) = self.prep_adjusted_oam_coord(k);
-        let mut z = self.read(0x29e + k);
+        let mut z = self.height(k);
         if z == 0xff {
             z = 0;
         }
@@ -4599,12 +4557,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const FLAGS: [u8; 16] = [
             0xc6, 0x86, 0x46, 6, 0x46, 0xc6, 6, 0x86, 0xc6, 0x86, 0x46, 6, 0x46, 0xc6, 6, 0x86,
         ];
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 3);
+            self.set_aux_timer(k, 3);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 2 {
                 self.clear(k);
                 self.somaria_block_spawn_bullets(k);
@@ -4612,8 +4570,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         let (x, y) = self.prep_adjusted_oam_coord(k);
-        let mut z = self.read(0x29e + k);
-        if self.read(0x380 + k) == 3 && self.read(0x24) != 0xff {
+        let mut z = self.height(k);
+        if self.state_k(k) == 3 && self.read(0x24) != 0xff {
             z = z.wrapping_add(self.read(0x24));
         }
         let mut j = usize::from(self.item_to_link(k)) * 8;
@@ -4668,8 +4626,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.move_y(k);
             self.ram.write_u16(0x1580e, self.get_x(k));
             self.ram.write_u16(0x15810, self.get_y(k));
-            let cycle = self.read(0x394 + k);
-            self.write(0x394 + k, cycle.wrapping_add(1));
+            let cycle = self.state_g(k);
+            self.set_state_g(k, cycle.wrapping_add(1));
             if cycle & 0x0f == 0 {
                 let sound = SoundRequest::at_world_x(self.ram, 1, self.get_x(k));
                 SoundPort::EffectsB.overwrite(self.ram, sound);
@@ -4685,20 +4643,20 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     self.get_y(k)
                         .wrapping_add(i16::from(Y_OFFSET[direction]) as u16),
                 );
-                self.write(Self::type_address(k), 4);
-                self.write(0xc68 + k, 7);
-                self.write(0xc90 + k, 0x10);
+                self.set_kind(k, 4);
+                self.set_timer(k, 7);
+                self.set_sprite_count(k, 0x10);
                 return;
             }
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if (timer as i8) < 0 {
                 flags = 4;
-                self.write(0x3b1 + k, 2);
+                self.set_aux_timer(k, 2);
             }
         }
         let original = self.current_oam_index();
-        let spin = self.read(0x3a9 + k);
+        let spin = self.state_s(k);
         let priority = (self.ram.read_u16(0x64) >> 8) as u8;
         for i in (0..4).rev() {
             if self.read(0x11) == 0 {
@@ -4713,12 +4671,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let mut draw_trail = true;
         if self.read(0x11) == 0 {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x39f + k, 0);
-                let trail = self.read(0x3a4 + k).wrapping_add(1) & 3;
-                self.write(0x3a4 + k, trail);
+                self.set_arr3(k, 0);
+                let trail = self.arr1(k).wrapping_add(1) & 3;
+                self.set_arr1(k, trail);
                 if trail == 3 {
                     self.write(0x15804, self.read(0x15804).wrapping_add(spin) & 0x3f);
                 }
@@ -4726,7 +4684,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 draw_trail = false;
             }
         }
-        let trail = self.read(0x3a4 + k);
+        let trail = self.arr1(k);
         if draw_trail && trail != 3 {
             let radial = Self::radial_projection(self.read(0x15804), self.read(0x15808));
             let (x, y) = self.sparkle_prep_oam_from_radial(radial);
@@ -4762,19 +4720,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.write(0x15800 + i, ANGLES[facing * 2 + i]);
         }
         self.write(0x15804, ANGLES[facing * 2 + 3]);
-        self.write(0x3b1 + k, 2);
-        self.write(0xc5e + k, 0x4c);
-        self.write(0x39f + k, 8);
-        self.write(0xc54 + k, 0);
-        self.write(0x385 + k, 0);
-        self.write(0x394 + k, 0);
-        self.write(0x3a4 + k, 0);
+        self.set_aux_timer(k, 2);
+        self.set_item_to_link(k, 0x4c);
+        self.set_arr3(k, 8);
+        self.set_step(k, 0);
+        self.set_state_l(k, 0);
+        self.set_state_g(k, 0);
+        self.set_arr1(k, 0);
         self.write(0x15808, 14);
         let direction = facing >> 1;
-        self.write(0xc72 + k, direction as u8);
-        self.write(0xc22 + k, Y_VELOCITY[direction] as u8);
-        self.write(0xc2c + k, X_VELOCITY[direction] as u8);
-        self.write(0x3a9 + k, SPIN[direction] as u8);
+        self.set_direction(k, direction as u8);
+        self.set_y_velocity(k, Y_VELOCITY[direction] as u8);
+        self.set_x_velocity(k, X_VELOCITY[direction] as u8);
+        self.set_state_s(k, SPIN[direction] as u8);
         self.ram
             .write_u16(0x15810, self.ram.read_u16(0x20).wrapping_add(12));
         self.ram
@@ -4791,9 +4749,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             );
             let sound = SoundRequest::at_world_x(self.ram, 1, self.get_x(k));
             SoundPort::EffectsB.overwrite(self.ram, sound);
-            self.write(Self::type_address(k), 4);
-            self.write(0xc68 + k, 7);
-            self.write(0xc90 + k, 16);
+            self.set_kind(k, 4);
+            self.set_timer(k, 7);
+            self.set_sprite_count(k, 16);
         }
     }
 
@@ -4802,12 +4760,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn spin_attack_sparkle_b_closer(&mut self, k: usize) {
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 1);
+            self.set_aux_timer(k, 1);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 3 {
                 self.clear(k);
             }
@@ -4821,18 +4779,18 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         ];
         const X: [i8; 4] = [-3, 21, 25, -8];
         const Y: [i8; 4] = [28, -2, 24, 6];
-        self.write(Self::type_address(k), 0x2b);
+        self.set_kind(k, 0x2b);
         let facing = usize::from(self.read(0x2f));
         for i in 0..4 {
             self.write(0x15800 + i, ANGLES[facing * 2 + i]);
         }
         self.write(0x15804, ANGLES[facing * 2 + 3]);
-        self.write(0x3b1 + k, 2);
-        self.write(0xc5e + k, 0x4c);
-        self.write(0x39f + k, 8);
-        self.write(0xc54 + k, 0);
-        self.write(0x385 + k, 0);
-        self.write(0x3a4 + k, 0xff);
+        self.set_aux_timer(k, 2);
+        self.set_item_to_link(k, 0x4c);
+        self.set_arr3(k, 8);
+        self.set_step(k, 0);
+        self.set_state_l(k, 0);
+        self.set_arr1(k, 0xff);
         self.write(0x15808, 20);
         self.ram
             .write_u16(0x1580e, self.ram.read_u16(0x22).wrapping_add(8));
@@ -4854,14 +4812,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn spin_attack_sparkle_a(&mut self, k: usize) {
         const TIMER: [u8; 6] = [4, 2, 3, 3, 2, 1];
         if self.read(0x11) == 0 {
-            let auxiliary = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, auxiliary);
+            let auxiliary = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, auxiliary);
             if (auxiliary as i8) < 0 {
-                self.write(0x3b1 + k, 0);
-                if self.read(0xc68 + k) == 0 {
+                self.set_aux_timer(k, 0);
+                if self.timer(k) == 0 {
                     let frame = self.item_to_link(k).wrapping_add(1);
-                    self.write(0xc5e + k, frame);
-                    self.write(0xc68 + k, TIMER[usize::from(frame)]);
+                    self.set_item_to_link(k, frame);
+                    self.set_timer(k, TIMER[usize::from(frame)]);
                     if frame == 5 {
                         if self.step(k) != 0 {
                             self.add_sword_beam(frame);
@@ -4881,23 +4839,23 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn spin_attack_sparkle_b(&mut self, k: usize) {
         const CHAR: [u8; 4] = [0xd7, 0xb7, 0x80, 0x83];
         const TRAIL_CHAR: [u8; 3] = [0xb7, 0x80, 0x83];
-        if self.read(0x385 + k) != 0 {
+        if self.state_l(k) != 0 {
             self.spin_attack_sparkle_b_closer(k);
             return;
         }
         let mut flags = 2;
         if self.read(0x11) == 0 {
             let radius = self.item_to_link(k).wrapping_sub(3);
-            self.write(0xc5e + k, radius);
+            self.set_item_to_link(k, radius);
             if radius < 13 {
-                self.write(0x3b1 + k, 1);
-                self.write(0x385 + k, 1);
-                self.write(0xc5e + k, 0);
+                self.set_aux_timer(k, 1);
+                self.set_state_l(k, 1);
+                self.set_item_to_link(k, 0);
                 self.spin_attack_sparkle_b_closer(k);
                 return;
             }
-            self.write(
-                0xc54 + k,
+            self.set_step(
+                k,
                 if radius < 0x42 {
                     3
                 } else if radius == 0x46 {
@@ -4908,11 +4866,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     0
                 },
             );
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if (timer as i8) < 0 {
                 flags = 4;
-                self.write(0x3b1 + k, 2);
+                self.set_aux_timer(k, 2);
             }
         }
         let original = self.current_oam_index();
@@ -4930,12 +4888,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let mut draw_trail = true;
         if self.read(0x11) == 0 {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x39f + k, 0);
-                let trail = self.read(0x3a4 + k).wrapping_add(1) & 3;
-                self.write(0x3a4 + k, trail);
+                self.set_arr3(k, 0);
+                let trail = self.arr1(k).wrapping_add(1) & 3;
+                self.set_arr1(k, trail);
                 if trail == 3 {
                     self.write(0x15804, self.read(0x15804).wrapping_add(9) & 0x3f);
                 }
@@ -4943,7 +4901,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 draw_trail = false;
             }
         }
-        let trail = self.read(0x3a4 + k);
+        let trail = self.arr1(k);
         if draw_trail && trail != 3 {
             let radial = Self::radial_projection(self.read(0x15804), self.read(0x15808));
             let (x, y) = self.sparkle_prep_oam_from_radial(radial);
@@ -4959,19 +4917,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0x34, 0x33, 0x32, 0x31, 0x16, 0x15, 0x14, 0x13, 0x2a, 0x29, 0x28, 0x27, 0x10, 0x0f,
             0x0e, 0x0d,
         ];
-        self.write(Self::type_address(k), 0x31);
+        self.set_kind(k, 0x31);
         let facing = usize::from(self.read(0x2f));
         for i in 0..4 {
             self.write(0x15800 + i, ANGLES[facing * 2 + i]);
         }
-        self.write(0x3b1 + k, 0x17);
-        self.write(0x394 + k, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x39f + k, 8);
-        self.write(0xc54 + k, 0);
-        self.write(0x385 + k, 0);
-        self.write(0x3a4 + k, 2);
-        self.write(0xc68 + k, 21);
+        self.set_aux_timer(k, 0x17);
+        self.set_state_g(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_arr3(k, 8);
+        self.set_step(k, 0);
+        self.set_state_l(k, 0);
+        self.set_arr1(k, 2);
+        self.set_timer(k, 21);
         self.write(0x15808, 20);
         misc::ancilla_sfx3_near(self.ram, 0x30);
         self.byrna_spark(k);
@@ -4991,12 +4949,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0xa2, 0xe2,
         ];
         if self.read(0x11) == 0 {
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x3b1 + k, 1);
+                self.set_aux_timer(k, 1);
                 let frame = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, frame);
+                self.set_item_to_link(k, frame);
                 if frame == 17 {
                     self.byrna_windup_transmute(k);
                     return;
@@ -5008,12 +4966,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let mut pose = self.read(0x300);
         if pose == 2 {
-            let value = self.read(0x39f + k).wrapping_sub(1);
+            let value = self.arr3(k).wrapping_sub(1);
             if (value as i8) < 0 {
-                self.write(0x39f + k, 0);
+                self.set_arr3(k, 0);
                 pose = 3;
             } else {
-                self.write(0x39f + k, value);
+                self.set_arr3(k, value);
             }
         }
         let j = usize::from(pose) + usize::from(self.read(0x2f)) * 2;
@@ -5061,10 +5019,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 return;
             }
             self.write(0x37b, 1);
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if timer == 0 {
-                self.write(0x3b1 + k, 1);
+                self.set_aux_timer(k, 1);
                 let cost = MAGIC[usize::from(self.read(0xf37b))];
                 let power = self.read(0xf36e);
                 let remaining = power.wrapping_sub(cost);
@@ -5074,10 +5032,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     self.write(0x373, 0);
                     return;
                 }
-                let magic_timer = self.read(0x394 + k).wrapping_sub(1);
-                self.write(0x394 + k, magic_timer);
+                let magic_timer = self.state_g(k).wrapping_sub(1);
+                self.set_state_g(k, magic_timer);
                 if (magic_timer as i8) < 0 {
-                    self.write(0x394 + k, 0x17);
+                    self.set_state_g(k, 0x17);
                     self.write(0xf36e, remaining);
                 }
                 if self.read(0xf4) & 0x40 != 0 {
@@ -5089,9 +5047,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
             if self.step(k) != 3 {
                 let frame = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, frame);
-                self.write(
-                    0xc54 + k,
+                self.set_item_to_link(k, frame);
+                self.set_step(
+                    k,
                     if frame >= 4 {
                         3
                     } else if frame == 2 {
@@ -5103,10 +5061,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     },
                 );
             }
-            let draw_timer = self.read(0x3a4 + k).wrapping_sub(1);
-            self.write(0x3a4 + k, draw_timer);
+            let draw_timer = self.arr1(k).wrapping_sub(1);
+            self.set_arr1(k, draw_timer);
             if (draw_timer as i8) < 0 {
-                self.write(0x3a4 + k, 2);
+                self.set_arr1(k, 2);
                 flags = 4;
             }
         }
@@ -5123,8 +5081,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         );
         self.ram
             .write_u16(0x1580e, self.ram.read_u16(0x22).wrapping_add(8));
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 21);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 21);
             misc::ancilla_sfx3_near(self.ram, 0x30);
         }
         let priority = (self.ram.read_u16(0x64) >> 8) as u8;
@@ -5141,7 +5099,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 x.wrapping_add(self.ram.read_u16(0xe2)),
                 y.wrapping_add(self.ram.read_u16(0xe8)),
             );
-            self.write(0xc72 + k, 0);
+            self.set_direction(k, 0);
             self.check_sprite_collision(k);
             index += 1;
         }
@@ -5155,7 +5113,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const FLAGS: [u8; 3] = [0x22, 0x2e, 0x2e];
         let mut forced_frame = None;
         if self.read(0x11) == 0 {
-            if self.read(0xc68 + k) != 0 {
+            if self.timer(k) != 0 {
                 let features = u32::from_le_bytes(self.ram.slice(0x64c, 4).try_into().unwrap());
                 self.set_xy(
                     k,
@@ -5166,33 +5124,33 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 );
                 return;
             }
-            let timer = self.read(0x394 + k).wrapping_sub(1);
-            self.write(0x394 + k, timer);
+            let timer = self.state_g(k).wrapping_sub(1);
+            self.set_state_g(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x394 + k, 0x28);
+                self.set_state_g(k, 0x28);
                 self.sfx3_pan(k, 0x1e);
             }
-            if self.read(0x385 + k) != 0 {
-                self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(1));
+            if self.state_l(k) != 0 {
+                self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(1));
                 self.move_z(k);
             } else if self.step(k) != 0 {
                 self.write(0xfc1, self.read(0xfc1).wrapping_add(1));
-                self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(1));
+                self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(1));
                 self.move_z(k);
             }
             self.move_x(k);
-            if self.read(0x385 + k) != 0 {
+            if self.state_l(k) != 0 {
                 let x = self.get_x(k);
                 if self.step(k) != 0 {
                     self.write(0xfc1, self.read(0xfc1).wrapping_add(1));
                 }
                 if (x as i16) >= 0 && x >= self.ram.read_u16(0x22) {
                     if self.step(k) != 0 {
-                        self.write(0xc54 + k, 0);
+                        self.set_step(k, 0);
                         self.write(0x4b, 0);
                         self.write(0x2f9, 0);
                         self.write(0x2da, 0);
-                        self.write(0xc22 + k, 0);
+                        self.set_y_velocity(k, 0);
                         self.write(0x2e4, 0);
                         self.write(0x37b, 0);
                         self.write(0x3fd, 0);
@@ -5240,7 +5198,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     self.write(0x2e4, 1);
                     self.write(0x37b, 1);
                     self.write(0x2f9, 1);
-                    self.write(0xc54 + k, 2);
+                    self.set_step(k, 2);
                     self.write(0xfc1, self.read(0xfc1).wrapping_add(1));
                     self.write(0x373, 0);
                     if indoors {
@@ -5252,19 +5210,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let frame = if let Some(frame) = forced_frame {
             frame
         } else {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x39f + k, 3);
-                let frame = self.read(0x380 + k).wrapping_add(1);
-                self.write(0x380 + k, if frame == 3 { 0 } else { frame });
+                self.set_arr3(k, 3);
+                let frame = self.state_k(k).wrapping_add(1);
+                self.set_state_k(k, if frame == 3 { 0 } else { frame });
             }
-            usize::from(self.read(0x380 + k))
+            usize::from(self.state_k(k))
         };
         self.write(0xaf4, DMA[frame]);
         let (x, y) = self.prep_oam_coord(k);
-        let z = if self.read(0x29e + k) != 0 {
-            i16::from(self.read(0x29e + k)) - 256
+        let z = if self.height(k) != 0 {
+            i16::from(self.height(k)) - 256
         } else {
             0
         };
@@ -5287,7 +5245,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         if (x as i16) >= 0 && x >= 0x130 {
             self.clear(k);
-            if self.read(0x385 + k) == 0 && self.step(k) != 0 {
+            if self.state_l(k) == 0 && self.step(k) != 0 {
                 self.write(0x11, 10);
                 self.write(0x10c, self.read(0x10));
                 self.write(0x10, 14);
@@ -5302,61 +5260,61 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0x1a) & 31 == 0 {
             self.sfx3_pan(k, 0x1e);
         }
-        let animation_timer = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, animation_timer);
+        let animation_timer = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, animation_timer);
         if (animation_timer as i8) < 0 {
-            self.write(0x39f + k, 3);
-            self.write(0x380 + k, self.read(0x380 + k) ^ 1);
+            self.set_arr3(k, 3);
+            self.set_state_k(k, self.state_k(k) ^ 1);
         }
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if timer == 0 {
-            self.write(0x3b1 + k, 1);
-            if self.read(0x385 + k) == 0 {
+            self.set_aux_timer(k, 1);
+            if self.state_l(k) == 0 {
                 let phase = self.item_to_link(k).wrapping_sub(1);
-                self.write(0xc5e + k, phase);
+                self.set_item_to_link(k, phase);
                 if (phase as i8) >= 0 {
                     let velocity = if self.step(k) != 0 {
-                        self.read(0x294 + k).wrapping_add(1)
+                        self.z_velocity(k).wrapping_add(1)
                     } else {
-                        self.read(0x294 + k).wrapping_sub(1)
+                        self.z_velocity(k).wrapping_sub(1)
                     };
-                    self.write(0x294 + k, velocity);
+                    self.set_z_velocity(k, velocity);
                     if (velocity as i8).unsigned_abs() >= 12 {
-                        self.write(0xc54 + k, self.step(k) ^ 1);
+                        self.set_step(k, self.step(k) ^ 1);
                     }
                 } else {
-                    self.write(0xc5e + k, 0);
-                    self.write(0xc54 + k, 0);
-                    self.write(0xc2c + k, LIMIT[0]);
-                    self.write(0x294 + k, (-16_i8) as u8);
-                    self.write(0x385 + k, 1);
-                    self.write(0xc54 + k, 3);
+                    self.set_item_to_link(k, 0);
+                    self.set_step(k, 0);
+                    self.set_x_velocity(k, LIMIT[0]);
+                    self.set_z_velocity(k, (-16_i8) as u8);
+                    self.set_state_l(k, 1);
+                    self.set_step(k, 3);
                 }
             }
-            if self.read(0x385 + k) != 0 {
+            if self.state_l(k) != 0 {
                 let x_velocity = if self.step(k) & 1 == 0 {
-                    self.read(0xc2c + k).wrapping_add(1)
+                    self.x_velocity(k).wrapping_add(1)
                 } else {
-                    self.read(0xc2c + k).wrapping_sub(1)
+                    self.x_velocity(k).wrapping_sub(1)
                 };
-                self.write(0xc2c + k, x_velocity);
+                self.set_x_velocity(k, x_velocity);
                 let abs_x = (x_velocity as i8).unsigned_abs();
                 if abs_x == 0 {
-                    let phase = self.read(0x385 + k).wrapping_add(1);
-                    self.write(0x385 + k, phase);
+                    let phase = self.state_l(k).wrapping_add(1);
+                    self.set_state_l(k, phase);
                     if phase == 7 {
-                        self.write(0x3a9 + k, 1);
+                        self.set_state_s(k, 1);
                     }
                 }
-                let speed_index = usize::from(self.read(0x3a9 + k));
+                let speed_index = usize::from(self.state_s(k));
                 if abs_x >= LIMIT[speed_index] {
-                    self.write(0xc54 + k, self.step(k) ^ 3);
+                    self.set_step(k, self.step(k) ^ 3);
                 }
-                self.write(0xc72 + k, if (x_velocity as i8) < 0 { 2 } else { 3 });
+                self.set_direction(k, if (x_velocity as i8) < 0 { 2 } else { 3 });
                 let vertical = LIMIT[speed_index].wrapping_sub(abs_x) >> 1;
-                self.write(
-                    0x294 + k,
+                self.set_z_velocity(
+                    k,
                     if self.step(k) & 2 != 0 {
                         vertical.wrapping_neg()
                     } else {
@@ -5367,13 +5325,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         self.move_x(k);
         self.move_z(k);
-        self.write(0xaf4, DMA[usize::from(self.read(0x380 + k)) + 1]);
+        self.write(0xaf4, DMA[usize::from(self.state_k(k)) + 1]);
         let (x, y) = self.prep_oam_coord(k);
         let index = self.current_oam_index();
         self.set_oam(
             index,
             x,
-            y.wrapping_add(i16::from(self.read(0x29e + k) as i8) as u16),
+            y.wrapping_add(i16::from(self.height(k) as i8) as u16),
             0x0e,
             0x22 | 0x30 | DIRECTION_FLAGS[usize::from(self.direction(k) & 1)],
             2,
@@ -5519,13 +5477,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             let submodule = self.read(0x11);
             if submodule != 0 && !matches!(submodule, 43 | 9) {
                 if submodule == 2 {
-                    self.write(0xc68 + k, 16);
+                    self.set_timer(k, 16);
                 }
             } else {
                 self.write(0xfc1, self.read(0xfc1).wrapping_add(1));
                 if self.step(k) != 0 && self.step(k) != 3 {
-                    let timer = self.read(0x3b1 + k).wrapping_sub(1);
-                    self.write(0x3b1 + k, timer);
+                    let timer = self.aux_timer(k).wrapping_sub(1);
+                    self.set_aux_timer(k, timer);
                     if (timer as i8) < 0 {
                         flow = Flow::Finish(false);
                     } else if timer == 0 {
@@ -5540,7 +5498,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         flow = Flow::Move;
                     }
                 } else if self.item_to_link(k) == 1 && self.step(k) != 2 {
-                    let timer = self.read(0xc68 + k);
+                    let timer = self.timer(k);
                     if timer == 0 {
                         flow = Flow::Finish(true);
                     } else if timer == 17 {
@@ -5549,15 +5507,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         flow = Flow::Message;
                     }
                 } else {
-                    let timer = self.read(0x3b1 + k).wrapping_sub(1);
-                    self.write(0x3b1 + k, timer);
+                    let timer = self.aux_timer(k).wrapping_sub(1);
+                    self.set_aux_timer(k, timer);
                     if timer == 0 {
                         flow = Flow::Finish(true);
                     } else if timer == 1 {
                         if matches!(self.item_to_link(k), 0x37..=0x39)
                             && self.runtime.audio_port0() != 0
                         {
-                            self.write(0x3b1 + k, timer.wrapping_add(1));
+                            self.set_aux_timer(k, timer.wrapping_add(1));
                         } else {
                             flow = Flow::Message;
                         }
@@ -5572,10 +5530,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
             Flow::Message => self.item_receipt_show_message(k),
             Flow::Move => {
-                if self.read(0x3b1 + k) >= 24 {
-                    let velocity = self.read(0xc22 + k).wrapping_sub(1);
+                if self.aux_timer(k) >= 24 {
+                    let velocity = self.y_velocity(k).wrapping_sub(1);
                     if velocity >= 248 {
-                        self.write(0xc22 + k, velocity);
+                        self.set_y_velocity(k, velocity);
                     }
                     self.move_y(k);
                 }
@@ -5584,7 +5542,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let item = self.item_to_link(k);
         if item == 0x20 {
-            self.write(0x29e + k, 0);
+            self.set_height(k, 0);
             self.add_occasional_sparkle(k);
             if self.runtime.audio_port0() == 0 {
                 self.write(0x12c, 0x1a);
@@ -5593,34 +5551,34 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         } else if item == 1 {
             const FLAGS: [u8; 3] = [5, 1, 4];
-            self.write(0xbf0 + k, FLAGS[0]);
+            self.set_arr4(k, FLAGS[0]);
             if self.step(k) != 2 {
-                if self.read(0xc68 + k) < 16 {
-                    self.write(0x3a4 + k, 0);
-                    self.write(0xbf0 + k, FLAGS[0]);
+                if self.timer(k) < 16 {
+                    self.set_arr1(k, 0);
+                    self.set_arr4(k, FLAGS[0]);
                 } else {
-                    let timer = self.read(0x39f + k).wrapping_sub(1);
-                    self.write(0x39f + k, timer);
+                    let timer = self.arr3(k).wrapping_sub(1);
+                    self.set_arr3(k, timer);
                     if (timer as i8) < 0 {
-                        self.write(0x39f + k, 2);
-                        let frame = self.read(0x3a4 + k).wrapping_add(1);
+                        self.set_arr3(k, 2);
+                        let frame = self.arr1(k).wrapping_add(1);
                         let frame = if frame == 3 { 0 } else { frame };
-                        self.write(0x3a4 + k, frame);
-                        self.write(0xbf0 + k, FLAGS[usize::from(frame)]);
+                        self.set_arr1(k, frame);
+                        self.set_arr4(k, FLAGS[usize::from(frame)]);
                     }
                 }
             }
         }
         if matches!(item, 0x34..=0x36) {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if (timer as i8) < 0 {
                 const DELAY: [u8; 3] = [9, 5, 5];
                 const TILE: [u8; 3] = [0x24, 0x25, 0x26];
-                let frame = self.read(0x3a4 + k).wrapping_add(1);
+                let frame = self.arr1(k).wrapping_add(1);
                 let frame = if frame == 3 { 0 } else { frame };
-                self.write(0x3a4 + k, frame);
-                self.write(0x39f + k, DELAY[usize::from(frame)]);
+                self.set_arr1(k, frame);
+                self.set_arr3(k, DELAY[usize::from(frame)]);
                 self.runtime
                     .write_to_4bpp_buffer(self.ram, TILE[usize::from(frame)]);
             }
@@ -5630,10 +5588,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn transmute_to_rising_crystal(&mut self, k: usize) {
-        self.write(Self::type_address(k), 0x3e);
-        self.write(0xc22 + k, 0);
-        self.write(0xc2c + k, 0);
-        self.write(0xc36 + k, 0);
+        self.set_kind(k, 0x3e);
+        self.set_y_velocity(k, 0);
+        self.set_x_velocity(k, 0);
+        self.set_y_fraction(k, 0);
         self.rising_crystal(k);
     }
 
@@ -5663,23 +5621,23 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.write(0x4c2, decode_timer - 1);
                 return;
             }
-            if self.read(0x39f + k) == 0 && item == 0x20 {
-                self.write(0x39f + k, 1);
+            if self.arr3(k) == 0 && item == 0x20 {
+                self.set_arr3(k, 1);
                 self.write(0xab1, 4);
                 self.ram.write_u16(0xaa8, 0x200);
                 self.runtime
                     .palette_load_sprite_environment_dungeon(self.ram);
                 self.write(0x15, self.read(0x15).wrapping_add(1));
             }
-        } else if self.read(0x394 + k) != 0 {
-            self.write(0x394 + k, self.read(0x394 + k) - 1);
+        } else if self.state_g(k) != 0 {
+            self.set_state_g(k, self.state_g(k) - 1);
             return;
         }
         if item == 0x20 {
             self.add_occasional_sparkle(k);
         }
         if self.read(0x11) == 0 {
-            if self.read(0x29e + k) < 24
+            if self.height(k) < 24
                 && self.check_link_collision(k, 2).is_some()
                 && self.read(0x37e) == 0
                 && self.read(0x4d) == 0
@@ -5696,32 +5654,32 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
             if self.step(k) != 2 {
                 if self.step(k) != 0 {
-                    self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(1));
+                    self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(1));
                 }
                 self.move_z(k);
-                if self.read(0x29e + k) >= 0xf8 {
-                    self.write(0xc54 + k, self.step(k).wrapping_add(1));
-                    self.write(0x294 + k, 0x18);
-                    self.write(0x29e + k, 0);
+                if self.height(k) >= 0xf8 {
+                    self.set_step(k, self.step(k).wrapping_add(1));
+                    self.set_z_velocity(k, 0x18);
+                    self.set_height(k, 0);
                 }
             }
         }
         let (x, y) = self.prep_adjusted_oam_coord(k);
-        let index = self.receive_item_draw(k, x, y.wrapping_sub(u16::from(self.read(0x29e + k))));
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let index = self.receive_item_draw(k, x, y.wrapping_sub(u16::from(self.height(k))));
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 9);
-            let frame = self.read(0x385 + k).wrapping_add(1);
-            self.write(0x385 + k, if frame == 3 { 0 } else { frame });
+            self.set_aux_timer(k, 9);
+            let frame = self.state_l(k).wrapping_add(1);
+            self.set_state_l(k, if frame == 3 { 0 } else { frame });
         }
-        let shadow = if self.read(0x29e + k) == 0 {
+        let shadow = if self.height(k) == 0 {
             if self.ram.read_u16(0xa0) == 6 {
-                usize::from(self.read(0x385 + k)) + 4
+                usize::from(self.state_l(k)) + 4
             } else {
                 0
             }
-        } else if self.read(0x29e + k) < 0x20 {
+        } else if self.height(k) < 0x20 {
             1
         } else {
             2
@@ -5731,13 +5689,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn rising_crystal(&mut self, k: usize) {
         const CRYSTAL_BITS: [u8; 13] = [0, 0, 4, 2, 0, 16, 2, 1, 64, 4, 1, 32, 8];
-        self.write(0x29e + k, 0);
+        self.set_height(k, 0);
         self.add_occasional_sparkle(k);
-        let mut velocity = self.read(0xc22 + k).wrapping_sub(1);
+        let mut velocity = self.y_velocity(k).wrapping_sub(1);
         if velocity < 0xf0 {
             velocity = 0xf0;
         }
-        self.write(0xc22 + k, velocity);
+        self.set_y_velocity(k, velocity);
         self.move_y(k);
         let scroll = self.ram.read_u16(0xe8);
         if self.get_y(k).wrapping_sub(scroll) < 0x49 {
@@ -5764,11 +5722,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const DRAW_FRAME: [u8; 12] = [0, 1, 2, 3, 2, 3, 4, 5, 6, 7, 8, 9];
         const DRAW_COUNT: [u8; 11] = [1, 4, 4, 4, 4, 4, 5, 4, 6, 6, 6];
         if self.read(0x11) == 0 {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if timer == 0 {
                 let state = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, state);
+                self.set_item_to_link(k, state);
                 if state == 2 {
                     self.sfx2_pan(k, 0x0c);
                 }
@@ -5776,14 +5734,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     self.clear(k);
                     return;
                 }
-                self.write(0x39f + k, super::BOMB_FRAME_DELAYS[usize::from(state)]);
+                self.set_arr3(k, super::BOMB_FRAME_DELAYS[usize::from(state)]);
             }
         }
         self.ram.write_u16(0x64, 0x3000);
         let state = usize::from(self.item_to_link(k));
         let count = usize::from(DRAW_COUNT[state]);
         let frame = usize::from(DRAW_FRAME[state]) * 6;
-        self.write(0xc54 + k, (frame * 2) as u8);
+        self.set_step(k, (frame * 2) as u8);
         let mut drawn = 0;
         for i in (0..9).rev() {
             let x = self
@@ -5801,7 +5759,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 drawn += end - start;
             }
         }
-        if self.item_to_link(k) == 3 && self.read(0x39f + k) == 1 {
+        if self.item_to_link(k) == 3 && self.arr3(k) == 1 {
             let features = u32::from_le_bytes(self.ram.slice(0x64c, 4).try_into().unwrap());
             let old = if features & 4096 != 0 {
                 self.read(0xf3cc)
@@ -5816,8 +5774,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     pub fn add_somaria_platform_poof(&mut self, k: usize) {
-        self.write(Self::type_address(k), 0x39);
-        self.write(0x3b1 + k, 7);
+        self.set_kind(k, 0x39);
+        self.set_aux_timer(k, 7);
         for sprite in (0..16).rev() {
             if self.read(0xe20 + sprite) == 0xed {
                 self.write(0xdd0 + sprite, 0);
@@ -5831,18 +5789,18 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const X: [i8; 4] = [0, 0, -4, 4];
         const Y: [i8; 4] = [-4, 4, 0, 0];
         self.write(0x646, 0);
-        self.write(0x3db + k, 0);
+        self.set_arr24(k, 0);
         for j in (0..4).rev() {
             let x = self.get_x(k).wrapping_add(i16::from(X[j]) as u16);
             let y = self.get_y(k).wrapping_add(i16::from(Y[j]) as u16);
             let priority = self.object_priority(k);
             self.check_tile_collision_targeted(k, x, y);
-            self.write(0x280 + k, priority);
-            if matches!(self.read(ANCILLA_TILE_ATTR + k), 0x23 | 0x24 | 0x25 | 0x3b) {
-                self.write(0x3db + k, self.read(0x3db + k).wrapping_add(1));
+            self.set_object_priority(k, priority);
+            if matches!(self.tile_attribute(k), 0x23 | 0x24 | 0x25 | 0x3b) {
+                self.set_arr24(k, self.arr24(k).wrapping_add(1));
             }
         }
-        self.read(0x3db + k) != 4
+        self.arr24(k) != 4
     }
 
     fn somaria_block_fizzle_away(&mut self, k: usize) {
@@ -5851,13 +5809,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.write(0x5e, 0);
         }
         self.write(0x646, 0);
-        self.write(Self::type_address(k), 0x2d);
-        self.write(0x3b1 + k, 0);
-        self.write(0xc54 + k, 0);
-        self.write(0xc5e + k, 0);
-        self.write(0x39f + k, 0);
-        self.write(0x3a4 + k, 0);
-        self.write(0x3ea + k, 0);
+        self.set_kind(k, 0x2d);
+        self.set_aux_timer(k, 0);
+        self.set_step(k, 0);
+        self.set_item_to_link(k, 0);
+        self.set_arr3(k, 0);
+        self.set_arr1(k, 0);
+        self.set_state_r(k, 0);
         if usize::from(self.read(0x2ec)) == k + 1 {
             self.write(0x2ec, 0);
             self.write(0x308, self.read(0x308) & 0x80);
@@ -5872,31 +5830,27 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0, 0x40, 0x80, 0xc0, 0, 0x40, 0x80, 0xc0, 0, 0x40, 0x80, 0xc0,
         ];
         let picked = usize::from(self.read(0x2ec)) == k + 1;
-        if picked
-            && self.read(0x308) & 0x80 != 0
-            && self.read(0x380 + k) != 3
-            && self.read(0x2f) == 0
-        {
+        if picked && self.read(0x308) & 0x80 != 0 && self.state_k(k) != 3 && self.read(0x2f) == 0 {
             self.runtime.allocate_oam_region(
                 self.ram,
                 if self.read(0xfb3) == 0 { b'B' } else { b'E' },
-                self.read(0xc90 + k),
+                self.sprite_count(k),
             );
         } else if self.read(0xfb3) != 0
             && self.floor(k) != 0
-            && (self.read(0x385 + k) != 0 || picked && self.read(0x308) & 0x80 != 0)
+            && (self.state_l(k) != 0 || picked && self.read(0x308) & 0x80 != 0)
         {
             self.ram.write_u16(0x90, 0x8d0);
             self.ram.write_u16(0x92, 0xa54);
         }
         let (x, mut y) = self.prep_adjusted_oam_coord(k);
-        let z = self.read(0x29e + k) as i8;
-        if z != 0 && z != -1 && self.read(0x380 + k) != 3 && self.object_priority(k) != 0 {
+        let z = self.height(k) as i8;
+        if z != 0 && z != -1 && self.state_k(k) != 3 && self.object_priority(k) != 0 {
             self.ram.write_u16(0x64, 0x3000);
         }
         y = y.wrapping_sub(i16::from(z) as u16);
         let original = self.current_oam_index();
-        let mut table = usize::from(self.read(0x3a4 + k)) * 4;
+        let mut table = usize::from(self.arr1(k)) * 4;
         let priority = (self.ram.read_u16(0x64) >> 8) as u8;
         for i in 0..4 {
             self.set_oam_safe(
@@ -5924,29 +5878,29 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn somaria_block(&mut self, k: usize) {
         const COLLISION_X: [i8; 12] = [0, 0, -8, 8, 0, 0, 0, 0, 8, -8, -8, 8];
         const COLLISION_Y: [i8; 12] = [-8, 8, 0, 0, 0, 0, 0, 0, -8, 8, -8, 8];
-        let cycle = self.read(0x394 + k).wrapping_sub(1);
-        self.write(0x394 + k, cycle);
+        let cycle = self.state_g(k).wrapping_sub(1);
+        self.set_state_g(k, cycle);
         if (cycle as i8) >= 0 {
             return;
         }
-        self.write(0x394 + k, 0);
+        self.set_state_g(k, 0);
         let mut picked = usize::from(self.read(0x2ec)) == k + 1;
-        if self.read(0x3c5 + k) == 0 {
+        if self.state_h(k) == 0 {
             if matches!(self.read(0x11), 0 | 8 | 16) {
                 self.handle_lift_logic(k);
                 picked = usize::from(self.read(0x2ec)) == k + 1;
-            } else if picked && self.read(0x380 + k) != 0 {
-                if self.read(0x380 + k) != 3 {
+            } else if picked && self.state_k(k) != 0 {
+                if self.state_k(k) != 3 {
                     self.latch_link_coordinates(k, 3);
                     self.latch_altitude_above_link(k);
-                    self.write(0x380 + k, 3);
+                    self.set_state_k(k, 3);
                 }
                 self.latch_carried_position(k);
             }
             if self.read(0x1b) != 0 {
-                if self.read(0x380 + k) == 0
+                if self.state_k(k) == 0
                     && self.read(0x308) & 0x80 == 0
-                    && matches!(self.read(0x29e + k), 0 | 0xff)
+                    && matches!(self.height(k), 0 | 0xff)
                 {
                     if self.read(0x3f4) != 0 {
                         let mut j = usize::from(self.read(0x1a) & 3);
@@ -5955,8 +5909,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                             let x = self.get_x(k).wrapping_add(i16::from(COLLISION_X[j]) as u16);
                             let y = self.get_y(k).wrapping_add(i16::from(COLLISION_Y[j]) as u16);
                             self.check_tile_collision_targeted(k, x, y);
-                            self.write(0x280 + k, priority);
-                            if matches!(self.read(ANCILLA_TILE_ATTR + k), 0xb6 | 0xbc) {
+                            self.set_object_priority(k, priority);
+                            if matches!(self.tile_attribute(k), 0xb6 | 0xbc) {
                                 self.set_xy(k, x, y);
                                 self.add_somaria_platform_poof(k);
                                 if picked {
@@ -5967,7 +5921,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                             j += 4;
                         }
                     } else if !self.somaria_block_check_for_switch(k)
-                        && matches!(self.read(0x29e + k), 0 | 0xff)
+                        && matches!(self.height(k), 0 | 0xff)
                     {
                         self.write(0x646, self.read(0x646).wrapping_add(1));
                     }
@@ -5981,32 +5935,29 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let mut old_y = self.latch_y_coord_to_z(k);
         let old_direction = self.direction(k);
         let mut old_priority = self.object_priority(k);
-        self.write(0x280 + k, 0);
+        self.set_object_priority(k, 0);
         let collision = self.check_tile_collision_class2(k);
-        if self.read(0x1b) != 0
-            && self.read(0x385 + k) != 0
-            && self.read(ANCILLA_TILE_ATTR + k) == 0x1c
-        {
-            self.write(0x3d5 + k, 1);
+        if self.read(0x1b) != 0 && self.state_l(k) != 0 && self.tile_attribute(k) == 0x1c {
+            self.set_state_t(k, 1);
         }
         if collision && (self.read(0x308) & 0x80 == 0 || self.read(0x309) != 0) {
-            if old_priority == 0 && self.read(0xbf0 + k) == 0 && self.read(0x29e + k) != 0 {
-                self.write(0xbf0 + k, 1);
+            if old_priority == 0 && self.arr4(k) == 0 && self.height(k) != 0 {
+                self.set_arr4(k, 1);
                 let y_speed = if self.direction(k) == 1 { 16 } else { 4 };
-                if self.read(0xc22 + k) != 0 {
-                    self.write(
-                        0xc22 + k,
-                        if (self.read(0xc22 + k) as i8) < 0 {
+                if self.y_velocity(k) != 0 {
+                    self.set_y_velocity(
+                        k,
+                        if (self.y_velocity(k) as i8) < 0 {
                             y_speed
                         } else {
                             (-(y_speed as i8)) as u8
                         },
                     );
                 }
-                if self.read(0xc2c + k) != 0 {
-                    self.write(
-                        0xc2c + k,
-                        if (self.read(0xc2c + k) as i8) < 0 {
+                if self.x_velocity(k) != 0 {
+                    self.set_x_velocity(
+                        k,
+                        if (self.x_velocity(k) as i8) < 0 {
                             4
                         } else {
                             (-4_i8) as u8
@@ -6014,34 +5965,34 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     );
                 }
                 if self.direction(k) == 1 {
-                    self.write(0xc22 + k, (-4_i8) as u8);
-                    self.write(0x385 + k, 2);
+                    self.set_y_velocity(k, (-4_i8) as u8);
+                    self.set_state_l(k, 2);
                 }
             }
-        } else if self.read(0x308) & 0x80 == 0 && matches!(self.read(0x29e + k), 0 | 0xff) {
-            self.write(0xc72 + k, 16);
+        } else if self.read(0x308) & 0x80 == 0 && matches!(self.height(k), 0 | 0xff) {
+            self.set_direction(k, 16);
             let priority = self.object_priority(k);
             self.check_tile_collision(k);
-            self.write(0x280 + k, priority);
-            let attribute = self.read(ANCILLA_TILE_ATTR + k);
+            self.set_object_priority(k, priority);
+            let attribute = self.tile_attribute(k);
             if attribute == 0x26 {
-                if old_priority == 0 && self.read(0xbf0 + k) == 0 && self.read(0x29e + k) != 0 {
-                    self.write(0xbf0 + k, 1);
+                if old_priority == 0 && self.arr4(k) == 0 && self.height(k) != 0 {
+                    self.set_arr4(k, 1);
                     let y_speed = if self.direction(k) == 1 { 16 } else { 4 };
-                    if self.read(0xc22 + k) != 0 {
-                        self.write(
-                            0xc22 + k,
-                            if (self.read(0xc22 + k) as i8) < 0 {
+                    if self.y_velocity(k) != 0 {
+                        self.set_y_velocity(
+                            k,
+                            if (self.y_velocity(k) as i8) < 0 {
                                 y_speed
                             } else {
                                 (-(y_speed as i8)) as u8
                             },
                         );
                     }
-                    if self.read(0xc2c + k) != 0 {
-                        self.write(
-                            0xc2c + k,
-                            if (self.read(0xc2c + k) as i8) < 0 {
+                    if self.x_velocity(k) != 0 {
+                        self.set_x_velocity(
+                            k,
+                            if (self.x_velocity(k) as i8) < 0 {
                                 4
                             } else {
                                 (-4_i8) as u8
@@ -6049,14 +6000,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                         );
                     }
                     if self.direction(k) == 1 {
-                        self.write(0xc22 + k, (-4_i8) as u8);
-                        self.write(0x385 + k, 2);
+                        self.set_y_velocity(k, (-4_i8) as u8);
+                        self.set_state_l(k, 2);
                     }
                 }
             } else if matches!(attribute, 0x0c | 0x1c) {
                 if self.read(0x46c) != 3 {
-                    if self.floor(k) == 0 && !matches!(self.read(0x29e + k), 0 | 0xff) {
-                        self.write(0xc7c + k, 1);
+                    if self.floor(k) == 0 && !matches!(self.height(k), 0 | 0xff) {
+                        self.set_floor(k, 1);
                     }
                 } else {
                     old_y = self.get_y(k).wrapping_add(self.ram.read_u16(0x310));
@@ -6069,7 +6020,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     if picked {
                         self.write(0x2ec, 0);
                     }
-                    if self.read(0xc68 + k) == 0 {
+                    if self.timer(k) == 0 {
                         if self.read(0x5e) == 18 {
                             self.write(0x5e, 0);
                             self.write(0x48, 0);
@@ -6082,7 +6033,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 if picked {
                     self.write(0x2ec, 0);
                 }
-                if self.read(0xc68 + k) == 0 {
+                if self.timer(k) == 0 {
                     self.set_y(k, self.get_y(k).wrapping_sub(24));
                     self.transmute_to_splash(k);
                     return;
@@ -6091,9 +6042,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.apply_conveyor(k);
                 old_y = self.get_y(k);
             } else {
-                self.write(
-                    0xc68 + k,
-                    if self.read(0x385 + k) | self.read(0x3c5 + k) != 0 {
+                self.set_timer(
+                    k,
+                    if self.state_l(k) | self.state_h(k) != 0 {
                         0
                     } else {
                         2
@@ -6103,15 +6054,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         old_priority |= self.object_priority(k);
         if self.read(0x308) & 0x80 == 0 {
-            let timer = self.read(0x3a9 + k).wrapping_sub(1);
-            self.write(0x3a9 + k, timer);
+            let timer = self.state_s(k).wrapping_sub(1);
+            self.set_state_s(k, timer);
             if timer == 0 {
-                self.write(0x3a9 + k, 1);
-                self.write(0x280 + k, 0);
+                self.set_state_s(k, 1);
+                self.set_object_priority(k, 0);
                 if self.check_basic_sprite_collision(k).is_some() {
-                    self.write(0x3a9 + k, 7);
+                    self.set_state_s(k, 7);
                     let step = self.step(k).wrapping_add(1);
-                    self.write(0xc54 + k, step);
+                    self.set_step(k, step);
                     if step == 5 {
                         self.somaria_block_fizzle_away(k);
                         return;
@@ -6120,15 +6071,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         self.set_y(k, old_y);
-        self.write(0xc72 + k, old_direction);
-        self.write(0x280 + k, old_priority);
+        self.set_direction(k, old_direction);
+        self.set_object_priority(k, old_priority);
         self.somaria_block_draw(k);
     }
 
     pub fn somaria_platform_poof(&mut self, k: usize) {
         const DIRECTION: [u8; 4] = [1, 0, 3, 2];
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) >= 0 {
             return;
         }
@@ -6169,15 +6120,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         }
         if let Some(k) = self.add_ancilla(kind, limit) {
-            self.write(0xc72 + k, 2);
-            self.write(0x39f + k, 3);
-            self.write(0xc54 + k, 0);
-            self.write(0x3b1 + k, 32);
-            self.write(0xc5e + k, 116);
-            self.write(0x294 + k, 0);
-            self.write(0x385 + k, 0);
-            self.write(0x29e + k, 0);
-            self.write(0x3a9 + k, 0);
+            self.set_direction(k, 2);
+            self.set_arr3(k, 3);
+            self.set_step(k, 0);
+            self.set_aux_timer(k, 32);
+            self.set_item_to_link(k, 116);
+            self.set_z_velocity(k, 0);
+            self.set_state_l(k, 0);
+            self.set_height(k, 0);
+            self.set_state_s(k, 0);
             self.set_xy(k, 0x200, 0x788);
         }
     }
@@ -6185,7 +6136,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     fn draw_weathervane_debris(&mut self, k: usize) {
         const CHAR: [u8; 2] = [0x4e, 0x4f];
         let (x, y) = self.prep_oam_coord(k);
-        let y = y.wrapping_sub(i16::from(self.read(0x29e + k) as i8) as u16);
+        let y = y.wrapping_sub(i16::from(self.height(k) as i8) as u16);
         let frame = self.item_to_link(k);
         if (frame as i8) < 0 {
             return;
@@ -6212,21 +6163,21 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.write(0x158b8, 1);
             self.write(0x12c, 0xf3);
         }
-        let cycle = self.read(0x394 + k).wrapping_sub(1);
-        self.write(0x394 + k, cycle);
+        let cycle = self.state_g(k).wrapping_sub(1);
+        self.set_state_g(k, cycle);
         if cycle != 0 {
             return;
         }
-        self.write(0x394 + k, 1);
-        if self.read(0x39f + k) == 0 {
-            self.write(0x39f + k, 1);
+        self.set_state_g(k, 1);
+        if self.arr3(k) == 0 {
+            self.set_arr3(k, 1);
             misc::ancilla_sfx2_near(self.ram, 0x0c);
         }
         if self.step(k) == 0 {
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if (timer as i8) < 0 {
-                self.write(0xc54 + k, 1);
+                self.set_step(k, 1);
                 self.runtime.overworld_alter_weathervane(self.ram);
                 self.add_cutscene_duck(0x38, 0);
             }
@@ -6244,30 +6195,30 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.write(0x15860 + i, 1);
                 self.write(0x1586c + i, state ^ 1);
             }
-            self.write(0xc5e + k, self.read(0x1586c + i));
-            self.write(0xbfa + k, self.read(0x15824 + i));
-            self.write(0xc0e + k, self.read(0x15830 + i));
-            self.write(0xc04 + k, self.read(0x1583c + i));
-            self.write(0xc18 + k, self.read(0x15848 + i));
-            self.write(0x29e + k, self.read(0x15854 + i));
-            self.write(0xc22 + k, self.read(0x15800 + i));
-            self.write(0xc2c + k, self.read(0x1580c + i));
+            self.set_item_to_link(k, self.read(0x1586c + i));
+            self.set_y_low(k, self.read(0x15824 + i));
+            self.set_y_high(k, self.read(0x15830 + i));
+            self.set_x_low(k, self.read(0x1583c + i));
+            self.set_x_high(k, self.read(0x15848 + i));
+            self.set_height(k, self.read(0x15854 + i));
+            self.set_y_velocity(k, self.read(0x15800 + i));
+            self.set_x_velocity(k, self.read(0x1580c + i));
             let z_velocity = self.read(0x15818 + i).wrapping_sub(1);
             self.write(0x15818 + i, z_velocity);
-            self.write(0x294 + k, z_velocity);
+            self.set_z_velocity(k, z_velocity);
             self.move_y(k);
             self.move_x(k);
             self.move_z(k);
-            let dead = self.read(0x29e + k) >= 0xf0;
+            let dead = self.height(k) >= 0xf0;
             self.draw_weathervane_debris(k);
             if dead {
                 self.write(0x1586c + i, 0xff);
             }
-            self.write(0x15824 + i, self.read(0xbfa + k));
-            self.write(0x15830 + i, self.read(0xc0e + k));
-            self.write(0x1583c + i, self.read(0xc04 + k));
-            self.write(0x15848 + i, self.read(0xc18 + k));
-            self.write(0x15854 + i, self.read(0x29e + k));
+            self.write(0x15824 + i, self.y_low(k));
+            self.write(0x15830 + i, self.y_high(k));
+            self.write(0x1583c + i, self.x_low(k));
+            self.write(0x15848 + i, self.x_high(k));
+            self.write(0x15854 + i, self.height(k));
         }
         if (0..12).all(|i| self.read(0x1586c + i) == 0xff) {
             self.clear(k);
@@ -6298,11 +6249,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0,
         ];
         if self.read(0x10010) != 0 && self.item_to_link(k) != 4 {
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x3b1 + k, 5);
-                self.write(0xc5e + k, self.item_to_link(k).wrapping_add(1));
+                self.set_aux_timer(k, 5);
+                self.set_item_to_link(k, self.item_to_link(k).wrapping_add(1));
             }
         }
         let mut index = self.current_oam_index();
@@ -6460,7 +6411,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     fn gt_cutscene_advance_radius(&mut self, k: usize, velocity: u8) -> u8 {
         let old_x = self.get_x(k);
-        self.write(0xc2c + k, velocity);
+        self.set_x_velocity(k, velocity);
         self.set_x(k, u16::from(self.read(0x15808)));
         self.move_x(k);
         let radius = self.get_x(k) as u8;
@@ -6473,8 +6424,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let mut index = self.current_oam_index();
         let mut central_only = false;
         if self.step(k) == 0 {
-            let velocity = self.read(0xc22 + k).wrapping_sub(1);
-            self.write(0xc22 + k, if velocity < 0xf0 { 0xf0 } else { velocity });
+            let velocity = self.y_velocity(k).wrapping_sub(1);
+            self.set_y_velocity(k, if velocity < 0xf0 { 0xf0 } else { velocity });
             self.move_y(k);
             let x = self.get_x(k);
             let y = self.get_y(k);
@@ -6483,7 +6434,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     .write_u16(0x15810, self.ram.read_u16(0xe8).wrapping_add(0x40));
                 self.ram.write_u16(0x1580e, x.wrapping_add(8));
                 self.set_y(k, self.ram.read_u16(0xe8).wrapping_add(0x38));
-                self.write(0xc54 + k, self.step(k).wrapping_add(1));
+                self.set_step(k, self.step(k).wrapping_add(1));
                 self.write(0x12d, 5);
                 self.write(0x12c, 0xf1);
                 self.ram.write_u16(0x1cf0, 0x13b);
@@ -6496,7 +6447,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 let radius = self.gt_cutscene_advance_radius(k, 16);
                 if radius >= 48 {
                     self.write(0x15808, 48);
-                    self.write(0xc54 + k, self.step(k).wrapping_add(1));
+                    self.set_step(k, self.step(k).wrapping_add(1));
                 }
             }
             if self.read(0x11) == 0 {
@@ -6510,7 +6461,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                             self.write(0x4c6, 5);
                             self.write(0xb0, 0);
                             self.write(0xc8, 0);
-                            self.write(0xc54 + k, self.step(k).wrapping_add(1));
+                            self.set_step(k, self.step(k).wrapping_add(1));
                         }
                     }
                     _ => {
@@ -6612,9 +6563,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     fn apply_conveyor(&mut self, k: usize) {
         const X_VEL: [i8; 4] = [0, 0, -8, 8];
         const Y_VEL: [i8; 4] = [-8, 8, 0, 0];
-        let belt = usize::from(self.read(ANCILLA_TILE_ATTR + k) - 0x68);
-        self.write(0xc22 + k, Y_VEL[belt] as u8);
-        self.write(0xc2c + k, X_VEL[belt] as u8);
+        let belt = usize::from(self.tile_attribute(k) - 0x68);
+        self.set_y_velocity(k, Y_VEL[belt] as u8);
+        self.set_x_velocity(k, X_VEL[belt] as u8);
         self.move_y(k);
         self.move_x(k);
     }
@@ -6685,9 +6636,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn latch_altitude_above_link(&mut self, k: usize) {
-        self.write(0x29e + k, 17);
+        self.set_height(k, 17);
         self.set_y(k, self.get_y(k).wrapping_add(17));
-        self.write(0x280 + k, 0);
+        self.set_object_priority(k, 0);
     }
 
     fn latch_link_coordinates(&mut self, k: usize, phase: usize) {
@@ -6704,8 +6655,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     fn latch_carried_position(&mut self, k: usize) {
         const Y: [i8; 6] = [-2, -1, 0, -2, -1, 0];
         self.write(0x5e, 12);
-        self.write(0xc7c + k, self.read(0xee));
-        self.write(0x3ca + k, self.read(0x476));
+        self.set_floor(k, self.read(0xee));
+        self.set_floor2(k, self.read(0x476));
         let mut z = self.ram.read_u16(0x24);
         if z == 0xffff {
             z = 0;
@@ -6723,7 +6674,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     fn latch_y_coord_to_z(&mut self, k: usize) -> u16 {
         let y = self.get_y(k);
-        let z = self.read(0x29e + k) as i8;
+        let z = self.height(k) as i8;
         if self.direction(k) == 1 && z != -1 {
             self.set_y(k, y.wrapping_sub(i16::from(z) as u16));
         }
@@ -6751,39 +6702,39 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         self.write(0x2ec, (k + 1) as u8);
-        self.write(0x380 + k, 0);
-        self.write(0x3b1 + k, 16);
-        self.write(0x385 + k, 0);
-        self.write(0x29e + k, 0);
+        self.set_state_k(k, 0);
+        self.set_aux_timer(k, 16);
+        self.set_state_l(k, 0);
+        self.set_height(k, 0);
     }
 
     fn handle_lift_logic(&mut self, k: usize) {
         const DELAY: [u8; 3] = [16, 8, 9];
-        if self.read(0x3ea + k) != 0 {
+        if self.state_r(k) != 0 {
             if self.item_to_link(k) != 0 {
                 return;
             }
-            if self.read(0x380 + k) == 3 {
-                self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(2));
+            if self.state_k(k) == 3 {
+                self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(2));
                 self.move_z(k);
-                let z = self.read(0x29e + k);
+                let z = self.height(k);
                 if z != 0 && z < 252 {
                     return;
                 }
-                self.write(0x29e + k, 0);
-                let bounce = self.read(0x3ea + k).wrapping_add(1);
-                self.write(0x3ea + k, bounce);
+                self.set_height(k, 0);
+                let bounce = self.state_r(k).wrapping_add(1);
+                self.set_state_r(k, bounce);
                 if bounce != 3 {
-                    self.write(0x294 + k, 24);
+                    self.set_z_velocity(k, 24);
                     return;
                 }
-                self.write(0x380 + k, 0);
+                self.set_state_k(k, 0);
             }
-            self.write(0x3ea + k, 0);
+            self.set_state_r(k, 0);
             self.write(0x5e, 0);
             return;
         }
-        if self.read(0x385 + k) == 0 {
+        if self.state_l(k) == 0 {
             if self.read(0x2ec) == 0 {
                 self.clear_pickup_item_and_check(k);
                 return;
@@ -6795,10 +6746,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 || self.read(0x3fd) != 0
                 || self.read(0x4d) == 1
             {
-                self.write(0x3ea + k, 1);
-                self.write(0x294 + k, 0);
+                self.set_state_r(k, 1);
+                self.set_z_velocity(k, 0);
                 self.write(0x2ec, 0);
-                self.write(0xbf0 + k, 0);
+                self.set_arr4(k, 0);
                 self.handle_lift_logic(k);
                 return;
             }
@@ -6806,17 +6757,17 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.clear_pickup_item_and_check(k);
                 return;
             }
-            let mut phase = usize::from(self.read(0x380 + k));
+            let mut phase = usize::from(self.state_k(k));
             if self.read(0x309) != 2 && self.read(0x2ec) != 0 && phase != 3 {
-                if phase == 0 && self.read(0x3b1 + k) == 16 {
+                if phase == 0 && self.aux_timer(k) == 16 {
                     self.sfx2_pan(k, 0x1d);
                 }
-                let timer = self.read(0x3b1 + k).wrapping_sub(1);
-                self.write(0x3b1 + k, timer);
+                let timer = self.aux_timer(k).wrapping_sub(1);
+                self.set_aux_timer(k, timer);
                 if (timer as i8) < 0 {
                     phase += 1;
-                    self.write(0x380 + k, phase as u8);
-                    self.write(0x3b1 + k, if phase == 3 { 0xfe } else { DELAY[phase] });
+                    self.set_state_k(k, phase as u8);
+                    self.set_aux_timer(k, if phase == 3 { 0xfe } else { DELAY[phase] });
                     if phase == 3 {
                         self.latch_altitude_above_link(k);
                         return;
@@ -6851,26 +6802,26 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             const Y_VEL: [i8; 4] = [-32, 32, 0, 0];
             const X_VEL: [i8; 4] = [0, 0, -32, 32];
             let direction = usize::from(self.read(0x2f) >> 1);
-            self.write(0xc72 + k, direction as u8);
-            self.write(0x294 + k, 24);
-            self.write(0xc22 + k, Y_VEL[direction] as u8);
-            self.write(0xc2c + k, X_VEL[direction] as u8);
+            self.set_direction(k, direction as u8);
+            self.set_z_velocity(k, 24);
+            self.set_y_velocity(k, Y_VEL[direction] as u8);
+            self.set_x_velocity(k, X_VEL[direction] as u8);
             self.write(0x309, 2);
-            self.write(0x385 + k, 1);
+            self.set_state_l(k, 1);
             self.write(0x2ec, 0);
-            self.write(0xbf0 + k, 0);
-            self.write(0x380 + k, 0);
-            self.write(0x280 + k, 0);
+            self.set_arr4(k, 0);
+            self.set_state_k(k, 0);
+            self.set_object_priority(k, 0);
             self.sfx3_pan(k, 0x13);
         }
         if self.item_to_link(k) == 0 {
-            self.write(0x294 + k, self.read(0x294 + k).wrapping_sub(2));
+            self.set_z_velocity(k, self.z_velocity(k).wrapping_sub(2));
             self.move_y(k);
             self.move_x(k);
-            let old_z = self.read(0x29e + k);
+            let old_z = self.height(k);
             self.move_z(k);
-            let z = self.read(0x29e + k);
-            if self.read(0xbf0 + k) != 0 && self.direction(k) == 1 && (z as i8) >= 0 {
+            let z = self.height(k);
+            if self.arr4(k) != 0 && self.direction(k) == 1 && (z as i8) >= 0 {
                 self.set_y(
                     k,
                     self.get_y(k)
@@ -6880,26 +6831,26 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             if (z as i8) >= 0 || z == 0xff {
                 return;
             }
-            self.write(0x29e + k, 0);
+            self.set_height(k, 0);
             self.sfx2_pan(k, 0x21);
-            let bounce = self.read(0x385 + k).wrapping_add(1);
-            self.write(0x385 + k, bounce);
+            let bounce = self.state_l(k).wrapping_add(1);
+            self.set_state_l(k, bounce);
             if bounce != 3 {
-                self.write(0xc22 + k, ((self.read(0xc22 + k) as i8) / 2) as u8);
-                self.write(0xc2c + k, ((self.read(0xc2c + k) as i8) / 2) as u8);
-                self.write(0x294 + k, 16);
-                self.write(0xbf0 + k, 0);
+                self.set_y_velocity(k, ((self.y_velocity(k) as i8) / 2) as u8);
+                self.set_x_velocity(k, ((self.x_velocity(k) as i8) / 2) as u8);
+                self.set_z_velocity(k, 16);
+                self.set_arr4(k, 0);
             } else {
-                self.write(0x29e + k, 0);
-                self.write(0x385 + k, 0);
-                self.write(0xbf0 + k, 0);
+                self.set_height(k, 0);
+                self.set_state_l(k, 0);
+                self.set_arr4(k, 0);
                 self.write(0x5e, 0);
-                self.write(0xc22 + k, 0);
-                self.write(0xc2c + k, 0);
-                self.write(0x294 + k, 0);
-                if self.read(0x3d5 + k) != 0 {
-                    self.write(0xc7c + k, self.read(0x3d5 + k));
-                    self.write(0x3d5 + k, 0);
+                self.set_y_velocity(k, 0);
+                self.set_x_velocity(k, 0);
+                self.set_z_velocity(k, 0);
+                if self.state_t(k) != 0 {
+                    self.set_floor(k, self.state_t(k));
+                    self.set_state_t(k, 0);
                 }
             }
         }
@@ -6944,18 +6895,18 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return None;
         }
         let mut shadow = 0;
-        if self.read(ANCILLA_TILE_ATTR + k) == 9 {
-            let timer = self.read(0x74b + k).wrapping_sub(1);
-            self.write(0x74b + k, timer);
+        if self.tile_attribute(k) == 9 {
+            let timer = self.arr22(k).wrapping_sub(1);
+            self.set_arr22(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x74b + k, 3);
-                let mut frame = self.read(0x3cf + k).wrapping_add(1);
+                self.set_arr22(k, 3);
+                let mut frame = self.arr23(k).wrapping_add(1);
                 if frame == 3 {
                     frame = 0;
                 }
-                self.write(0x3cf + k, frame);
+                self.set_arr23(k, frame);
             }
-            shadow = usize::from(self.read(0x3cf + k) + 4);
+            shadow = usize::from(self.arr23(k) + 4);
             if matches!(self.read(0x12d) & 0x3f, 0x0b | 0x21) {
                 let x = self.get_x(k).wrapping_sub(self.ram.read_u16(0xe2));
                 let pan = if x < 0x80 {
@@ -6967,10 +6918,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 };
                 self.write(0x12d, pan | 0x28);
             }
-        } else if self.read(ANCILLA_TILE_ATTR + k) == 0x40 {
+        } else if self.tile_attribute(k) == 0x40 {
             shadow = 3;
         }
-        let z = self.read(0x29e + k);
+        let z = self.height(k);
         if (2..252).contains(&z) {
             shadow = 2;
         }
@@ -6989,8 +6940,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const DRAW_FRAME: [u8; 12] = [0, 1, 2, 3, 2, 3, 4, 5, 6, 7, 8, 9];
         const DRAW_COUNT: [u8; 11] = [1, 4, 4, 4, 4, 4, 5, 4, 6, 6, 6];
         let mut position = self.prep_adjusted_oam_coord(k);
-        let z = self.read(0x29e + k) as i8;
-        if z != 0 && z != -1 && self.read(0x380 + k) != 3 && self.object_priority(k) != 0 {
+        let z = self.height(k) as i8;
+        if z != 0 && z != -1 && self.state_k(k) != 3 && self.object_priority(k) != 0 {
             self.ram.write_u16(0x64, 0x3000);
         }
         position.1 = position.1.wrapping_sub(i16::from(z) as u16);
@@ -6998,15 +6949,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let frame = usize::from(DRAW_FRAME[state]) * 6;
         let mut palette = 2;
         if state == 0 {
-            palette = if self.read(0x39f + k) < 0x20 {
-                self.read(0x39f + k) & 0x0e
+            palette = if self.arr3(k) < 0x20 {
+                self.arr3(k) & 0x0e
             } else {
                 4
             };
-            if self.read(0x385 + k) == 0
+            if self.state_l(k) == 0
                 && (self.read(0xe20) == 0x92 || k + 1 == usize::from(self.read(0x2ec)))
-                && (self.read(0x308) & 0x80 == 0
-                    || self.read(0x380 + k) != 3 && self.read(0x2f) == 0)
+                && (self.read(0x308) & 0x80 == 0 || self.state_k(k) != 3 && self.read(0x2f) == 0)
             {
                 self.runtime.allocate_oam_region(
                     self.ram,
@@ -7015,7 +6965,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 );
             } else if self.read(0xfb3) != 0
                 && self.floor(k) != 0
-                && (self.read(0x385 + k) != 0
+                && (self.state_l(k) != 0
                     || k + 1 == usize::from(self.read(0x2ec)) && self.read(0x308) & 0x80 != 0)
             {
                 self.ram.write_u16(0x90, 0x8d0);
@@ -7024,7 +6974,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         let original = self.current_oam_index();
         let count = usize::from(DRAW_COUNT[state]);
-        let underwater = state == 0 && matches!(self.read(ANCILLA_TILE_ATTR + k), 9 | 0x40);
+        let underwater = state == 0 && matches!(self.tile_attribute(k), 9 | 0x40);
         let explosion_index = original + if underwater { 2 } else { 0 };
         self.draw_explosion(explosion_index, frame, 0, count, palette, position);
         let shadow_index = explosion_index + count;
@@ -7048,11 +6998,11 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0x11) != 0 {
             if matches!(self.read(0x11), 8 | 16) {
                 self.handle_lift_logic(k);
-            } else if k + 1 == usize::from(self.read(0x2ec)) && self.read(0x380 + k) != 0 {
-                if self.read(0x380 + k) != 3 {
+            } else if k + 1 == usize::from(self.read(0x2ec)) && self.state_k(k) != 0 {
+                if self.state_k(k) != 3 {
                     self.latch_link_coordinates(k, 3);
                     self.latch_altitude_above_link(k);
-                    self.write(0x380 + k, 3);
+                    self.set_state_k(k, 3);
                 }
                 self.latch_carried_position(k);
             }
@@ -7063,70 +7013,67 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let mut old_y = self.latch_y_coord_to_z(k);
         let old_direction = self.direction(k);
         let old_priority = self.object_priority(k);
-        self.write(0x280 + k, 0);
+        self.set_object_priority(k, 0);
         let mut collision = self.check_tile_collision_class2(k);
-        if self.read(0x1b) != 0
-            && self.read(0x385 + k) != 0
-            && self.read(ANCILLA_TILE_ATTR + k) == 0x1c
-        {
-            self.write(0x3d5 + k, 1);
+        if self.read(0x1b) != 0 && self.state_l(k) != 0 && self.tile_attribute(k) == 0x1c {
+            self.set_state_t(k, 1);
         }
         if collision && (self.read(0x308) & 0x80 == 0 || self.read(0x309) != 0) {
-            if old_priority == 0 && self.read(0xbf0 + k) == 0 {
-                self.write(0xbf0 + k, 1);
+            if old_priority == 0 && self.arr4(k) == 0 {
+                self.set_arr4(k, 1);
                 let y_speed = if self.direction(k) == 1 { 16 } else { 4 };
-                if self.read(0xc22 + k) != 0 {
-                    self.write(
-                        0xc22 + k,
-                        if (self.read(0xc22 + k) as i8) < 0 {
+                if self.y_velocity(k) != 0 {
+                    self.set_y_velocity(
+                        k,
+                        if (self.y_velocity(k) as i8) < 0 {
                             y_speed
                         } else {
                             (-(y_speed as i8)) as u8
                         },
                     );
                 }
-                if self.read(0xc2c + k) != 0 {
-                    self.write(
-                        0xc2c + k,
-                        if (self.read(0xc2c + k) as i8) < 0 {
+                if self.x_velocity(k) != 0 {
+                    self.set_x_velocity(
+                        k,
+                        if (self.x_velocity(k) as i8) < 0 {
                             4
                         } else {
                             (-4_i8) as u8
                         },
                     );
                 }
-                if self.direction(k) == 1 && self.read(0x29e + k) != 0 {
-                    self.write(0xc22 + k, (-4_i8) as u8);
-                    self.write(0x385 + k, 2);
+                if self.direction(k) == 1 && self.height(k) != 0 {
+                    self.set_y_velocity(k, (-4_i8) as u8);
+                    self.set_state_l(k, 2);
                 }
             }
         } else if !(k + 1 == usize::from(self.read(0x2ec)) && self.read(0x308) & 0x80 != 0)
-            && matches!(self.read(0x29e + k), 0 | 0xff)
+            && matches!(self.height(k), 0 | 0xff)
         {
-            self.write(0xc72 + k, 16);
+            self.set_direction(k, 16);
             let priority = self.object_priority(k);
             self.check_tile_collision(k);
-            self.write(0x280 + k, priority);
-            let attribute = self.read(ANCILLA_TILE_ATTR + k);
+            self.set_object_priority(k, priority);
+            let attribute = self.tile_attribute(k);
             if attribute == 0x26 {
                 collision = true;
-                if old_priority == 0 && self.read(0xbf0 + k) == 0 {
-                    self.write(0xbf0 + k, 1);
+                if old_priority == 0 && self.arr4(k) == 0 {
+                    self.set_arr4(k, 1);
                     let y_speed = if self.direction(k) == 1 { 16 } else { 4 };
-                    if self.read(0xc22 + k) != 0 {
-                        self.write(
-                            0xc22 + k,
-                            if (self.read(0xc22 + k) as i8) < 0 {
+                    if self.y_velocity(k) != 0 {
+                        self.set_y_velocity(
+                            k,
+                            if (self.y_velocity(k) as i8) < 0 {
                                 y_speed
                             } else {
                                 (-(y_speed as i8)) as u8
                             },
                         );
                     }
-                    if self.read(0xc2c + k) != 0 {
-                        self.write(
-                            0xc2c + k,
-                            if (self.read(0xc2c + k) as i8) < 0 {
+                    if self.x_velocity(k) != 0 {
+                        self.set_x_velocity(
+                            k,
+                            if (self.x_velocity(k) as i8) < 0 {
                                 4
                             } else {
                                 (-4_i8) as u8
@@ -7136,8 +7083,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 }
             } else if matches!(attribute, 0x0c | 0x1c) {
                 if self.read(0x46c) != 3 {
-                    if self.floor(k) == 0 && !matches!(self.read(0x29e + k), 0 | 0xff) {
-                        self.write(0xc7c + k, 1);
+                    if self.floor(k) == 0 && !matches!(self.height(k), 0 | 0xff) {
+                        self.set_floor(k, 1);
                     }
                 } else {
                     old_y = self.get_y(k).wrapping_add(self.ram.read_u16(0x310));
@@ -7150,7 +7097,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     if k + 1 == usize::from(self.read(0x2ec)) {
                         self.write(0x2ec, 0);
                     }
-                    if self.read(0xc68 + k) == 0 {
+                    if self.timer(k) == 0 {
                         self.clear(k);
                         return;
                     }
@@ -7159,7 +7106,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 if k + 1 == usize::from(self.read(0x2ec)) {
                     self.write(0x2ec, 0);
                 }
-                if self.read(0xc68 + k) == 0 {
+                if self.timer(k) == 0 {
                     self.set_y(k, self.get_y(k).wrapping_sub(24));
                     self.transmute_to_splash(k);
                     return;
@@ -7168,19 +7115,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.apply_conveyor(k);
                 old_y = self.get_y(k);
             } else {
-                self.write(0xc68 + k, if self.read(0x385 + k) != 0 { 0 } else { 2 });
+                self.set_timer(k, if self.state_l(k) != 0 { 0 } else { 2 });
             }
         }
         let _ = collision;
         self.set_y(k, old_y);
-        self.write(0xc72 + k, old_direction);
-        self.write(0x280 + k, self.object_priority(k) | old_priority);
+        self.set_direction(k, old_direction);
+        self.set_object_priority(k, self.object_priority(k) | old_priority);
         self.bomb_check_sprite_and_player_damage(k);
-        let timer = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, timer);
+        let timer = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, timer);
         if timer == 0 {
             let state = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, state);
+            self.set_item_to_link(k, state);
             if state == 1 {
                 self.sfx2_pan(k, 0x0c);
                 if k + 1 == usize::from(self.read(0x2ec)) {
@@ -7192,17 +7139,17 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 }
             }
             if state == 11 {
-                self.write(Self::type_address(k), if self.step(k) != 0 { 8 } else { 0 });
+                self.set_kind(k, if self.step(k) != 0 { 8 } else { 0 });
                 return;
             }
-            self.write(0x39f + k, super::BOMB_FRAME_DELAYS[usize::from(state)]);
+            self.set_arr3(k, super::BOMB_FRAME_DELAYS[usize::from(state)]);
         }
-        if self.item_to_link(k) == 7 && self.read(0x39f + k) == 2 {
+        if self.item_to_link(k) == 7 && self.arr3(k) == 2 {
             self.ram.write_u16(0x728 + k * 2, 0);
             self.runtime
                 .bomb_check_for_destructibles(self.ram, self.get_x(k), self.get_y(k), k);
             if self.ram.read_u16(0x728 + k * 2) != 0 {
-                self.write(0xc54 + k, 1);
+                self.set_step(k, 1);
             }
         }
         self.bomb_draw(k);
@@ -7271,12 +7218,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         ];
         for k in (5..=10).rev() {
             if self.kind(k) == 0 {
-                self.write(Self::type_address(k), 0x32);
-                self.write(0xc7c + k, self.read(0xee));
+                self.set_kind(k, 0x32);
+                self.set_floor(k, self.read(0xee));
                 self.write(0x10040 + k, 16);
                 let j = usize::from(self.read(0x1a) & 15);
-                self.write(0xc22 + k, XY[j * 2] as u8);
-                self.write(0xc2c + k, XY[j * 2 + 1] as u8);
+                self.set_y_velocity(k, XY[j * 2] as u8);
+                self.set_x_velocity(k, XY[j * 2 + 1] as u8);
                 self.set_xy(
                     k,
                     self.ram
@@ -7339,7 +7286,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     && self.read(0x10008 + k) == 2
                     && self.item_to_link(0).wrapping_add(1) < 7
                 {
-                    self.write(0xc5e, self.item_to_link(0).wrapping_add(1));
+                    self.set_item_to_link(0, self.item_to_link(0).wrapping_add(1));
                     self.write(0x10000 + k, 1);
                     self.write(0x10008 + k, 3);
                     for i in (0..4).rev() {
@@ -7364,7 +7311,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 }
             }
         }
-        let active = usize::from(self.read(0x380));
+        let active = usize::from(self.state_k(0));
         if self.read(0x10000 + active) != 0 {
             let mut i = if active == 1 { 7 } else { 3 };
             loop {
@@ -7389,16 +7336,16 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn jump_splash(&mut self, k: usize) {
         const CHAR: [u8; 2] = [0xac, 0xae];
         if self.read(0x11) == 0 {
-            let delay = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, delay);
+            let delay = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, delay);
             if (delay as i8) < 0 {
-                self.write(0x3b1 + k, 0);
-                self.write(0xc5e + k, 1);
+                self.set_aux_timer(k, 0);
+                self.set_item_to_link(k, 1);
             }
             if self.item_to_link(k) != 0 {
-                let velocity = self.read(0xc22 + k).wrapping_sub(4);
-                self.write(0xc22 + k, velocity);
-                self.write(0xc2c + k, velocity);
+                let velocity = self.y_velocity(k).wrapping_sub(4);
+                self.set_y_velocity(k, velocity);
+                self.set_x_velocity(k, velocity);
                 if velocity < 232 {
                     self.clear(k);
                     if (self.read(0x2e0) != 0 || self.read(0x5d) == 4) && self.read(0x345) != 0 {
@@ -7453,23 +7400,23 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn hit_stars(&mut self, k: usize) {
         const CHAR: [u8; 2] = [0x90, 0x91];
-        let divider = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, divider);
+        let divider = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, divider);
         if (divider as i8) >= 0 {
             return;
         }
-        self.write(0x39f + k, 0);
+        self.set_arr3(k, 0);
         if self.read(0x11) == 0 {
-            let delay = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, delay);
+            let delay = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, delay);
             if (delay as i8) < 0 {
-                self.write(0x3b1 + k, 0);
-                self.write(0xc5e + k, 1);
+                self.set_aux_timer(k, 0);
+                self.set_item_to_link(k, 1);
             }
             if self.item_to_link(k) != 0 {
-                let velocity = self.read(0xc22 + k).wrapping_sub(4);
-                self.write(0xc22 + k, velocity);
-                self.write(0xc2c + k, velocity);
+                let velocity = self.y_velocity(k).wrapping_sub(4);
+                self.set_y_velocity(k, velocity);
+                self.set_x_velocity(k, velocity);
                 if velocity < 232 {
                     self.clear(k);
                     return;
@@ -7479,7 +7426,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         let (mut x, y) = self.prep_oam_coord(k);
-        let anchor = u16::from_le_bytes([self.read(0x38a + k), self.read(0x38f + k)]);
+        let anchor = u16::from_le_bytes([self.state_a(k), self.state_b(k)]);
         let reflected_x = anchor
             .wrapping_mul(2)
             .wrapping_sub(self.get_x(k))
@@ -7513,10 +7460,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const XY: [i8; 8] = [18, -13, -9, 4, 18, 13, -9, -11];
         const CHAR: [u8; 2] = [0x40, 0x50];
         let (mut x, mut y) = self.prep_oam_coord(k);
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 8);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 8);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 2 {
                 self.clear(k);
                 return;
@@ -7544,8 +7491,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const CHAR: [u8; 3] = [0x9d, 0x9c, 0x8d];
         if self.read(0x11) == 0 {
             let frame = self.item_to_link(k).wrapping_add(2);
-            self.write(0xc5e + k, frame);
-            self.write(0xc22 + k, self.read(0xc22 + k).wrapping_add(frame));
+            self.set_item_to_link(k, frame);
+            self.set_y_velocity(k, self.y_velocity(k).wrapping_add(frame));
             self.move_y(k);
             self.move_x(k);
             let timer = self.read(0x10040 + k).wrapping_sub(1);
@@ -7627,7 +7574,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let mut index = self.current_oam_index();
         let frame = usize::from(self.item_to_link(k));
         let mut alternating = 0;
-        let mut remaining = self.read(0x746 + k);
+        let mut remaining = self.arr25(k);
         loop {
             self.set_oam(
                 index,
@@ -7777,12 +7724,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 _ => {}
             }
         } else {
-            self.write(0xc04 + k, self.read(0x15808));
-            self.write(0xc18 + k, 0);
+            self.set_x_low(k, self.read(0x15808));
+            self.set_x_high(k, 0);
             self.move_x(k);
-            self.write(0x15808, self.read(0xc04 + k));
+            self.write(0x15808, self.x_low(k));
             if self.read(0x15808) == 0x40 {
-                self.write(0xc54 + k, 4);
+                self.set_step(k, 4);
             }
         }
         let step = self.step(k);
@@ -7841,30 +7788,30 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     }
 
     fn ether_orb_pulse(&mut self, k: usize) {
-        if (self.read(0x746 + k) as i8) >= 0 {
-            let timer = self.read(0x39f + k).wrapping_sub(1);
-            self.write(0x39f + k, timer);
+        if (self.arr25(k) as i8) >= 0 {
+            let timer = self.arr3(k).wrapping_sub(1);
+            self.set_arr3(k, timer);
             if (timer as i8) >= 0 {
                 self.draw_ether_blitz(k);
                 return;
             }
-            self.write(0x39f + k, 3);
-            let segments = self.read(0x746 + k).wrapping_sub(1);
-            self.write(0x746 + k, segments);
+            self.set_arr3(k, 3);
+            let segments = self.arr25(k).wrapping_sub(1);
+            self.set_arr25(k, segments);
             if (segments as i8) >= 0 {
                 self.draw_ether_blitz(k);
                 return;
             }
-            self.write(0x39f + k, 9);
+            self.set_arr3(k, 9);
         }
-        let timer = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, timer);
+        let timer = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, timer);
         if (timer as i8) < 0 {
-            self.write(0xc54 + k, 2);
-            self.write(0xc22 + k, 0);
-            self.write(0xc2c + k, 16);
-            self.write(0xc5e + k, 0);
-            self.write(0x3b1 + k, 2);
+            self.set_step(k, 2);
+            self.set_y_velocity(k, 0);
+            self.set_x_velocity(k, 16);
+            self.set_item_to_link(k, 0);
+            self.set_aux_timer(k, 2);
             if self.read(0x31d) != 0 {
                 self.medallion_check_sprite_damage(k);
             }
@@ -7877,10 +7824,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let y = self.get_y(k);
         if self.read(0x1580c) != (y as u8 & 0xf0) {
             self.write(0x1580c, y as u8 & 0xf0);
-            self.write(0x746 + k, self.read(0x746 + k).wrapping_add(1));
+            self.set_arr25(k, self.arr25(k).wrapping_add(1));
         }
         if y < 0xe000 && self.ram.read_u16(0x1580a) < 0xe000 && self.ram.read_u16(0x1580a) <= y {
-            self.write(0xc54 + k, 1);
+            self.set_step(k, 1);
         }
         self.draw_ether_blitz(k);
     }
@@ -7891,8 +7838,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         if self.step(k) != 0 {
             let flash = if self.read(0x31d) == 0 {
-                let value = self.read(0xbf0 + k).wrapping_add(1);
-                self.write(0xbf0 + k, value);
+                let value = self.arr4(k).wrapping_add(1);
+                self.set_arr4(k, value);
                 value & 4 == 0
             } else {
                 self.read(0x31d) == 11
@@ -7906,27 +7853,27 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
         }
         if self.step(k) == 2 {
-            let timer = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, timer);
+            let timer = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, timer);
             if (timer as i8) < 0 {
-                self.write(0x3b1 + k, 2);
+                self.set_aux_timer(k, 2);
                 let frame = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, frame);
+                self.set_item_to_link(k, frame);
                 if frame == 2 {
-                    self.write(0xc5e + k, frame - 1);
-                    self.write(0xc2c + k, 16);
-                    self.write(0xc54 + k, 3);
+                    self.set_item_to_link(k, frame - 1);
+                    self.set_x_velocity(k, 16);
+                    self.set_step(k, 3);
                 }
             }
-            self.write(0xc2c + k, self.read(0xc2c + k).wrapping_add(1));
+            self.set_x_velocity(k, self.x_velocity(k).wrapping_add(1));
             self.ether_radial_spin(k);
             return;
         }
-        let timer = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, timer);
+        let timer = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, timer);
         if (timer as i8) < 0 {
-            self.write(0x3b1 + k, 2);
-            self.write(0xc5e + k, self.item_to_link(k) ^ 1);
+            self.set_aux_timer(k, 2);
+            self.set_item_to_link(k, self.item_to_link(k) ^ 1);
         }
         match self.step(k) {
             0 => self.ether_lightning_stroke(k),
@@ -7936,16 +7883,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 let duration = self.read(0x15812).wrapping_sub(1);
                 self.write(0x15812, duration);
                 if duration == 0 {
-                    self.write(0xc54 + k, 5);
+                    self.set_step(k, 5);
                 }
                 self.ether_radial_spin(k);
             }
             _ => {
-                let velocity = self.read(0xc2c + k).wrapping_add(0x10);
-                self.write(
-                    0xc2c + k,
-                    if (velocity as i8) < 0 { 0x7f } else { velocity },
-                );
+                let velocity = self.x_velocity(k).wrapping_add(0x10);
+                self.set_x_velocity(k, if (velocity as i8) < 0 { 0x7f } else { velocity });
                 self.ether_radial_spin(k);
             }
         }
@@ -7977,8 +7921,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.write(0x15820, 0x10);
         self.write(0xaaa, 11);
         self.write(0x112, 1);
-        self.write(0xc54 + k, 0);
-        self.write(0xc5e + k, 0);
+        self.set_step(k, 0);
+        self.set_item_to_link(k, 0);
         misc::ancilla_sfx2_near(self.ram, 0x2a);
         let mut generated = self.runtime.generated_bombos_position(self.read(0x1a));
         if generated >= 0xe0 {
@@ -8126,7 +8070,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.read(0x15820) >= 0x80 {
             self.write(0x15934, 1);
         }
-        self.write(0xc54 + k, last as u8);
+        self.set_step(k, last as u8);
     }
 
     fn finish_bombos_fire_columns(&mut self, k: usize) {
@@ -8152,7 +8096,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         }
         self.write(0x15934, 2);
         self.medallion_check_sprite_damage(k);
-        self.write(0xc54 + k, 0);
+        self.set_step(k, 0);
     }
 
     fn draw_bombos_blast(&mut self, k: usize) {
@@ -8253,7 +8197,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.draw_bombos_blast(slot);
         }
         if (0..16).any(|slot| self.read(0x15935 + slot) != 8) {
-            self.write(0xc54 + k, last as u8);
+            self.set_step(k, last as u8);
         } else {
             self.clear(k);
             self.write(0xaaa, 1);
@@ -8411,7 +8355,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             }
             slot -= 1;
         }
-        self.write(0xc54 + k, next_step);
+        self.set_step(k, next_step);
     }
 
     fn quake_spread_bolts(&mut self, k: usize) {
@@ -8422,12 +8366,12 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         if self.step(k) != 1 {
             return;
         }
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 2);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 2);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 55 {
-                self.write(0xc54 + k, 2);
+                self.set_step(k, 2);
                 return;
             }
         }
@@ -8524,7 +8468,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             0xe4, 0x62, 0xe4, 0xa8, 0xe2, 0x68,
         ];
         let (x, y) = self.prep_oam_coord(k);
-        let frame = usize::from(self.read(0x746 + k));
+        let frame = usize::from(self.arr25(k));
         let index = self.current_oam_index();
         for i in 0..4 {
             let table = frame * 4 + i;
@@ -8588,10 +8532,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         ];
         if self.read(0x11) == 0 {
             self.powder_apply_damage_to_sprites(k);
-            let delay = self.read(0x3b1 + k).wrapping_sub(1);
-            self.write(0x3b1 + k, delay);
+            let delay = self.aux_timer(k).wrapping_sub(1);
+            self.set_aux_timer(k, delay);
             if (delay as i8) < 0 {
-                self.write(0x3b1 + k, 1);
+                self.set_aux_timer(k, 1);
                 let direction = usize::from(self.direction(k));
                 if self.item_to_link(k) == 9 {
                     self.clear(k);
@@ -8599,14 +8543,14 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                     return;
                 }
                 let frame = self.item_to_link(k).wrapping_add(1);
-                self.write(0xc5e + k, frame);
-                self.write(0x746 + k, FRAMES[usize::from(frame) + direction * 10]);
+                self.set_item_to_link(k, frame);
+                self.set_arr25(k, FRAMES[usize::from(frame) + direction * 10]);
             }
         }
         self.runtime.allocate_oam_region(
             self.ram,
             if self.read(0xfb3) == 0 { b'B' } else { b'E' },
-            self.read(0xc90 + k),
+            self.sprite_count(k),
         );
         self.magic_powder_draw(k);
     }
@@ -8642,7 +8586,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn screen_shake(&mut self, k: usize) {
         if self.read(0x11) == 0 {
             let timer = self.item_to_link(k).wrapping_sub(1);
-            self.write(0xc5e + k, timer);
+            self.set_item_to_link(k, timer);
             if (timer as i8) < 0 {
                 self.ram.write_u16(0x11a, 0);
                 self.ram.write_u16(0x11c, 0);
@@ -8663,10 +8607,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     fn dash_dust_motive(&mut self, k: usize) {
         const CHAR: [u8; 3] = [0xa9, 0xcf, 0xdf];
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 3);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 3);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 3 {
                 self.clear(k);
                 return;
@@ -8705,10 +8649,10 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.dash_dust_motive(k);
             return;
         }
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 3);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 3);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 5 {
                 return;
             }
@@ -8789,8 +8733,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         let Some(k) = self.add_ancilla(6, 1) else {
             return;
         };
-        self.write(0xc5e + k, 0);
-        self.write(0x39f + k, 1);
+        self.set_item_to_link(k, 0);
+        self.set_arr3(k, 1);
         let direction = usize::from(self.direction(source));
         self.set_xy(
             k,
@@ -8807,7 +8751,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const FLAGS: [u8; 12] = [0, 0, 0xff, 0x80, 0x80, 0xff, 0x40, 0xff, 0x40, 0, 0xff, 0];
         const CHAR: [u8; 12] = [9, 0x0a, 0xff, 9, 0x0a, 0xff, 9, 0xff, 0x0a, 9, 0xff, 0x0a];
         let (x0, y0) = self.prep_oam_coord(k);
-        if self.read(0x385 + k) != 0 {
+        if self.state_l(k) != 0 {
             self.ram.write_u16(0x64, 0x3000);
         }
         let mut index = self.current_oam_index();
@@ -8885,8 +8829,8 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             self.hookshot_draw(k);
             return;
         }
-        if self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 7);
+        if self.timer(k) == 0 {
+            self.set_timer(k, 7);
             self.sfx2_pan(k, 0x0a);
         }
         if self.read(0x37e) != 0 {
@@ -8897,7 +8841,7 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         self.move_x(k);
         if self.step(k) != 0 {
             let length = self.item_to_link(k).wrapping_sub(1);
-            self.write(0xc5e + k, length);
+            self.set_item_to_link(k, length);
             if (length as i8) < 0 {
                 self.clear(k);
                 return;
@@ -8906,24 +8850,24 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             return;
         }
         let length = self.item_to_link(k).wrapping_add(1);
-        self.write(0xc5e + k, length);
+        self.set_item_to_link(k, length);
         if length == 32 {
-            self.write(0xc54 + k, 1);
-            self.write(0xc2c + k, self.read(0xc2c + k).wrapping_neg());
-            self.write(0xc22 + k, self.read(0xc22 + k).wrapping_neg());
+            self.set_step(k, 1);
+            self.set_x_velocity(k, self.x_velocity(k).wrapping_neg());
+            self.set_y_velocity(k, self.y_velocity(k).wrapping_neg());
         }
         if self.hookshot_should_bother_with_tiles(k) {
             self.hookshot_draw(k);
             return;
         }
-        if self.read(0x385 + k) == 0
+        if self.state_l(k) == 0
             && self.step(k) == 0
             && self.check_sprite_collision(k).is_some()
             && self.step(k) == 0
         {
-            self.write(0xc54 + k, 1);
-            self.write(0xc22 + k, self.read(0xc22 + k).wrapping_neg());
-            self.write(0xc2c + k, self.read(0xc2c + k).wrapping_neg());
+            self.set_step(k, 1);
+            self.set_y_velocity(k, self.y_velocity(k).wrapping_neg());
+            self.set_x_velocity(k, self.x_velocity(k).wrapping_neg());
         }
         self.runtime.hookshot_check_tile_collision(self.ram, k);
         let ledge = if self.read(0x1b) != 0 {
@@ -8941,31 +8885,29 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             ((self.read(0x36e) & 3 | self.read(0x36d) | self.read(0x370)) & 0x33) != 0
         };
         if detected {
-            let delay = self.read(0x394 + k).wrapping_sub(1);
-            self.write(0x394 + k, delay);
+            let delay = self.state_g(k).wrapping_sub(1);
+            self.set_state_g(k, delay);
             if (delay as i8) < 0 {
-                if self.read(0x380 + k) != 0
-                    && (ledge & 3 != 0 || self.read(0x380 + k) != self.read(0x76))
-                {
-                    self.write(0x394 + k, 2);
-                    let l = self.read(0x385 + k).wrapping_sub(1);
-                    self.write(0x385 + k, l);
+                if self.state_k(k) != 0 && (ledge & 3 != 0 || self.state_k(k) != self.read(0x76)) {
+                    self.set_state_g(k, 2);
+                    let l = self.state_l(k).wrapping_sub(1);
+                    self.set_state_l(k, l);
                     if (l as i8) < 0 {
-                        self.write(0x385 + k, 0);
+                        self.set_state_l(k, 0);
                     }
                 } else {
-                    self.write(0x385 + k, self.read(0x385 + k).wrapping_add(1));
-                    self.write(0x380 + k, self.read(0x76));
-                    self.write(0x394 + k, 1);
+                    self.set_state_l(k, self.state_l(k).wrapping_add(1));
+                    self.set_state_k(k, self.read(0x76));
+                    self.set_state_g(k, 1);
                 }
             }
         }
-        if self.read(0x385 + k) != 0 {
+        if self.state_l(k) != 0 {
             self.hookshot_draw(k);
             return;
         }
-        if (self.read(0x394 + k) as i8) >= 0 {
-            self.write(0x394 + k, self.read(0x394 + k).wrapping_sub(1));
+        if (self.state_g(k) as i8) >= 0 {
+            self.set_state_g(k, self.state_g(k).wrapping_sub(1));
             self.hookshot_draw(k);
             return;
         }
@@ -8976,9 +8918,9 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
             & 3
             != 0;
         if obstacle && self.step(k) == 0 {
-            self.write(0xc54 + k, 1);
-            self.write(0xc22 + k, self.read(0xc22 + k).wrapping_neg());
-            self.write(0xc2c + k, self.read(0xc2c + k).wrapping_neg());
+            self.set_step(k, 1);
+            self.set_y_velocity(k, self.y_velocity(k).wrapping_neg());
+            self.set_x_velocity(k, self.x_velocity(k).wrapping_neg());
             if self.ram.read_u16(0x2f6) & 3 == 0 {
                 self.add_hookshot_wall_clink(k);
                 self.sfx2_pan(
@@ -9031,18 +8973,18 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 
     pub fn snore(&mut self, k: usize) {
         const DMA: [u8; 3] = [0x44, 0x43, 0x42];
-        let delay = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, delay);
+        let delay = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, delay);
         if (delay as i8) < 0 {
             if self.item_to_link(k) != 2 {
-                self.write(0xc5e + k, self.item_to_link(k).wrapping_add(1));
+                self.set_item_to_link(k, self.item_to_link(k).wrapping_add(1));
             }
-            self.write(0x3b1 + k, 7);
+            self.set_aux_timer(k, 7);
         }
-        let velocity = self.read(0xc2c + k).wrapping_add(self.step(k));
-        self.write(0xc2c + k, velocity);
+        let velocity = self.x_velocity(k).wrapping_add(self.step(k));
+        self.set_x_velocity(k, velocity);
         if (velocity as i8).unsigned_abs() >= 8 {
-            self.write(0xc54 + k, self.step(k).wrapping_neg());
+            self.set_step(k, self.step(k).wrapping_neg());
         }
         self.move_y(k);
         self.move_x(k);
@@ -9064,19 +9006,19 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const FLAGS: [u8; 16] = [
             0, 0xff, 0xff, 0xff, 0, 0x40, 0x80, 0xc0, 0, 0x40, 0xff, 0xff, 0, 0xff, 0xff, 0xff,
         ];
-        if self.read(0x3b1 + k) != 0 {
-            self.write(0x3b1 + k, self.read(0x3b1 + k).wrapping_sub(1));
+        if self.aux_timer(k) != 0 {
+            self.set_aux_timer(k, self.aux_timer(k).wrapping_sub(1));
             return;
         }
-        let delay = self.read(0x39f + k).wrapping_sub(1);
-        self.write(0x39f + k, delay);
+        let delay = self.arr3(k).wrapping_sub(1);
+        self.set_arr3(k, delay);
         if (delay as i8) < 0 {
-            self.write(0x39f + k, 1);
+            self.set_arr3(k, 1);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 4 {
                 self.clear(k);
-                self.write(0x3b1 + k, self.read(0x3b1 + k).wrapping_sub(1));
+                self.set_aux_timer(k, self.aux_timer(k).wrapping_sub(1));
                 return;
             }
         }
@@ -9108,17 +9050,17 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
     pub fn spin_attack_charge_sparkle(&mut self, k: usize) {
         const CHAR: [u8; 3] = [0xb7, 0x80, 0x83];
         const FLAGS: [u8; 3] = [4, 4, 0x84];
-        if self.read(0x11) == 0 && self.read(0xc68 + k) == 0 {
-            self.write(0xc68 + k, 4);
+        if self.read(0x11) == 0 && self.timer(k) == 0 {
+            self.set_timer(k, 4);
             let frame = self.item_to_link(k).wrapping_add(1);
-            self.write(0xc5e + k, frame);
+            self.set_item_to_link(k, frame);
             if frame == 3 {
                 self.clear(k);
                 return;
             }
         }
         self.allocate_oam_from_region_a_d_f(k, 4);
-        self.write(0xc86 + k, self.read(0x90));
+        self.set_oam_index(k, self.read(0x90));
         let (x, y) = self.prep_oam_coord(k);
         let frame = usize::from(self.item_to_link(k));
         self.set_oam(
@@ -9136,15 +9078,15 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
         const Y: [i8; 8] = [1, 1, 9, 9, 1, 1, 9, 9];
         const CHAR: [u8; 8] = [0x86, 0x86, 0x96, 0x96, 0x87, 0x87, 0x97, 0x97];
         const FLAGS: [u8; 8] = [1, 0x41, 1, 0x41, 1, 0x41, 1, 0x41];
-        if self.read(0xc68 + k) == 0 {
+        if self.timer(k) == 0 {
             self.clear(k);
             return;
         }
-        let delay = self.read(0x3b1 + k).wrapping_sub(1);
-        self.write(0x3b1 + k, delay);
+        let delay = self.aux_timer(k).wrapping_sub(1);
+        self.set_aux_timer(k, delay);
         if (delay as i8) < 0 {
-            self.write(
-                0xc5e + k,
+            self.set_item_to_link(
+                k,
                 if self.item_to_link(k) == 2 {
                     0
                 } else {
@@ -9179,21 +9121,21 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
                 self.move_x(k);
                 self.move_y(k);
             }
-            if self.read(0xc68 + k) == 0 {
-                self.write(0xc68 + k, 3);
+            if self.timer(k) == 0 {
+                self.set_timer(k, 3);
                 let mut step = self.step(k).wrapping_add(1);
                 if step >= 6 {
                     step = 4;
                 }
-                self.write(0xc54 + k, step);
+                self.set_step(k, step);
             }
             let sprite_hit = self.check_sprite_collision(k).is_some();
             let tile_hit =
                 ((self.read(0x1a) ^ k as u8) & 1) != 0 && self.check_tile_collision(k) != 0;
             if sprite_hit || tile_hit {
-                self.write(Self::type_address(k), 4);
-                self.write(0xc68 + k, 7);
-                self.write(0xc90 + k, 16);
+                self.set_kind(k, 4);
+                self.set_timer(k, 7);
+                self.set_sprite_count(k, 16);
             }
         }
         self.somaria_blast_draw(k);
@@ -9267,13 +9209,13 @@ impl<R: AncillaRuntime> Ancilla<'_, '_, R> {
 }
 
 pub(crate) fn add_bird_common<R: AncillaRuntime>(ctx: &mut Ancilla<'_, '_, R>, k: usize) {
-    ctx.write(0xc22 + k, 0);
-    ctx.write(0xc5e + k, 0);
-    ctx.write(0x3b1 + k, 1);
-    ctx.write(0xc2c + k, 56);
-    ctx.write(0x39f + k, 3);
-    ctx.write(0x380 + k, 0);
-    ctx.write(0x394 + k, 0);
+    ctx.set_y_velocity(k, 0);
+    ctx.set_item_to_link(k, 0);
+    ctx.set_aux_timer(k, 1);
+    ctx.set_x_velocity(k, 56);
+    ctx.set_arr3(k, 3);
+    ctx.set_state_k(k, 0);
+    ctx.set_state_g(k, 0);
     let features = u32::from_le_bytes(ctx.ram.slice(0x64c, 4).try_into().unwrap());
     let extend = if features & 1 != 0 { 0x40 } else { 0 };
     let x = ctx.ram.read_u16(0xe2).wrapping_sub(16 + extend);
@@ -9819,6 +9761,44 @@ mod tests {
             assert_eq!(ctx.step(0), 3);
             assert_eq!(ctx.item_to_link(0), 1);
             assert_eq!(ctx.read(0xc2c), 17);
+        });
+    }
+
+    #[test]
+    fn ether_orbit_updates_workspace_angles_without_treating_them_as_pool_slots() {
+        fixture(|ctx| {
+            ctx.set_kind(2, 0x18);
+            ctx.set_step(2, 4);
+            ctx.set_aux_timer(2, 2);
+            ctx.set_item_to_link(2, 0);
+            ctx.set_x_velocity(2, 0x44);
+            ctx.write(0x15808, 40);
+            ctx.write(0x15812, 10);
+            ctx.ram.slice_mut(0x1642c, 8).fill(0xa5);
+            for i in 0..8 {
+                ctx.write(0x15800 + i, 0x3f - i as u8);
+            }
+            ctx.ether_spell(2);
+            assert_eq!(ctx.ram.slice(0x15800, 8), &[0, 63, 62, 61, 60, 59, 58, 57]);
+            assert_eq!(ctx.x_velocity(2), 0x44);
+            assert_eq!(ctx.ram.slice(0x1642c, 8), &[0xa5; 8]);
+        });
+    }
+
+    #[test]
+    fn ether_expansion_updates_slot_velocity_without_writing_low_wram_scratch() {
+        fixture(|ctx| {
+            ctx.set_kind(2, 0x18);
+            ctx.set_step(2, 5);
+            ctx.set_aux_timer(2, 2);
+            ctx.set_item_to_link(2, 0);
+            ctx.set_x_velocity(2, 0x78);
+            ctx.write(0x15808, 40);
+            let scratch = ctx.read(2);
+            ctx.ether_spell(2);
+            assert_eq!(ctx.x_velocity(2), 0x7f);
+            assert_eq!(ctx.read(2), scratch);
+            assert_eq!(ctx.ram.slice(0x15800, 8), &[0; 8]);
         });
     }
 

@@ -6,6 +6,30 @@
 
 use crate::ram::Ram;
 
+/// Integer coordinates in separate low/high arrays. Controllers and follower
+/// history use these without allocating nonexistent fractional position bytes.
+#[derive(Clone, Copy)]
+pub(crate) struct SplitCoordinate {
+    low: usize,
+    high: usize,
+}
+
+impl SplitCoordinate {
+    pub(crate) const fn new(low: usize, high: usize) -> Self {
+        Self { low, high }
+    }
+
+    pub(crate) fn pixels(self, ram: &Ram<'_>, slot: usize) -> u16 {
+        u16::from_le_bytes([ram.read_u8(self.low + slot), ram.read_u8(self.high + slot)])
+    }
+
+    pub(crate) fn set_pixels(self, ram: &mut Ram<'_>, slot: usize, pixels: u16) {
+        let [low, high] = pixels.to_le_bytes();
+        ram.write_u8(self.low + slot, low);
+        ram.write_u8(self.high + slot, high);
+    }
+}
+
 /// An unsigned wrapping coordinate with eight fractional bits.
 ///
 /// `INTEGER_BITS` is 8 for height or 16 for world coordinates. The integer part

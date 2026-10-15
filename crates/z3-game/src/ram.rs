@@ -7,6 +7,7 @@
 
 use z3_core::WRAM_SIZE;
 
+use crate::ancilla_state::{AncillaMut, AncillaRef};
 use crate::player_state::{PlayerMut, PlayerRef};
 
 pub struct Ram<'a> {
@@ -29,6 +30,17 @@ impl<'a> Ram<'a> {
     #[must_use]
     pub fn player_mut(&mut self) -> PlayerMut<'_> {
         PlayerMut::new(self.bytes)
+    }
+
+    /// Borrows an effect slot without caching its compatibility bytes.
+    #[must_use]
+    pub fn ancilla(&self, slot: usize) -> AncillaRef<'_> {
+        AncillaRef::new(self.bytes, slot)
+    }
+
+    #[must_use]
+    pub fn ancilla_mut(&mut self, slot: usize) -> AncillaMut<'_> {
+        AncillaMut::new(self.bytes, slot)
     }
 
     #[must_use]

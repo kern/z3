@@ -4,6 +4,19 @@
 //! WRAM layout is kept explicit so behavior can be compared address-for-address.
 
 use crate::sound::{SoundPort, SoundRequest};
+use crate::sprite_state::SpriteSlot;
+use crate::sprite_state::layout::{
+    SPRITE_A, SPRITE_AI_STATE, SPRITE_ANIM_CLOCK, SPRITE_B, SPRITE_BUMP_DAMAGE, SPRITE_C, SPRITE_D,
+    SPRITE_DEFL_BITS, SPRITE_DELAY_AUX1, SPRITE_DELAY_AUX2, SPRITE_DELAY_AUX3, SPRITE_DELAY_AUX4,
+    SPRITE_DELAY_MAIN, SPRITE_E, SPRITE_F, SPRITE_FLAGS, SPRITE_FLAGS2, SPRITE_FLAGS3,
+    SPRITE_FLAGS4, SPRITE_FLAGS5, SPRITE_FLOOR, SPRITE_G, SPRITE_GIVE_DAMAGE, SPRITE_GRAPHICS,
+    SPRITE_HEAD_DIR, SPRITE_HEALTH, SPRITE_HIT_TIMER, SPRITE_I, SPRITE_IGNORE_PROJECTILE,
+    SPRITE_OAM_FLAGS, SPRITE_OBJ_PRIO, SPRITE_PAUSE, SPRITE_STATE, SPRITE_STUNNED, SPRITE_SUBTYPE2,
+    SPRITE_TYPE, SPRITE_UNK1, SPRITE_UNK2, SPRITE_UNK3, SPRITE_UNK4, SPRITE_UNK5, SPRITE_WALLCOLL,
+    SPRITE_X_HI, SPRITE_X_LO, SPRITE_X_RECOIL, SPRITE_X_SUBPIXEL, SPRITE_X_VEL, SPRITE_Y_HI,
+    SPRITE_Y_LO, SPRITE_Y_RECOIL, SPRITE_Y_SUBPIXEL, SPRITE_Y_VEL, SPRITE_Z, SPRITE_Z_SUBPOS,
+    SPRITE_Z_VEL,
+};
 use crate::{
     oam,
     position::{Height, SplitPosition},
@@ -165,7 +178,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.w8(base + slot, value);
     }
     fn run_sprite_active_main(&mut self, slot: usize) {
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         crate::sprite_main_bank0::SpriteMainBank0 {
             ram: &mut self.ram,
             runtime: self.hooks,
@@ -179,12 +192,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             &mut self.ram,
             slot,
         );
-        self.set_arr(
-            SPRITE_STATE,
-            slot,
-            self.arr(SPRITE_STATE, slot).wrapping_add(1),
-        );
-        let kind = self.arr(SPRITE_TYPE, slot);
+        self.ram
+            .set_sprite_state(slot, self.ram.sprite(slot).state().wrapping_add(1));
+        let kind = self.ram.sprite(slot).kind();
         crate::sprite_main_bank0::SpriteMainBank0 {
             ram: &mut self.ram,
             runtime: self.hooks,
@@ -236,22 +246,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.sprite_set_y(slot, self.sprite_get_y(slot).wrapping_add_signed(y));
     }
     pub fn sprite_invert_xy_speeds(&mut self, slot: usize) {
-        self.set_arr(
-            SPRITE_X_VEL,
-            slot,
-            (-(self.arr(SPRITE_X_VEL, slot) as i8)) as u8,
-        );
-        self.set_arr(
-            SPRITE_Y_VEL,
-            slot,
-            (-(self.arr(SPRITE_Y_VEL, slot) as i8)) as u8,
-        );
+        self.ram
+            .set_sprite_velocity_x(slot, (-(self.ram.sprite(slot).velocity_x() as i8)) as u8);
+        self.ram
+            .set_sprite_velocity_y(slot, (-(self.ram.sprite(slot).velocity_y() as i8)) as u8);
     }
     pub fn sprite_invert_speed_xy(&mut self, slot: usize) {
         self.sprite_invert_xy_speeds(slot);
     }
     pub fn sprite_move_x(&mut self, slot: usize) {
-        let velocity = self.arr(SPRITE_X_VEL, slot) as i8;
+        let velocity = self.ram.sprite(slot).velocity_x() as i8;
         if velocity == 0 {
             return;
         }
@@ -259,7 +263,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         SPRITE_X_POSITION.store(&mut self.ram, slot, position.advanced(velocity));
     }
     pub fn sprite_move_y(&mut self, slot: usize) {
-        let velocity = self.arr(SPRITE_Y_VEL, slot) as i8;
+        let velocity = self.ram.sprite(slot).velocity_y() as i8;
         if velocity == 0 {
             return;
         }
@@ -269,10 +273,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     pub fn sprite_move_z(&mut self, slot: usize) {
         // The legacy Z helper reads whole pixels before the fractional byte.
         let position = Height::from_parts(
-            u16::from(self.arr(SPRITE_Z, slot)),
-            self.arr(SPRITE_Z_SUBPOS, slot),
+            u16::from(self.ram.sprite(slot).z()),
+            self.ram.sprite(slot).subpixel_z(),
         );
-        let velocity = self.arr(SPRITE_Z_VEL, slot) as i8;
+        let velocity = self.ram.sprite(slot).velocity_z() as i8;
         SPRITE_HEIGHT.store(&mut self.ram, slot, position.advanced(velocity));
     }
     pub fn sprite_move_xy(&mut self, slot: usize) {
@@ -285,36 +289,28 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.sprite_move_y(slot);
     }
     pub fn sprite_zero_velocity_xy(&mut self, slot: usize) {
-        self.set_arr(SPRITE_X_VEL, slot, 0);
-        self.set_arr(SPRITE_Y_VEL, slot, 0);
+        self.ram.set_sprite_velocity_x(slot, 0);
+        self.ram.set_sprite_velocity_y(slot, 0);
     }
     pub fn sprite_halve_speed_xy(&mut self, slot: usize) {
-        self.set_arr(
-            SPRITE_X_VEL,
+        self.ram.set_sprite_velocity_x(
             slot,
-            ((self.arr(SPRITE_X_VEL, slot) as i8) >> 1) as u8,
+            ((self.ram.sprite(slot).velocity_x() as i8) >> 1) as u8,
         );
-        self.set_arr(
-            SPRITE_Y_VEL,
+        self.ram.set_sprite_velocity_y(
             slot,
-            ((self.arr(SPRITE_Y_VEL, slot) as i8) >> 1) as u8,
+            ((self.ram.sprite(slot).velocity_y() as i8) >> 1) as u8,
         );
     }
     pub fn sprite_bounce_off_wall(&mut self, slot: usize) {
-        let collision = self.arr(SPRITE_WALLCOLL, slot);
+        let collision = self.ram.sprite(slot).wall_collision();
         if collision & 3 != 0 {
-            self.set_arr(
-                SPRITE_X_VEL,
-                slot,
-                (-(self.arr(SPRITE_X_VEL, slot) as i8)) as u8,
-            );
+            self.ram
+                .set_sprite_velocity_x(slot, (-(self.ram.sprite(slot).velocity_x() as i8)) as u8);
         }
         if collision & 12 != 0 {
-            self.set_arr(
-                SPRITE_Y_VEL,
-                slot,
-                (-(self.arr(SPRITE_Y_VEL, slot) as i8)) as u8,
-            );
+            self.ram
+                .set_sprite_velocity_y(slot, (-(self.ram.sprite(slot).velocity_y() as i8)) as u8);
         }
     }
     fn project_speed(right: PairU8, below: PairU8, mut velocity: u8) -> ProjectSpeedRet {
@@ -379,10 +375,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
     pub fn sprite_is_below_link(&self, slot: usize) -> PairU8 {
         let t = i32::from(self.r8(0x20)) + 8;
-        let u = (t & 0xff) + i32::from(self.arr(SPRITE_Z, slot));
-        let v = (u & 0xff) - i32::from(self.arr(SPRITE_Y_LO, slot));
+        let u = (t & 0xff) + i32::from(self.ram.sprite(slot).z());
+        let v = (u & 0xff) - i32::from(self.ram.sprite(slot).y_low());
         let w =
-            i32::from(self.r8(0x21)) - i32::from(self.arr(SPRITE_Y_HI, slot)) - i32::from(v < 0);
+            i32::from(self.r8(0x21)) - i32::from(self.ram.sprite(slot).y_high()) - i32::from(v < 0);
         let high = (w & 0xff) + (t >> 8) + (u >> 8);
         PairU8 {
             a: u8::from(((high as u8) as i8) < 0),
@@ -411,8 +407,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
     pub fn sprite_apply_speed_towards_link(&mut self, slot: usize, velocity: u8) {
         let speed = self.sprite_project_speed_towards_link(slot, velocity);
-        self.set_arr(SPRITE_X_VEL, slot, speed.x);
-        self.set_arr(SPRITE_Y_VEL, slot, speed.y);
+        self.ram.set_sprite_velocity_x(slot, speed.x);
+        self.ram.set_sprite_velocity_y(slot, speed.y);
     }
     pub fn sprite_direction_to_face_location(&mut self, slot: usize, x: u16, y: u16) -> u8 {
         let below = self.sprite_is_below_location(slot, y);
@@ -437,32 +433,34 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         )
     }
     pub fn sprite_return_if_inactive(&self, slot: usize) -> bool {
-        self.arr(SPRITE_STATE, slot) != 9
+        self.ram.sprite(slot).state() != 9
             || self.r8(0xfc1) != 0
             || self.r8(0x11) != 0
-            || self.arr(SPRITE_DEFL_BITS, slot) & 0x80 == 0 && self.arr(SPRITE_PAUSE, slot) != 0
+            || self.ram.sprite(slot).deflection_bits() & 0x80 == 0
+                && self.ram.sprite(slot).pause() != 0
     }
     pub fn sprite_return_if_paused(&self, slot: usize) -> bool {
         self.r8(0xfc1) != 0
             || self.r8(0x11) != 0
-            || self.arr(SPRITE_DEFL_BITS, slot) & 0x80 == 0 && self.arr(SPRITE_PAUSE, slot) != 0
+            || self.ram.sprite(slot).deflection_bits() & 0x80 == 0
+                && self.ram.sprite(slot).pause() != 0
     }
     pub fn sprite_set_spawned_coordinates(&mut self, slot: usize, info: SpriteSpawnInfo) {
         self.sprite_set_x(slot, info.r0_x);
         self.sprite_set_y(slot, info.r2_y);
-        self.set_arr(SPRITE_Z, slot, info.r4_z);
+        self.ram.set_sprite_z(slot, info.r4_z);
     }
     pub fn sprite_check_if_overlords_clear(&self) -> bool {
         (0..8).all(|i| !matches!(self.arr(OVERLORD_TYPE, i), 0x14 | 0x18))
     }
     pub fn sprite_check_if_room_is_clear(&self) -> bool {
-        (0..16).all(|i| self.arr(SPRITE_STATE, i) == 0 || self.arr(SPRITE_FLAGS4, i) & 0x40 != 0)
+        (0..16).all(|i| self.ram.sprite(i).state() == 0 || self.ram.sprite(i).flags4() & 0x40 != 0)
             && self.sprite_check_if_overlords_clear()
     }
     pub fn sprite_check_if_screen_is_clear(&self) -> bool {
         (0..16).all(|i| {
-            self.arr(SPRITE_STATE, i) == 0
-                || self.arr(SPRITE_FLAGS4, i) & 0x40 != 0
+            self.ram.sprite(i).state() == 0
+                || self.ram.sprite(i).flags4() & 0x40 != 0
                 || self.sprite_get_x(i).wrapping_sub(self.r16(0xe2)) >= 256
                 || self.sprite_get_y(i).wrapping_sub(self.r16(0xe8)) >= 256
         }) && self.sprite_check_if_overlords_clear()
@@ -474,18 +472,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         (0..5).rev().any(|slot| self.arr(0xc4a, slot) == 0x27)
     }
     pub fn sprite_track_body_to_head(&mut self, slot: usize) -> bool {
-        let head = self.arr(SPRITE_HEAD_DIR, slot);
-        if head != self.arr(SPRITE_D, slot) {
+        let head = self.ram.sprite(slot).head_direction();
+        if head != self.ram.sprite(slot).scratch_d() {
             if self.r8(0x1a) & 0x1f != 0 {
                 return false;
             }
-            if (head ^ self.arr(SPRITE_D, slot)) & 2 == 0 {
+            if (head ^ self.ram.sprite(slot).scratch_d()) & 2 == 0 {
                 let direction = ((((slot as u8 ^ self.r8(0x1a)) >> 5) | 2) & 3) ^ (head & 2);
-                self.set_arr(SPRITE_D, slot, direction);
+                self.ram.set_sprite_scratch_d(slot, direction);
                 return false;
             }
         }
-        self.set_arr(SPRITE_D, slot, head);
+        self.ram.set_sprite_scratch_d(slot, head);
         true
     }
 
@@ -515,24 +513,24 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if !self.sprite_check_damage_to_link_same_layer(slot)
             || self.sprite_check_if_link_is_busy()
             || self.r8(0xf6) & 0x80 == 0
-            || self.arr(SPRITE_DELAY_AUX4, slot) != 0
+            || self.ram.sprite(slot).aux4_delay() != 0
             || self.r8(0x4d) == 2
         {
-            return u16::from(self.arr(SPRITE_D, slot));
+            return u16::from(self.ram.sprite(slot).scratch_d());
         }
         let direction = self.sprite_direction_to_face_link(slot).0;
         if self.r8(0x2f) != FACING[usize::from(direction)] {
-            return u16::from(self.arr(SPRITE_D, slot));
+            return u16::from(self.ram.sprite(slot).scratch_d());
         }
         self.sprite_show_message_unconditional(message);
-        self.set_arr(SPRITE_DELAY_AUX4, slot, 64);
+        self.ram.set_sprite_aux4_delay(slot, 64);
         u16::from(direction) ^ 0x103
     }
 
     pub fn sprite_show_message_on_contact(&mut self, slot: usize, message: u16) -> u16 {
         self.w16(0x1cf0, message);
         if !self.sprite_check_damage_to_link_same_layer(slot) || self.r8(0x4d) == 2 {
-            return u16::from(self.arr(SPRITE_D, slot));
+            return u16::from(self.ram.sprite(slot).scratch_d());
         }
         self.sprite_show_message_unconditional(message);
         u16::from(self.sprite_direction_to_face_link(slot).0) ^ 0x103
@@ -544,13 +542,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         message: u16,
     ) -> bool {
         self.w16(0x1cf0, message);
-        let flags2 = self.arr(SPRITE_FLAGS2, slot);
-        let flags4 = self.arr(SPRITE_FLAGS4, slot);
-        self.set_arr(SPRITE_FLAGS2, slot, 0x80);
-        self.set_arr(SPRITE_FLAGS4, slot, 7);
+        let flags2 = self.ram.sprite(slot).flags2();
+        let flags4 = self.ram.sprite(slot).flags4();
+        self.ram.set_sprite_flags2(slot, 0x80);
+        self.ram.set_sprite_flags4(slot, 7);
         let result = self.sprite_check_damage_to_link_same_layer(slot);
-        self.set_arr(SPRITE_FLAGS2, slot, flags2);
-        self.set_arr(SPRITE_FLAGS4, slot, flags4);
+        self.ram.set_sprite_flags2(slot, flags2);
+        self.ram.set_sprite_flags4(slot, flags4);
         if result {
             self.sprite_nullify_hookshot_drag();
             self.w8(0x372, 0);
@@ -570,12 +568,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         slot: usize,
         result: &mut PrepOamCoordsRet,
     ) -> bool {
-        self.set_arr(SPRITE_PAUSE, slot, 0);
+        self.ram.set_sprite_pause(slot, 0);
         let x = self.r16(0xfd8).wrapping_sub(self.r16(0xe2));
         let y = self.r16(0xfda).wrapping_sub(self.r16(0xe8));
         self.w16(0, x);
-        self.w16(2, y.wrapping_sub(u16::from(self.arr(SPRITE_Z, slot))));
-        result.flags = self.arr(SPRITE_OAM_FLAGS, slot) ^ self.arr(SPRITE_OBJ_PRIO, slot);
+        self.w16(2, y.wrapping_sub(u16::from(self.ram.sprite(slot).z())));
+        result.flags = self.ram.sprite(slot).oam_flags() ^ self.ram.sprite(slot).object_priority();
         result.r4 = 0;
         let extension = if self.hooks.enhanced_features0() & 1 != 0 {
             0x40
@@ -583,14 +581,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             0
         };
         let out_of_bounds = x.wrapping_add(0x40 + extension) >= 0x170 + extension * 2
-            || y.wrapping_add(0x40) >= 0x170 && self.arr(SPRITE_FLAGS4, slot) & 0x20 == 0;
+            || y.wrapping_add(0x40) >= 0x170 && self.ram.sprite(slot).flags4() & 0x20 == 0;
         if out_of_bounds {
-            self.set_arr(
-                SPRITE_PAUSE,
-                slot,
-                self.arr(SPRITE_PAUSE, slot).wrapping_add(1),
-            );
-            if self.arr(SPRITE_DEFL_BITS, slot) & 0x80 == 0 {
+            self.ram
+                .set_sprite_pause(slot, self.ram.sprite(slot).pause().wrapping_add(1));
+            if self.ram.sprite(slot).deflection_bits() & 0x80 == 0 {
                 self.sprite_kill_self(slot);
             }
         }
@@ -606,29 +601,29 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
     pub fn sprite_inactive_sprite(&mut self, slot: usize) {
         if self.r8(0x1b) == 0 {
-            self.w16(0xbc0 + slot * 2, 0xffff);
+            self.ram.set_sprite_scratch_n_word(slot, 0xffff);
         } else {
-            self.set_arr(0xbc0, slot, 0xff);
+            self.ram.set_sprite_scratch_n(slot, 0xff);
         }
     }
     pub fn sprite_func3(&mut self, slot: usize) {
-        self.set_arr(SPRITE_STATE, slot, 6);
-        self.set_arr(SPRITE_DELAY_MAIN, slot, 31);
-        self.set_arr(SPRITE_FLAGS2, slot, 3);
+        self.ram.set_sprite_state(slot, 6);
+        self.ram.set_sprite_main_delay(slot, 31);
+        self.ram.set_sprite_flags2(slot, 3);
     }
     pub fn sprite_func18(&mut self, slot: usize, new_type: u8) {
-        self.set_arr(SPRITE_TYPE, slot, new_type);
+        self.ram.set_sprite_kind(slot, new_type);
         self.sprite_prep_load_properties(slot);
         self.hooks.sprite_spawn_poof_garnish(&mut self.ram, slot);
         self.w8(0x12f, 0);
         self.hooks.sprite_sfx3_with_pan(&mut self.ram, slot, 0x32);
-        self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-        self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+        self.ram.set_sprite_hit_timer(slot, 0);
+        self.ram.set_sprite_damage(slot, 0);
     }
     pub fn sprite_hit_timer31(&mut self, slot: usize) {
-        if self.arr(SPRITE_TYPE, slot) == 0x7a
+        if self.ram.sprite(slot).kind() == 0x7a
             && self.r8(0xfff) == 0
-            && self.arr(SPRITE_HEALTH, slot) <= self.arr(SPRITE_GIVE_DAMAGE, slot)
+            && self.ram.sprite(slot).health() <= self.ram.sprite(slot).damage()
         {
             self.w16(0x1cf0, 0x140);
             self.sprite_show_message_minimal();
@@ -636,9 +631,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
     pub fn sprite_timers_and_oam(&mut self, slot: usize) {
         self.sprite_get_16_bit_coords(slot);
-        let bytes = (self.arr(SPRITE_FLAGS2, slot) & 0x1f).wrapping_add(1) * 4;
+        let bytes = (self.ram.sprite(slot).flags2() & 0x1f).wrapping_add(1) * 4;
         if self.r8(0xfb3) != 0 {
-            if self.arr(SPRITE_FLOOR, slot) != 0 {
+            if self.ram.sprite(slot).floor() != 0 {
                 self.oam_allocate_from_region_f(bytes);
             } else {
                 self.oam_allocate_from_region_d(bytes);
@@ -658,47 +653,42 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     self.set_arr(base, slot, value.wrapping_sub(1));
                 }
             }
-            let timer = self.arr(SPRITE_HIT_TIMER, slot) & 0x7f;
+            let timer = self.ram.sprite(slot).hit_timer() & 0x7f;
             if timer != 0 {
-                if self.arr(SPRITE_STATE, slot) >= 9 && timer == 31 {
+                if self.ram.sprite(slot).state() >= 9 && timer == 31 {
                     self.sprite_hit_timer31(slot);
-                } else if self.arr(SPRITE_STATE, slot) >= 9 && timer == 24 {
+                } else if self.ram.sprite(slot).state() >= 9 && timer == 24 {
                     self.sprite_mini_moldorm_recoil(slot);
                 }
-                if self.arr(SPRITE_GIVE_DAMAGE, slot) < 251 {
-                    self.set_arr(
-                        SPRITE_OBJ_PRIO,
+                if self.ram.sprite(slot).damage() < 251 {
+                    self.ram.set_sprite_object_priority(
                         slot,
-                        self.arr(SPRITE_HIT_TIMER, slot).wrapping_mul(2) & 0xe,
+                        self.ram.sprite(slot).hit_timer().wrapping_mul(2) & 0xe,
                     );
                 }
-                self.set_arr(
-                    SPRITE_HIT_TIMER,
-                    slot,
-                    self.arr(SPRITE_HIT_TIMER, slot).wrapping_sub(1),
-                );
+                self.ram
+                    .set_sprite_hit_timer(slot, self.ram.sprite(slot).hit_timer().wrapping_sub(1));
             } else {
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-                self.set_arr(SPRITE_OBJ_PRIO, slot, 0);
+                self.ram.set_sprite_hit_timer(slot, 0);
+                self.ram.set_sprite_object_priority(slot, 0);
             }
-            let value = self.arr(SPRITE_DELAY_AUX4, slot);
+            let value = self.ram.sprite(slot).aux4_delay();
             if value != 0 {
-                self.set_arr(SPRITE_DELAY_AUX4, slot, value.wrapping_sub(1));
+                self.ram.set_sprite_aux4_delay(slot, value.wrapping_sub(1));
             }
         }
         const PRIORITIES: [u8; 4] = [0x20, 0x10, 0x30, 0x30];
         let mut floor = self.r8(0xee);
         if floor != 3 {
-            floor = self.arr(SPRITE_FLOOR, slot);
+            floor = self.ram.sprite(slot).floor();
         }
-        self.set_arr(
-            SPRITE_OBJ_PRIO,
+        self.ram.set_sprite_object_priority(
             slot,
-            self.arr(SPRITE_OBJ_PRIO, slot) & 0xcf | PRIORITIES[usize::from(floor)],
+            self.ram.sprite(slot).object_priority() & 0xcf | PRIORITIES[usize::from(floor)],
         );
     }
     pub fn sprite_execute_single(&mut self, slot: usize) {
-        let state = self.arr(SPRITE_STATE, slot);
+        let state = self.ram.sprite(slot).state();
         if state != 0 {
             self.sprite_timers_and_oam(slot);
         }
@@ -724,7 +714,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.w8(0xffa, 0);
             return;
         }
-        for slot in (0..16).rev() {
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
             self.w8(0xfa0, slot as u8);
             if self.arr(0x1d00, slot) != 0 {
                 self.uncache_and_execute_sprite(slot);
@@ -766,7 +757,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.hooks.ancilla_main(&mut self.ram);
         self.hooks.overlord_main(&mut self.ram);
         self.w8(0xb9a, 0);
-        for slot in (0..16).rev() {
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
             self.w8(0xfa0, slot as u8);
             self.sprite_execute_single(slot);
         }
@@ -811,7 +803,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.set_arr(live, slot, self.arr(cached, slot));
         }
         self.sprite_execute_single(slot);
-        if self.arr(SPRITE_PAUSE, slot) != 0 {
+        if self.ram.sprite(slot).pause() != 0 {
             self.set_arr(0x1d00, slot, 0);
         }
         for ((live, _), value) in MAP.into_iter().zip(backup) {
@@ -866,7 +858,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
     pub fn sprite_prep_load_properties(&mut self, slot: usize) {
         self.sprite_prep_reset_properties(slot);
-        let kind = usize::from(self.arr(SPRITE_TYPE, slot));
+        let kind = usize::from(self.ram.sprite(slot).kind());
         for (base, value) in [
             (SPRITE_FLAGS2, SPRITE_INIT_FLAGS2[kind]),
             (SPRITE_HEALTH, SPRITE_INIT_HEALTH[kind]),
@@ -885,12 +877,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         } else {
             self.r8(0x40a)
         };
-        self.set_arr(SPRITE_ROOM, slot, room);
+        self.ram.set_sprite_room(slot, room);
     }
     pub fn sprite_prep_load_palette(&mut self, slot: usize) {
-        let flags = SPRITE_INIT_FLAGS3[usize::from(self.arr(SPRITE_TYPE, slot))];
-        self.set_arr(SPRITE_FLAGS3, slot, flags);
-        self.set_arr(SPRITE_OAM_FLAGS, slot, flags & 15);
+        let flags = SPRITE_INIT_FLAGS3[usize::from(self.ram.sprite(slot).kind())];
+        self.ram.set_sprite_flags3(slot, flags);
+        self.ram.set_sprite_oam_flags(slot, flags & 15);
     }
     pub fn oam_get_buffer_position(&mut self, number: u8, region: u8) -> u8 {
         let index = usize::from(region >> 1);
@@ -961,8 +953,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.sprite_add_xy(slot, [0, 0, -1, 1][i], [-1, 1, 0, 0][i]);
     }
     pub fn sprite_func8(&mut self, slot: usize) {
-        self.set_arr(SPRITE_STATE, slot, 1);
-        self.set_arr(SPRITE_DELAY_MAIN, slot, 0x1f);
+        self.ram.set_sprite_state(slot, 1);
+        self.ram.set_sprite_main_delay(slot, 0x1f);
         self.w8(0x12e, 0);
         self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x20);
     }
@@ -970,11 +962,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     pub fn sprite_func22(&mut self, slot: usize) {
         let sound = SoundRequest::at_world_x(&self.ram, 0x28, self.sprite_get_x(slot));
         SoundPort::EffectsA.overwrite(&mut self.ram, sound);
-        self.set_arr(SPRITE_STATE, slot, 3);
-        self.set_arr(SPRITE_DELAY_MAIN, slot, 15);
-        self.set_arr(SPRITE_AI_STATE, slot, 0);
+        self.ram.set_sprite_state(slot, 3);
+        self.ram.set_sprite_main_delay(slot, 15);
+        self.ram.set_sprite_ai_state(slot, 0);
         self.hooks.random_u8(&mut self.ram);
-        self.set_arr(SPRITE_FLAGS2, slot, 3);
+        self.ram.set_sprite_flags2(slot, 3);
     }
     pub fn sprite_spawn_dynamically_ex(
         &mut self,
@@ -985,26 +977,28 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     ) -> i32 {
         while candidate >= 0 {
             let slot = candidate as usize;
-            if self.arr(SPRITE_STATE, slot) == 0 {
-                self.set_arr(SPRITE_TYPE, slot, kind);
-                self.set_arr(SPRITE_STATE, slot, 9);
+            if self.ram.sprite(slot).state() == 0 {
+                self.ram.set_sprite_kind(slot, kind);
+                self.ram.set_sprite_state(slot, 9);
                 info.r0_x = self.sprite_get_x(parent);
                 info.r2_y = self.sprite_get_y(parent);
-                info.r4_z = self.arr(SPRITE_Z, parent);
+                info.r4_z = self.ram.sprite(parent).z();
                 info.r5_overlord_x =
                     u16::from(self.arr(0xb08, parent)) | u16::from(self.arr(0xb10, parent)) << 8;
                 info.r7_overlord_y =
                     u16::from(self.arr(0xb18, parent)) | u16::from(self.arr(0xb20, parent)) << 8;
                 self.sprite_prep_load_properties(slot);
                 if self.r8(0x1b) == 0 {
-                    self.w16(0xbc0 + slot * 2, 0xffff);
+                    self.ram.set_sprite_scratch_n_word(slot, 0xffff);
                 } else {
-                    self.set_arr(0xbc0, slot, 0xff);
+                    self.ram.set_sprite_scratch_n(slot, 0xff);
                 }
-                self.set_arr(SPRITE_FLOOR, slot, self.arr(SPRITE_FLOOR, parent));
-                self.set_arr(SPRITE_D, slot, self.arr(SPRITE_D, parent));
-                self.set_arr(0xcba, slot, 0);
-                self.set_arr(0xe30, slot, 0);
+                self.ram
+                    .set_sprite_floor(slot, self.ram.sprite(parent).floor());
+                self.ram
+                    .set_sprite_scratch_d(slot, self.ram.sprite(parent).scratch_d());
+                self.ram.set_sprite_death_action(slot, 0);
+                self.ram.set_sprite_subtype(slot, 0);
                 return candidate;
             }
             candidate -= 1;
@@ -1020,11 +1014,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.sprite_spawn_dynamically_ex(parent, kind, info, 15)
     }
     pub fn sprite_kill_self(&mut self, slot: usize) {
-        if self.arr(SPRITE_DEFL_BITS, slot) & 0x40 == 0 && self.r8(0x1b) != 0 {
+        if self.ram.sprite(slot).deflection_bits() & 0x40 == 0 && self.r8(0x1b) != 0 {
             return;
         }
-        self.set_arr(SPRITE_STATE, slot, 0);
-        let block = self.r16(0xbc0 + slot * 2);
+        self.ram.set_sprite_state(slot, 0);
+        let block = self.ram.sprite(slot).scratch_n_word();
         self.w8(0, block as u8);
         self.w16(1, (block >> 3).wrapping_add(0xef80));
         if block != 0xffff {
@@ -1033,21 +1027,22 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.w8(address, self.r8(address) & !(0x80 >> (block & 7)));
         }
         if self.r8(0x1b) == 0 {
-            self.w16(0xbc0 + slot * 2, 0xffff);
+            self.ram.set_sprite_scratch_n_word(slot, 0xffff);
         } else {
-            self.set_arr(0xbc0, slot, 0xff);
+            self.ram.set_sprite_scratch_n(slot, 0xff);
         }
     }
     pub fn sprite_initialize_slots(&mut self) {
-        for slot in (0..16).rev() {
-            let state = self.arr(SPRITE_STATE, slot);
-            let kind = self.arr(SPRITE_TYPE, slot);
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
+            let state = self.ram.sprite(slot).state();
+            let kind = self.ram.sprite(slot).kind();
             if state == 10 && !matches!(kind, 0xec | 0xd2) {
                 self.w8(0x309, 0);
                 self.w8(0x308, 0);
-                self.set_arr(SPRITE_STATE, slot, 0);
-            } else if state != 0 && kind != 0x6c && self.arr(SPRITE_ROOM, slot) != self.r8(0x40a) {
-                self.set_arr(SPRITE_STATE, slot, 0);
+                self.ram.set_sprite_state(slot, 0);
+            } else if state != 0 && kind != 0x6c && self.ram.sprite(slot).room() != self.r8(0x40a) {
+                self.ram.set_sprite_state(slot, 0);
             }
         }
         for slot in (0..8).rev() {
@@ -1057,9 +1052,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
     }
     pub fn sprite_initialize_mirror_portal(&mut self) {
-        for slot in (0..16).rev() {
-            if self.arr(SPRITE_STATE, slot) != 0 && self.arr(SPRITE_TYPE, slot) == 0x6c {
-                self.set_arr(SPRITE_STATE, slot, 0);
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
+            if self.ram.sprite(slot).state() != 0 && self.ram.sprite(slot).kind() == 0x6c {
+                self.ram.set_sprite_state(slot, 0);
             }
         }
         let mut info = SpriteSpawnInfo::default();
@@ -1074,15 +1070,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             (u16::from(self.arr(0x1ad0, 15)) | u16::from(self.arr(0x1ae0, 15)) << 8)
                 .wrapping_add(8),
         );
-        self.set_arr(SPRITE_FLOOR, slot, 0);
-        self.set_arr(SPRITE_IGNORE_PROJECTILE, slot, 1);
+        self.ram.set_sprite_floor(slot, 0);
+        self.ram.set_sprite_ignore_projectile(slot, 1);
     }
     pub fn sprite_disable_all(&mut self) {
-        for slot in (0..16).rev() {
-            if self.arr(SPRITE_STATE, slot) != 0
-                && (self.r8(0x1b) != 0 || self.arr(SPRITE_TYPE, slot) != 0x6c)
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
+            if self.ram.sprite(slot).state() != 0
+                && (self.r8(0x1b) != 0 || self.ram.sprite(slot).kind() != 0x6c)
             {
-                self.set_arr(SPRITE_STATE, slot, 0);
+                self.ram.set_sprite_state(slot, 0);
             }
         }
         for slot in (0..10).rev() {
@@ -1118,13 +1115,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
     pub fn sprite_manually_set_death_flag_uw(&mut self, slot: usize) {
         if self.r8(0x1b) == 0
-            || self.arr(SPRITE_DEFL_BITS, slot) & 1 != 0
-            || (self.arr(0xbc0, slot) as i8) < 0
+            || self.ram.sprite(slot).deflection_bits() & 1 != 0
+            || (self.ram.sprite(slot).scratch_n() as i8) < 0
         {
             return;
         }
         let address = 0x1df80 + usize::from(self.r16(0x48e)) * 2;
-        self.w16(address, self.r16(address) | 1u16 << self.arr(0xbc0, slot));
+        self.w16(
+            address,
+            self.r16(address) | 1u16 << self.ram.sprite(slot).scratch_n(),
+        );
     }
     pub fn dungeon_load_single_sprite(&mut self, slot: usize, source: &[u8]) -> usize {
         let y = source[0];
@@ -1132,7 +1132,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let kind = source[2];
         if kind == 0xe4 && matches!(y, 0xfe | 0xfd) {
             let previous = slot.wrapping_sub(1);
-            self.set_arr(SPRITE_DIE_ACTION, previous, if y == 0xfe { 1 } else { 2 });
+            self.ram
+                .set_sprite_death_action(previous, if y == 0xfe { 1 } else { 2 });
             return previous;
         }
         if kind != 0xe4 && x >= 0xe0 {
@@ -1145,9 +1146,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         {
             return slot;
         }
-        self.set_arr(SPRITE_STATE, slot, 8);
+        self.ram.set_sprite_state(slot, 8);
         self.w8(0xfb5, y);
-        self.set_arr(SPRITE_FLOOR, slot, y >> 7);
+        self.ram.set_sprite_floor(slot, y >> 7);
         self.sprite_set_y(
             slot,
             (u16::from(y) << 4 & 0x1ff).wrapping_add(u16::from(self.r8(0xfb1)) << 8),
@@ -1157,11 +1158,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             slot,
             (u16::from(x) << 4 & 0x1ff).wrapping_add(u16::from(self.r8(0xfb0)) << 8),
         );
-        self.set_arr(SPRITE_TYPE, slot, kind);
+        self.ram.set_sprite_kind(slot, kind);
         self.w8(0xfb5, (self.r8(0xfb5) & 0x60) >> 2);
-        self.set_arr(SPRITE_SUBTYPE, slot, self.r8(0xfb5) | self.r8(0xfb6) >> 5);
-        self.set_arr(0xbc0, slot, slot as u8);
-        self.set_arr(SPRITE_DIE_ACTION, slot, 0);
+        self.ram
+            .set_sprite_subtype(slot, self.r8(0xfb5) | self.r8(0xfb6) >> 5);
+        self.ram.set_sprite_scratch_n(slot, slot as u8);
+        self.ram.set_sprite_death_action(slot, 0);
         slot
     }
 
@@ -1197,7 +1199,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return;
         }
         self.w8(0xffa, self.r8(0x1b));
-        for slot in (0..16).rev() {
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
             self.set_arr(0x1d00, slot, 0);
             for (destination, source) in [
                 (0x1d10, SPRITE_TYPE),
@@ -1209,7 +1212,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             ] {
                 self.set_arr(destination, slot, self.arr(source, slot));
             }
-            if self.arr(SPRITE_PAUSE, slot) != 0 || matches!(self.arr(SPRITE_STATE, slot), 4 | 10) {
+            if self.ram.sprite(slot).pause() != 0 || matches!(self.ram.sprite(slot).state(), 4 | 10)
+            {
                 continue;
             }
             for (destination, source) in [
@@ -1299,89 +1303,88 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return;
         }
         let spawned = spawned as usize;
-        self.set_arr(
-            SPRITE_AI_STATE,
-            spawned,
-            SPAWN_SECRET_ITEM_SPAWN_FLAG[index],
-        );
-        self.set_arr(
-            SPRITE_IGNORE_PROJECTILE,
-            spawned,
-            SPAWN_SECRET_ITEM_IGNORE_PROJ[index],
-        );
-        self.set_arr(SPRITE_Z_VEL, spawned, SPAWN_SECRET_ITEM_Z_VEL[index]);
+        self.ram
+            .set_sprite_ai_state(spawned, SPAWN_SECRET_ITEM_SPAWN_FLAG[index]);
+        self.ram
+            .set_sprite_ignore_projectile(spawned, SPAWN_SECRET_ITEM_IGNORE_PROJ[index]);
+        self.ram
+            .set_sprite_velocity_z(spawned, SPAWN_SECRET_ITEM_Z_VEL[index]);
         self.sprite_set_x(
             spawned,
             info.r0_x
                 .wrapping_add(u16::from(SPAWN_SECRET_ITEM_X_LO[index])),
         );
         self.sprite_set_y(spawned, info.r2_y);
-        self.set_arr(SPRITE_Z, spawned, info.r4_z);
-        self.set_arr(SPRITE_GRAPHICS, spawned, 0);
-        self.set_arr(SPRITE_DELAY_AUX4, spawned, 32);
-        self.set_arr(SPRITE_DELAY_AUX2, spawned, 48);
+        self.ram.set_sprite_z(spawned, info.r4_z);
+        self.ram.set_sprite_graphics(spawned, 0);
+        self.ram.set_sprite_aux4_delay(spawned, 32);
+        self.ram.set_sprite_aux2_delay(spawned, 48);
         match kind {
             0xe4 => {
                 self.hooks.sprite_prep_small_key(&mut self.ram, spawned);
-                self.set_arr(SPRITE_STUNNED, spawned, 0xff);
+                self.ram.set_sprite_stunned(spawned, 0xff);
             }
             0x0b => {
                 self.w8(0x12e, 0x30);
                 if self.r8(0x48e) == 1 {
-                    self.set_arr(SPRITE_SUBTYPE, spawned, 1);
+                    self.ram.set_sprite_subtype(spawned, 1);
                 }
-                self.set_arr(SPRITE_STUNNED, spawned, 0xff);
+                self.ram.set_sprite_stunned(spawned, 0xff);
             }
             0x41 | 0x42 => {
                 self.w8(0x12f, 4);
-                self.set_arr(SPRITE_GIVE_DAMAGE, spawned, 0);
-                self.set_arr(SPRITE_HIT_TIMER, spawned, 160);
+                self.ram.set_sprite_damage(spawned, 0);
+                self.ram.set_sprite_hit_timer(spawned, 160);
             }
-            0x3e => self.set_arr(SPRITE_OAM_FLAGS, spawned, 9),
+            0x3e => self.ram.set_sprite_oam_flags(spawned, 9),
             _ => {
-                self.set_arr(SPRITE_STUNNED, spawned, 0xff);
+                self.ram.set_sprite_stunned(spawned, 0xff);
                 if kind == 0x79 {
-                    self.set_arr(SPRITE_A, spawned, 32);
+                    self.ram.set_sprite_scratch_a(spawned, 32);
                 }
             }
         }
     }
 
     pub fn sprite_spawn_throwable_terrain_silently(&mut self, what: u8, x: u16, y: u16) -> i32 {
-        let Some(slot) = (0..16)
-            .rev()
-            .find(|&slot| self.arr(SPRITE_STATE, slot) == 0)
+        let Some(slot) = self
+            .ram
+            .sprites()
+            .find_inactive_rev()
+            .map(SpriteSlot::index)
         else {
             return -1;
         };
-        self.set_arr(SPRITE_STATE, slot, 10);
-        self.set_arr(SPRITE_TYPE, slot, 0xec);
+        self.ram.set_sprite_state(slot, 10);
+        self.ram.set_sprite_kind(slot, 0xec);
         self.sprite_set_x(slot, x);
         self.sprite_set_y(slot, y);
         self.sprite_prep_load_properties(slot);
-        self.set_arr(SPRITE_FLOOR, slot, self.r8(0xee));
-        self.set_arr(SPRITE_C, slot, what);
+        self.ram.set_sprite_floor(slot, self.r8(0xee));
+        self.ram.set_sprite_scratch_c(slot, what);
         if what >= 6 {
-            self.set_arr(SPRITE_FLAGS2, slot, 0xa6);
+            self.ram.set_sprite_flags2(slot, 0xa6);
         }
         let mut flags = self.hooks.throwable_scenery_flags(what);
         if what == 2 && self.r8(0x1b) != 0 {
-            self.set_arr(SPRITE_OAM_FLAGS, slot, 0x80);
+            self.ram.set_sprite_oam_flags(slot, 0x80);
             flags = 0x50;
         }
-        self.set_arr(SPRITE_OAM_FLAGS, slot, flags);
-        self.set_arr(SPRITE_UNK4, slot, 9);
+        self.ram.set_sprite_oam_flags(slot, flags);
+        self.ram.set_sprite_unknown4(slot, 9);
         self.w8(0x314, 2);
         self.w8(0xfb2, 2);
-        self.set_arr(SPRITE_DELAY_MAIN, slot, 16);
-        self.set_arr(SPRITE_FLOOR, slot, self.r8(0xee));
-        self.set_arr(SPRITE_GRAPHICS, slot, 0);
+        self.ram.set_sprite_main_delay(slot, 16);
+        self.ram.set_sprite_floor(slot, self.r8(0xee));
+        self.ram.set_sprite_graphics(slot, 0);
         if self.r8(0xb9c) != 0xff {
-            if self.r8(0xb9c) | self.r8(0x1b) == 0 && self.arr(SPRITE_C, slot).wrapping_sub(2) < 2 {
+            if self.r8(0xb9c) | self.r8(0x1b) == 0
+                && self.ram.sprite(slot).scratch_c().wrapping_sub(2) < 2
+            {
                 self.overworld_substitute_alternate_secret();
             }
             if self.r16(0xb9c) & 0x80 != 0 {
-                self.set_arr(SPRITE_GRAPHICS, slot, self.r8(0xb9c) & 0x7f);
+                self.ram.set_sprite_graphics(slot, self.r8(0xb9c) & 0x7f);
                 self.w8(0xb9c, 0);
             }
             self.sprite_spawn_secret(slot);
@@ -1407,17 +1410,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_schedule_for_breakage(&mut self, slot: usize) {
-        self.set_arr(SPRITE_DELAY_MAIN, slot, 31);
-        self.set_arr(SPRITE_STATE, slot, 6);
-        self.set_arr(
-            SPRITE_FLAGS2,
-            slot,
-            self.arr(SPRITE_FLAGS2, slot).wrapping_add(4),
-        );
+        self.ram.set_sprite_main_delay(slot, 31);
+        self.ram.set_sprite_state(slot, 6);
+        self.ram
+            .set_sprite_flags2(slot, self.ram.sprite(slot).flags2().wrapping_add(4));
     }
 
     pub fn throwable_scenery_transmute_to_debris(&mut self, slot: usize) {
-        let graphics = self.arr(SPRITE_GRAPHICS, slot);
+        let graphics = self.ram.sprite(slot).graphics();
         if graphics != 0 {
             self.w8(0xb9c, graphics);
             self.sprite_spawn_secret(slot);
@@ -1426,7 +1426,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let kind = if self.r8(0x1b) != 0 {
             0
         } else {
-            self.arr(SPRITE_C, slot)
+            self.ram.sprite(slot).scratch_c()
         };
         self.w8(0x12e, 0);
         self.hooks
@@ -1435,7 +1435,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn throwable_scenery_transmute_if_valid(&mut self, slot: usize) {
-        if self.arr(SPRITE_TYPE, slot) == 0xec {
+        if self.ram.sprite(slot).kind() == 0xec {
             self.w8(0xfac, 0);
             self.throwable_scenery_transmute_to_debris(slot);
         }
@@ -1455,10 +1455,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let spawned = spawned as usize;
         self.sprite_set_spawned_coordinates(spawned, info);
-        self.set_arr(SPRITE_AI_STATE, spawned, 2);
-        self.set_arr(SPRITE_DELAY_MAIN, spawned, 48);
-        if self.arr(SPRITE_TYPE, slot) == 0xd2 {
-            self.set_arr(SPRITE_A, spawned, 0xd2);
+        self.ram.set_sprite_ai_state(spawned, 2);
+        self.ram.set_sprite_main_delay(spawned, 48);
+        if self.ram.sprite(slot).kind() == 0xd2 {
+            self.ram.set_sprite_scratch_a(spawned, 0xd2);
         }
     }
 
@@ -1472,15 +1472,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn sprite_stunned_main_func1(&mut self, slot: usize) {
         self.run_sprite_active_main(slot);
-        if self.arr(SPRITE_UNK5, slot) != 0 {
-            if self.arr(SPRITE_DELAY_MAIN, slot) < 32 {
-                self.set_arr(
-                    SPRITE_OAM_FLAGS,
-                    slot,
-                    self.arr(SPRITE_OAM_FLAGS, slot) & 0xf1 | 4,
-                );
+        if self.ram.sprite(slot).unknown5() != 0 {
+            if self.ram.sprite(slot).main_delay() < 32 {
+                self.ram
+                    .set_sprite_oam_flags(slot, self.ram.sprite(slot).oam_flags() & 0xf1 | 4);
             }
-            let timer = self.arr(SPRITE_DELAY_MAIN, slot);
+            let timer = self.ram.sprite(slot).main_delay();
             let t = (((slot as u8) << 4) ^ self.r8(0x1a)) | self.r8(0x11);
             if t & SPRITE_STUNNED_MAIN_FUNC1_MASKS[usize::from(timer >> 4)] != 0 {
                 return;
@@ -1494,42 +1491,44 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             if self.r8(0x1a) & 1 != 0 || self.r8(0x11) != 0 || self.r8(0xfc1) != 0 {
                 return;
             }
-            let timer = self.arr(SPRITE_STUNNED, slot);
+            let timer = self.ram.sprite(slot).stunned();
             if timer != 0 {
-                self.set_arr(SPRITE_STUNNED, slot, timer.wrapping_sub(1));
+                self.ram.set_sprite_stunned(slot, timer.wrapping_sub(1));
                 if timer < 0x38 {
-                    self.set_arr(SPRITE_X_VEL, slot, if timer & 1 != 0 { 0xf8 } else { 8 });
+                    self.ram
+                        .set_sprite_velocity_x(slot, if timer & 1 != 0 { 0xf8 } else { 8 });
                     self.sprite_move_x(slot);
                 }
                 return;
             }
-            self.set_arr(SPRITE_STATE, slot, 9);
-            self.set_arr(SPRITE_X_RECOIL, slot, 0);
-            self.set_arr(SPRITE_Y_RECOIL, slot, 0);
+            self.ram.set_sprite_state(slot, 9);
+            self.ram.set_sprite_recoil_x(slot, 0);
+            self.ram.set_sprite_recoil_y(slot, 0);
         }
     }
 
     pub fn sprite_module_carried(&mut self, slot: usize) {
-        self.set_arr(SPRITE_ROOM, slot, self.r16(0x40a) as u8);
-        if self.arr(SPRITE_UNK3, slot) != 3 {
-            if self.arr(SPRITE_DELAY_MAIN, slot) == 0 {
-                self.set_arr(
-                    SPRITE_DELAY_MAIN,
+        self.ram.set_sprite_room(slot, self.r16(0x40a) as u8);
+        if self.ram.sprite(slot).unknown3() != 3 {
+            if self.ram.sprite(slot).main_delay() == 0 {
+                self.ram.set_sprite_main_delay(
                     slot,
-                    if self.arr(SPRITE_C, slot) == 6 { 8 } else { 4 },
+                    if self.ram.sprite(slot).scratch_c() == 6 {
+                        8
+                    } else {
+                        4
+                    },
                 );
-                self.set_arr(
-                    SPRITE_UNK3,
-                    slot,
-                    self.arr(SPRITE_UNK3, slot).wrapping_add(1),
-                );
+                self.ram
+                    .set_sprite_unknown3(slot, self.ram.sprite(slot).unknown3().wrapping_add(1));
             }
         } else {
-            self.set_arr(SPRITE_FLAGS3, slot, self.arr(SPRITE_FLAGS3, slot) & !0x10);
+            self.ram
+                .set_sprite_flags3(slot, self.ram.sprite(slot).flags3() & !0x10);
         }
-        let timer = self.arr(SPRITE_DELAY_AUX4, slot).wrapping_sub(1);
+        let timer = self.ram.sprite(slot).aux4_delay().wrapping_sub(1);
         let shake = u8::from(timer < 63 && timer & 2 != 0);
-        let index = usize::from(self.r8(0x2f)) * 2 + usize::from(self.arr(SPRITE_UNK3, slot));
+        let index = usize::from(self.r8(0x2f)) * 2 + usize::from(self.ram.sprite(slot).unknown3());
         let offset = SPRITE_HELD_X[index] as u8;
         let t0 = u16::from(self.r16(0x22) as u8) + u16::from(offset);
         let t1 = u16::from(t0 as u8) + ((t0 >> 8) & 1) + u16::from(shake);
@@ -1537,26 +1536,27 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             + ((t1 >> 8) & 1)
             + ((t0 >> 8) & 1)
             + u16::from((i16::from(SPRITE_HELD_X[index]) >> 8) as u8);
-        self.set_arr(SPRITE_X_LO, slot, t1 as u8);
-        self.set_arr(SPRITE_X_HI, slot, t2 as u8);
-        self.set_arr(SPRITE_Z, slot, SPRITE_HELD_Z[index]);
+        self.ram.set_sprite_x_low(slot, t1 as u8);
+        self.ram.set_sprite_x_high(slot, t2 as u8);
+        self.ram.set_sprite_z(slot, SPRITE_HELD_Z[index]);
         let animation = usize::from(if self.r8(0x2e) < 6 { self.r8(0x2e) } else { 0 });
         let z = self
             .r16(0x24)
             .wrapping_add(1)
             .wrapping_add(u16::from(SPRITE_HELD_Z_FOR_FRAME[animation]));
         self.sprite_set_y(slot, self.r16(0x20).wrapping_add(8).wrapping_sub(z));
-        self.set_arr(SPRITE_FLOOR, slot, self.r8(0xee) & 1);
+        self.ram.set_sprite_floor(slot, self.r8(0xee) & 1);
         self.carried_sprite_check_for_throw(slot);
         self.sprite_get_16_bit_coords(slot);
-        if self.arr(SPRITE_UNK4, slot) != 11 {
+        if self.ram.sprite(slot).unknown4() != 11 {
             self.run_sprite_active_main(slot);
-            if self.arr(SPRITE_DELAY_AUX4, slot) == 1 {
-                self.set_arr(SPRITE_STATE, slot, 9);
-                self.set_arr(SPRITE_B, slot, 0);
-                self.set_arr(SPRITE_DELAY_AUX4, slot, 96);
-                self.set_arr(SPRITE_Z_VEL, slot, 32);
-                self.set_arr(SPRITE_FLAGS3, slot, self.arr(SPRITE_FLAGS3, slot) | 0x10);
+            if self.ram.sprite(slot).aux4_delay() == 1 {
+                self.ram.set_sprite_state(slot, 9);
+                self.ram.set_sprite_scratch_b(slot, 0);
+                self.ram.set_sprite_aux4_delay(slot, 96);
+                self.ram.set_sprite_velocity_z(slot, 32);
+                self.ram
+                    .set_sprite_flags3(slot, self.ram.sprite(slot).flags3() | 0x10);
                 self.w8(0x309, 2);
             }
         } else {
@@ -1579,7 +1579,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     self.r8(0x46)
                 };
             if busy == 0 {
-                if self.arr(SPRITE_UNK3, slot) != 3 || (self.r8(0xf4) | self.r8(0xf6)) & 0x80 == 0 {
+                if self.ram.sprite(slot).unknown3() != 3
+                    || (self.r8(0xf4) | self.r8(0xf6)) & 0x80 == 0
+                {
                     return;
                 }
                 self.w8(0xf6, self.r8(0xf6) & 0x7f);
@@ -1587,20 +1589,23 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         self.hooks.sprite_sfx3_with_pan(&mut self.ram, slot, 0x13);
         self.w8(0x309, 2);
-        self.set_arr(SPRITE_STATE, slot, self.arr(SPRITE_UNK4, slot));
-        self.set_arr(SPRITE_Z_VEL, slot, 0);
-        self.set_arr(SPRITE_UNK3, slot, 0);
-        let kind = usize::from(self.arr(SPRITE_TYPE, slot));
-        self.set_arr(
-            SPRITE_FLAGS3,
+        self.ram
+            .set_sprite_state(slot, self.ram.sprite(slot).unknown4());
+        self.ram.set_sprite_velocity_z(slot, 0);
+        self.ram.set_sprite_unknown3(slot, 0);
+        let kind = usize::from(self.ram.sprite(slot).kind());
+        self.ram.set_sprite_flags3(
             slot,
-            (self.arr(SPRITE_FLAGS3, slot) & !0x10) | (SPRITE_INIT_FLAGS3[kind] & 0x10),
+            (self.ram.sprite(slot).flags3() & !0x10) | (SPRITE_INIT_FLAGS3[kind] & 0x10),
         );
         let direction = usize::from(self.r8(0x2f) >> 1);
-        self.set_arr(SPRITE_X_VEL, slot, SPRITE_HELD_THROW_X_VEL[direction] as u8);
-        self.set_arr(SPRITE_Y_VEL, slot, SPRITE_HELD_THROW_Y_VEL[direction] as u8);
-        self.set_arr(SPRITE_Z_VEL, slot, SPRITE_HELD_THROW_Z_VEL[direction]);
-        self.set_arr(SPRITE_DELAY_AUX4, slot, 0);
+        self.ram
+            .set_sprite_velocity_x(slot, SPRITE_HELD_THROW_X_VEL[direction] as u8);
+        self.ram
+            .set_sprite_velocity_y(slot, SPRITE_HELD_THROW_Y_VEL[direction] as u8);
+        self.ram
+            .set_sprite_velocity_z(slot, SPRITE_HELD_THROW_Z_VEL[direction]);
+        self.ram.set_sprite_aux4_delay(slot, 0);
     }
 
     pub fn sprite_module_stunned(&mut self, slot: usize) {
@@ -1613,27 +1618,27 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn throwable_scenery_interact_with_sprites_and_tiles(&mut self, slot: usize) {
         self.sprite_move_xy(slot);
-        if self.arr(SPRITE_E, slot) == 0 {
+        if self.ram.sprite(slot).scratch_e() == 0 {
             self.sprite_check_tile_collision(slot);
         }
         self.thrown_sprite_tile_and_sprite_interaction(slot);
     }
 
     pub fn thrown_sprite_check_damage_to_sprites(&mut self, slot: usize) {
-        if self.arr(SPRITE_DELAY_AUX4, slot) != 0
-            || self.arr(SPRITE_X_VEL, slot) | self.arr(SPRITE_Y_VEL, slot) == 0
+        if self.ram.sprite(slot).aux4_delay() != 0
+            || self.ram.sprite(slot).velocity_x() | self.ram.sprite(slot).velocity_y() == 0
         {
             return;
         }
         for other in (0..16).rev() {
             if other != self.r8(0xfa0) as usize
-                && self.arr(SPRITE_TYPE, slot) != 0xd2
-                && self.arr(SPRITE_STATE, other) >= 9
+                && self.ram.sprite(slot).kind() != 0xd2
+                && self.ram.sprite(other).state() >= 9
                 && (((other as u8 ^ self.r8(0x1a)) & 3)
-                    | self.arr(SPRITE_IGNORE_PROJECTILE, other)
-                    | self.arr(SPRITE_HIT_TIMER, other))
+                    | self.ram.sprite(other).ignore_projectile()
+                    | self.ram.sprite(other).hit_timer())
                     == 0
-                && self.arr(SPRITE_FLOOR, slot) == self.arr(SPRITE_FLOOR, other)
+                && self.ram.sprite(slot).floor() == self.ram.sprite(other).floor()
             {
                 self.thrown_sprite_check_damage_to_single_sprite(slot, other);
             }
@@ -1642,16 +1647,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn thrown_sprite_check_damage_to_single_sprite(&mut self, slot: usize, other: usize) {
         let mut hitbox = SpriteHitBox {
-            r0_xlo: self.arr(SPRITE_X_LO, slot),
-            r8_xhi: self.arr(SPRITE_X_HI, slot),
+            r0_xlo: self.ram.sprite(slot).x_low(),
+            r8_xhi: self.ram.sprite(slot).x_high(),
             r2: 15,
             ..SpriteHitBox::default()
         };
-        let y = i16::from(self.arr(SPRITE_Y_LO, slot)) - i16::from(self.arr(SPRITE_Z, slot));
+        let y = i16::from(self.ram.sprite(slot).y_low()) - i16::from(self.ram.sprite(slot).z());
         let adjusted = u16::from(y as u8) + 8;
         hitbox.r1_ylo = adjusted as u8;
         hitbox.r9_yhi = self
-            .arr(SPRITE_Y_HI, slot)
+            .ram
+            .sprite(slot)
+            .y_high()
             .wrapping_add((adjusted >> 8) as u8)
             .wrapping_sub(u8::from(y < 0));
         hitbox.r3 = 8;
@@ -1659,11 +1666,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if !Self::check_if_hit_boxes_overlap(&hitbox) {
             return;
         }
-        if self.arr(SPRITE_TYPE, other) == 0x3f {
+        if self.ram.sprite(other).kind() == 0x3f {
             self.sprite_place_weapon_tink(slot);
         } else {
-            let damage = if self.arr(SPRITE_TYPE, slot) == 0xec
-                && self.arr(SPRITE_C, slot) == 2
+            let damage = if self.ram.sprite(slot).kind() == 0xec
+                && self.ram.sprite(slot).scratch_c() == 2
                 && self.r8(0x1b) == 0
             {
                 1
@@ -1671,24 +1678,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 3
             };
             self.ancilla_check_damage_to_sprite_preset(other, damage);
-            self.set_arr(
-                SPRITE_X_RECOIL,
-                other,
-                self.arr(SPRITE_X_VEL, slot).wrapping_mul(2),
-            );
-            self.set_arr(
-                SPRITE_Y_RECOIL,
-                other,
-                self.arr(SPRITE_Y_VEL, slot).wrapping_mul(2),
-            );
-            self.set_arr(SPRITE_DELAY_AUX4, slot, 16);
+            self.ram
+                .set_sprite_recoil_x(other, self.ram.sprite(slot).velocity_x().wrapping_mul(2));
+            self.ram
+                .set_sprite_recoil_y(other, self.ram.sprite(slot).velocity_y().wrapping_mul(2));
+            self.ram.set_sprite_aux4_delay(slot, 16);
         }
         self.sprite_apply_ricochet(slot);
     }
 
     pub fn sprite_check_tile_collision(&mut self, slot: usize) -> u8 {
         self.sprite_check_tile_collision2(slot);
-        self.arr(SPRITE_WALLCOLL, slot)
+        self.ram.sprite(slot).wall_collision()
     }
 
     pub fn sprite_stunned_main_ex(&mut self, slot: usize, second_entry: bool) {
@@ -1698,69 +1699,68 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             if self.sprite_return_if_paused(slot) {
                 return;
             }
-            if self.arr(SPRITE_F, slot) != 0 {
-                if (self.arr(SPRITE_F, slot) as i8) < 0 {
-                    self.set_arr(SPRITE_F, slot, 0);
+            if self.ram.sprite(slot).scratch_f() != 0 {
+                if (self.ram.sprite(slot).scratch_f() as i8) < 0 {
+                    self.ram.set_sprite_scratch_f(slot, 0);
                 }
                 self.sprite_zero_velocity_xy(slot);
             }
-            if self.arr(SPRITE_DELAY_MAIN, slot) < 0x20 {
+            if self.ram.sprite(slot).main_delay() < 0x20 {
                 self.sprite_check_damage_from_link(slot);
             }
             if self.sprite_return_if_recoiling(slot) {
                 return;
             }
             self.sprite_move_xy(slot);
-            if self.arr(SPRITE_E, slot) == 0 {
+            if self.ram.sprite(slot).scratch_e() == 0 {
                 self.sprite_check_tile_collision(slot);
-                if self.arr(SPRITE_STATE, slot) == 0 {
+                if self.ram.sprite(slot).state() == 0 {
                     return;
                 }
             }
         }
-        if self.arr(SPRITE_WALLCOLL, slot) & 0x0f != 0 {
+        if self.ram.sprite(slot).wall_collision() & 0x0f != 0 {
             self.sprite_apply_ricochet(slot);
-            if self.arr(SPRITE_STATE, slot) == 11 {
+            if self.ram.sprite(slot).state() == 11 {
                 self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 5);
             }
         }
         self.sprite_check_tile_property(slot, 0x68);
-        let kind = usize::from(self.arr(SPRITE_TYPE, slot));
+        let kind = usize::from(self.ram.sprite(slot).kind());
         if SPRITE_INIT_FLAGS3[kind] & 0x10 != 0 {
-            self.set_arr(SPRITE_FLAGS3, slot, self.arr(SPRITE_FLAGS3, slot) | 0x10);
+            self.ram
+                .set_sprite_flags3(slot, self.ram.sprite(slot).flags3() | 0x10);
             if self.r8(0xfa5) == 32 {
-                self.set_arr(SPRITE_FLAGS3, slot, self.arr(SPRITE_FLAGS3, slot) & !0x10);
+                self.ram
+                    .set_sprite_flags3(slot, self.ram.sprite(slot).flags3() & !0x10);
             }
         }
         self.sprite_move_z(slot);
-        self.set_arr(
-            SPRITE_Z_VEL,
-            slot,
-            self.arr(SPRITE_Z_VEL, slot).wrapping_sub(2),
-        );
-        let z_test = self.arr(SPRITE_Z, slot).wrapping_sub(1);
+        self.ram
+            .set_sprite_velocity_z(slot, self.ram.sprite(slot).velocity_z().wrapping_sub(2));
+        let z_test = self.ram.sprite(slot).z().wrapping_sub(1);
         if z_test >= 0xf0 {
-            self.set_arr(SPRITE_Z, slot, 0);
-            if self.arr(SPRITE_TYPE, slot) == 0xe8
-                && (self.arr(SPRITE_Z_VEL, slot).wrapping_sub(0xe8) as i8) < 0
+            self.ram.set_sprite_z(slot, 0);
+            if self.ram.sprite(slot).kind() == 0xe8
+                && (self.ram.sprite(slot).velocity_z().wrapping_sub(0xe8) as i8) < 0
             {
-                self.set_arr(SPRITE_STATE, slot, 6);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 8);
-                self.set_arr(SPRITE_FLAGS2, slot, 3);
+                self.ram.set_sprite_state(slot, 6);
+                self.ram.set_sprite_main_delay(slot, 8);
+                self.ram.set_sprite_flags2(slot, 3);
                 return;
             }
             self.throwable_scenery_transmute_if_valid(slot);
             let mut tile = self.r8(0xfa5);
             if tile == 32 {
-                tile = self.arr(SPRITE_FLAGS, slot) >> 1;
-                if self.arr(SPRITE_FLAGS, slot) & 1 == 0 {
+                tile = self.ram.sprite(slot).flags() >> 1;
+                if self.ram.sprite(slot).flags() & 1 == 0 {
                     self.sprite_func8(slot);
                     return;
                 }
             }
             if tile == 9 {
-                let velocity = self.arr(SPRITE_Z_VEL, slot);
-                self.set_arr(SPRITE_Z_VEL, slot, 0);
+                let velocity = self.ram.sprite(slot).velocity_z();
+                self.ram.set_sprite_velocity_z(slot, 0);
                 if (velocity.wrapping_sub(0xf0) as i8) < 0 {
                     let mut info = SpriteSpawnInfo::default();
                     let spawned = self.sprite_spawn_dynamically(slot, 0xec, &mut info);
@@ -1771,7 +1771,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     }
                 }
             } else if tile == 8 {
-                if self.arr(SPRITE_TYPE, slot) == 0xd2
+                if self.ram.sprite(slot).kind() == 0xd2
                     || self.hooks.random_u8(&mut self.ram) & 1 != 0
                 {
                     self.sprite_spawn_leaping_fish(slot);
@@ -1779,26 +1779,27 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 self.sprite_func22(slot);
                 return;
             }
-            let velocity = self.arr(SPRITE_Z_VEL, slot);
+            let velocity = self.ram.sprite(slot).velocity_z();
             if (velocity as i8) < 0 {
                 let bounce = (0u8).wrapping_sub(velocity) >> 1;
-                self.set_arr(SPRITE_Z_VEL, slot, if bounce < 9 { 0 } else { bounce });
+                self.ram
+                    .set_sprite_velocity_z(slot, if bounce < 9 { 0 } else { bounce });
             }
             for base in [SPRITE_X_VEL, SPRITE_Y_VEL] {
                 let velocity = ((self.arr(base, slot) as i8) >> 1) as u8;
                 self.set_arr(base, slot, if velocity == 0xff { 0 } else { velocity });
             }
         }
-        if (self.arr(SPRITE_STATE, slot) != 11 || self.arr(SPRITE_UNK5, slot) != 0)
+        if (self.ram.sprite(slot).state() != 11 || self.ram.sprite(slot).unknown5() != 0)
             && !self.sprite_return_if_lifted(slot)
-            && self.arr(SPRITE_TYPE, slot) != 0x4a
+            && self.ram.sprite(slot).kind() != 0x4a
         {
             self.thrown_sprite_check_damage_to_sprites(slot);
         }
     }
 
     pub fn sprite_handle_dragging_by_ancilla(&mut self, slot: usize) -> bool {
-        let encoded = self.arr(SPRITE_B, slot);
+        let encoded = self.ram.sprite(slot).scratch_b();
         if encoded == 0 {
             return false;
         }
@@ -1806,29 +1807,26 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if self.arr(0xc4a, ancilla) == 0 {
             self.sprite_handle_absorption_by_player(slot);
         } else {
-            self.set_arr(SPRITE_X_LO, slot, self.arr(0xc04, ancilla));
-            self.set_arr(SPRITE_X_HI, slot, self.arr(0xc18, ancilla));
-            self.set_arr(SPRITE_Y_LO, slot, self.arr(0xbfa, ancilla));
-            self.set_arr(SPRITE_Y_HI, slot, self.arr(0xc0e, ancilla));
-            self.set_arr(SPRITE_Z, slot, 0);
+            self.ram.set_sprite_x_low(slot, self.arr(0xc04, ancilla));
+            self.ram.set_sprite_x_high(slot, self.arr(0xc18, ancilla));
+            self.ram.set_sprite_y_low(slot, self.arr(0xbfa, ancilla));
+            self.ram.set_sprite_y_high(slot, self.arr(0xc0e, ancilla));
+            self.ram.set_sprite_z(slot, 0);
         }
         true
     }
 
     pub fn sprite_return_if_phasing_out(&mut self, slot: usize) -> bool {
-        if self.arr(SPRITE_STUNNED, slot) == 0 || self.r8(0x11) | self.r8(0xfc1) != 0 {
+        if self.ram.sprite(slot).stunned() == 0 || self.r8(0x11) | self.r8(0xfc1) != 0 {
             return false;
         }
         if self.r8(0x1a) & 1 == 0 {
-            self.set_arr(
-                SPRITE_STUNNED,
-                slot,
-                self.arr(SPRITE_STUNNED, slot).wrapping_sub(1),
-            );
+            self.ram
+                .set_sprite_stunned(slot, self.ram.sprite(slot).stunned().wrapping_sub(1));
         }
-        let timer = self.arr(SPRITE_STUNNED, slot);
+        let timer = self.ram.sprite(slot).stunned();
         if timer == 0 {
-            self.set_arr(SPRITE_STATE, slot, 0);
+            self.ram.set_sprite_state(slot, 0);
         } else if timer >= 0x28 || timer & 1 != 0 {
             return false;
         }
@@ -1838,8 +1836,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_handle_absorption_by_player(&mut self, slot: usize) {
-        self.set_arr(SPRITE_STATE, slot, 0);
-        let item = self.arr(SPRITE_TYPE, slot).wrapping_sub(0xd8);
+        self.ram.set_sprite_state(slot, 0);
+        let item = self.ram.sprite(slot).kind().wrapping_sub(0xd8);
         self.hooks
             .sprite_sfx3_with_pan(&mut self.ram, slot, ABSORPTION_SFX[usize::from(item)]);
         match item {
@@ -1859,10 +1857,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             9 => self.w8(
                 0xf376,
                 self.r8(0xf376)
-                    .wrapping_add(if self.arr(SPRITE_HEAD_DIR, slot) == 0 {
+                    .wrapping_add(if self.ram.sprite(slot).head_direction() == 0 {
                         5
                     } else {
-                        self.arr(SPRITE_HEAD_DIR, slot)
+                        self.ram.sprite(slot).head_direction()
                     }),
             ),
             10 => self.w8(0xf376, self.r8(0xf376).wrapping_add(10)),
@@ -1877,14 +1875,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     self.w8(0x2e9, 0);
                     SpriteHooks::link_receive_item(self.hooks, &mut self.ram, 0x32, 0);
                 }
-                self.set_arr(SPRITE_N, slot, self.arr(SPRITE_SUBTYPE, slot));
+                self.ram
+                    .set_sprite_scratch_n(slot, self.ram.sprite(slot).subtype());
                 let flag =
-                    u16::from(ABSORB_BIG_KEY[usize::from(self.arr(SPRITE_DIE_ACTION, slot))]) << 8;
+                    u16::from(ABSORB_BIG_KEY[usize::from(self.ram.sprite(slot).death_action())])
+                        << 8;
                 self.w16(0x402, self.r16(0x402) | flag);
                 self.sprite_manually_set_death_flag_uw(slot);
             }
             14 => {
-                self.w8(0xf35a, self.arr(SPRITE_SUBTYPE, slot));
+                self.w8(0xf35a, self.ram.sprite(slot).subtype());
                 if self.hooks.enhanced_features0() & 4096 != 0 {
                     self.hooks.palette_load_shield(&mut self.ram);
                 }
@@ -1894,7 +1894,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_check_absorption_by_player(&mut self, slot: usize) {
-        if self.arr(SPRITE_DELAY_AUX4, slot) == 0 && self.sprite_check_damage_to_player_1(slot) {
+        if self.ram.sprite(slot).aux4_delay() == 0 && self.sprite_check_damage_to_player_1(slot) {
             self.sprite_handle_absorption_by_player(slot);
         }
     }
@@ -1904,21 +1904,21 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return false;
         }
         if self.r8(0xfb3) == 0 && self.r8(0x1b) != 0 {
-            self.set_arr(SPRITE_OBJ_PRIO, slot, 0x30);
+            self.ram.set_sprite_object_priority(slot, 0x30);
         }
         if self.r8(0xfc6) >= 3 {
             return false;
         }
-        if self.arr(SPRITE_DELAY_AUX2, slot) != 0 {
+        if self.ram.sprite(slot).aux2_delay() != 0 {
             self.oam_allocate_from_region_c(12);
         }
-        if self.arr(SPRITE_E, slot) != 0 {
+        if self.ram.sprite(slot).scratch_e() != 0 {
             if self.hooks.enhanced_features0() & 4096 != 0 {
-                self.set_arr(SPRITE_B, slot, 0);
+                self.ram.set_sprite_scratch_b(slot, 0);
             }
             return true;
         }
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         assert!((0xd8..0xd8 + 19).contains(&kind));
         let numbered = ABSORBABLE_TAB2[usize::from(kind - 0xd8)];
         if numbered != 0 {
@@ -1927,12 +1927,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         match ABSORBABLE_TAB1[usize::from(kind - 0xd8)] {
             0 => self.sprite_draw_single_small(slot),
-            2 if kind == 0xe6 && self.arr(SPRITE_SUBTYPE, slot) == 1 => {
+            2 if kind == 0xe6 && self.ram.sprite(slot).subtype() == 1 => {
                 self.sprite_draw_thin_and_tall(slot)
             }
             2 => {
                 if kind == 0xe6 {
-                    self.set_arr(SPRITE_GRAPHICS, slot, 1);
+                    self.ram.set_sprite_graphics(slot, 1);
                 }
                 self.sprite_draw_single_large(slot);
             }
@@ -1947,7 +1947,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if self.sprite_prep_oam_coord_or_double_ret(slot, &mut info) {
             return;
         }
-        let count = if self.arr(SPRITE_HEAD_DIR, slot) < 1 {
+        let count = if self.ram.sprite(slot).head_direction() < 1 {
             3
         } else {
             2
@@ -1989,8 +1989,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn entity_apply_rumble_to_sprites(&mut self, hitbox: &mut SpriteHitBox) {
-        for slot in (0..16).rev() {
-            if self.arr(SPRITE_DEFL_BITS, slot) & 2 == 0 || self.arr(SPRITE_E, slot) == 0 {
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
+            if self.ram.sprite(slot).deflection_bits() & 2 == 0
+                || self.ram.sprite(slot).scratch_e() == 0
+            {
                 continue;
             }
             if self.r8(0xfc6) != 0x0e {
@@ -1999,20 +2002,20 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     continue;
                 }
             }
-            self.set_arr(SPRITE_E, slot, 0);
+            self.ram.set_sprite_scratch_e(slot, 0);
             self.w8(0x12f, 0x30);
-            self.set_arr(SPRITE_Z_VEL, slot, 0x30);
-            self.set_arr(SPRITE_X_VEL, slot, 0x10);
-            self.set_arr(SPRITE_DELAY_AUX3, slot, 0x30);
-            self.set_arr(SPRITE_STUNNED, slot, 0xff);
-            if self.arr(SPRITE_TYPE, slot) == 0xd8 {
+            self.ram.set_sprite_velocity_z(slot, 0x30);
+            self.ram.set_sprite_velocity_x(slot, 0x10);
+            self.ram.set_sprite_aux3_delay(slot, 0x30);
+            self.ram.set_sprite_stunned(slot, 0xff);
+            if self.ram.sprite(slot).kind() == 0xd8 {
                 self.hooks.sprite_transmute_to_bomb(&mut self.ram, slot);
             }
         }
     }
 
     pub fn sprite_explode_spawn_ea(&mut self, slot: usize) {
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         self.w8(0xfb5, kind);
         let mut info = SpriteSpawnInfo::default();
         let spawned = self.sprite_spawn_dynamically_ex(slot, 0xea, &mut info, 14);
@@ -2021,33 +2024,37 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let spawned = spawned as usize;
         self.sprite_set_spawned_coordinates(spawned, info);
-        self.set_arr(SPRITE_Z_VEL, spawned, 32);
-        self.set_arr(SPRITE_FLOOR, spawned, self.r8(0xee));
-        self.set_arr(SPRITE_A, spawned, if spawned == 9 { 2 } else { 6 });
+        self.ram.set_sprite_velocity_z(spawned, 32);
+        self.ram.set_sprite_floor(spawned, self.r8(0xee));
+        self.ram
+            .set_sprite_scratch_a(spawned, if spawned == 9 { 2 } else { 6 });
         self.sprite_set_y(spawned, info.r2_y.wrapping_add(3));
         if kind == 0xce {
             self.sprite_set_y(spawned, info.r2_y.wrapping_add(16));
         } else if kind == 0xcb {
-            self.set_arr(SPRITE_X_LO, spawned, 0x78);
-            self.set_arr(SPRITE_Y_LO, spawned, 0x78);
-            self.set_arr(SPRITE_X_HI, spawned, (self.r16(0x22) >> 8) as u8);
-            self.set_arr(SPRITE_Y_HI, spawned, (self.r16(0x20) >> 8) as u8);
+            self.ram.set_sprite_x_low(spawned, 0x78);
+            self.ram.set_sprite_y_low(spawned, 0x78);
+            self.ram
+                .set_sprite_x_high(spawned, (self.r16(0x22) >> 8) as u8);
+            self.ram
+                .set_sprite_y_high(spawned, (self.r16(0x20) >> 8) as u8);
         }
     }
 
     pub fn sprite_kill_friends(&mut self) {
         let current = usize::from(self.r8(0xfa0));
-        for slot in (0..16).rev() {
+        for slot in SpriteSlot::all().rev() {
+            let slot = slot.index();
             if slot != current
-                && self.arr(SPRITE_STATE, slot) != 0
-                && self.arr(SPRITE_DEFL_BITS, slot) & 2 == 0
-                && self.arr(SPRITE_TYPE, slot) != 0x7a
+                && self.ram.sprite(slot).state() != 0
+                && self.ram.sprite(slot).deflection_bits() & 2 == 0
+                && self.ram.sprite(slot).kind() != 0x7a
             {
-                self.set_arr(SPRITE_STATE, slot, 6);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 15);
-                self.set_arr(SPRITE_FLAGS3, slot, 0);
-                self.set_arr(SPRITE_FLAGS5, slot, 0);
-                self.set_arr(SPRITE_FLAGS2, slot, 3);
+                self.ram.set_sprite_state(slot, 6);
+                self.ram.set_sprite_main_delay(slot, 15);
+                self.ram.set_sprite_flags3(slot, 0);
+                self.ram.set_sprite_flags5(slot, 0);
+                self.ram.set_sprite_flags2(slot, 3);
             }
         }
     }
@@ -2057,34 +2064,36 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let spawned = self.sprite_spawn_dynamically(0, 0xe3, &mut info);
         if spawned >= 0 {
             let slot = spawned as usize;
-            self.set_arr(SPRITE_FLOOR, slot, self.r8(0xee));
+            self.ram.set_sprite_floor(slot, self.r8(0xee));
             self.sprite_set_x(slot, self.r16(0x22).wrapping_add(8));
             self.sprite_set_y(slot, self.r16(0x20).wrapping_add(16));
-            self.set_arr(SPRITE_D, slot, 0);
-            self.set_arr(SPRITE_DELAY_AUX4, slot, 96);
+            self.ram.set_sprite_scratch_d(slot, 0);
+            self.ram.set_sprite_aux4_delay(slot, 96);
         }
         spawned
     }
 
     pub fn sprite_draw_ripple_if_in_water(&mut self, slot: usize) {
-        if !matches!(self.arr(SPRITE_I, slot), 8 | 9) {
+        if !matches!(self.ram.sprite(slot).scratch_i(), 8 | 9) {
             return;
         }
-        if self.arr(SPRITE_FLAGS3, slot) & 0x20 != 0 {
+        if self.ram.sprite(slot).flags3() & 0x20 != 0 {
             self.w16(0xfd8, self.r16(0xfd8).wrapping_sub(4));
-            if self.arr(SPRITE_TYPE, slot) == 0xdf {
+            if self.ram.sprite(slot).kind() == 0xdf {
                 self.w16(0xfda, self.r16(0xfda).wrapping_sub(7));
             }
         }
         self.hooks.sprite_draw_water_ripple(&mut self.ram, slot);
         self.sprite_get_16_bit_coords(slot);
-        self.oam_allocate_from_region_a((self.arr(SPRITE_FLAGS2, slot) & 0x1f).wrapping_add(1) * 4);
+        self.oam_allocate_from_region_a(
+            (self.ram.sprite(slot).flags2() & 0x1f).wrapping_add(1) * 4,
+        );
     }
 
     pub fn sprite_fall_draw(&mut self, slot: usize, info: &PrepOamCoordsRet) {
         const CHAR: [u8; 8] = [0x83, 0x83, 0x83, 0x80, 0x80, 0x80, 0xb7, 0xb7];
         let index = self.current_oam_index();
-        let charnum = CHAR[usize::from(self.arr(SPRITE_DELAY_MAIN, slot) >> 2)];
+        let charnum = CHAR[usize::from(self.ram.sprite(slot).main_delay() >> 2)];
         oam::write(
             &mut self.ram,
             index,
@@ -2099,8 +2108,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_module_fall1(&mut self, slot: usize) {
-        if self.arr(SPRITE_DELAY_MAIN, slot) == 0 {
-            self.set_arr(SPRITE_STATE, slot, 0);
+        if self.ram.sprite(slot).main_delay() == 0 {
+            self.ram.set_sprite_state(slot, 0);
             self.sprite_manually_set_death_flag_uw(slot);
             return;
         }
@@ -2111,14 +2120,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_module_fall2(&mut self, slot: usize) {
-        let mut delay = self.arr(SPRITE_DELAY_MAIN, slot);
+        let mut delay = self.ram.sprite(slot).main_delay();
         if delay == 0 {
-            self.set_arr(SPRITE_STATE, slot, 0);
+            self.ram.set_sprite_state(slot, 0);
             self.sprite_manually_set_death_flag_uw(slot);
             return;
         }
         if delay >= 0x40 {
-            if self.arr(SPRITE_OAM_FLAGS, slot) != 5 {
+            if self.ram.sprite(slot).oam_flags() != 5 {
                 if delay & 7 | self.r8(0x11) | self.r8(0xfc1) == 0 {
                     self.hooks.sprite_sfx3_with_pan(&mut self.ram, slot, 0x31);
                 }
@@ -2135,25 +2144,26 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 return;
             }
             delay = 63;
-            self.set_arr(SPRITE_DELAY_MAIN, slot, delay);
+            self.ram.set_sprite_main_delay(slot, delay);
         }
         if delay == 61 {
             self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x20);
         }
         let frame = usize::from(delay >> 1);
-        if matches!(self.arr(SPRITE_TYPE, slot), 0x26 | 0x13) {
-            self.set_arr(SPRITE_GRAPHICS, slot, SPRITE_FALL_TAB2[frame]);
+        if matches!(self.ram.sprite(slot).kind(), 0x26 | 0x13) {
+            self.ram.set_sprite_graphics(slot, SPRITE_FALL_TAB2[frame]);
             self.sprite_draw_falling_helma_beetle(slot);
         } else {
             let mut graphics = SPRITE_FALL_TAB1[frame];
             if graphics < 12 {
-                graphics = graphics
-                    .wrapping_add(SPRITE_FALL_TAB4[usize::from(self.arr(SPRITE_D, slot))] as u8);
+                graphics = graphics.wrapping_add(
+                    SPRITE_FALL_TAB4[usize::from(self.ram.sprite(slot).scratch_d())] as u8,
+                );
             }
-            self.set_arr(SPRITE_GRAPHICS, slot, graphics);
+            self.ram.set_sprite_graphics(slot, graphics);
             self.sprite_draw_falling_humanoid(slot);
         }
-        if self.r8(0x1a) & SPRITE_FALL_TAB3[usize::from(self.arr(SPRITE_DELAY_MAIN, slot) >> 3)]
+        if self.r8(0x1a) & SPRITE_FALL_TAB3[usize::from(self.ram.sprite(slot).main_delay() >> 3)]
             | self.r8(0x11)
             != 0
         {
@@ -2161,90 +2171,77 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         self.sprite_check_tile_property(slot, 0x68);
         if self.r8(0xfa5) != 0x20 {
-            self.set_arr(SPRITE_Y_RECOIL, slot, 0);
-            self.set_arr(SPRITE_X_RECOIL, slot, 0);
+            self.ram.set_sprite_recoil_y(slot, 0);
+            self.ram.set_sprite_recoil_x(slot, 0);
         }
-        self.set_arr(
-            SPRITE_Y_VEL,
-            slot,
-            ((self.arr(SPRITE_Y_RECOIL, slot) as i8) >> 2) as u8,
-        );
-        self.set_arr(
-            SPRITE_X_VEL,
-            slot,
-            ((self.arr(SPRITE_X_RECOIL, slot) as i8) >> 2) as u8,
-        );
+        self.ram
+            .set_sprite_velocity_y(slot, ((self.ram.sprite(slot).recoil_y() as i8) >> 2) as u8);
+        self.ram
+            .set_sprite_velocity_x(slot, ((self.ram.sprite(slot).recoil_x() as i8) >> 2) as u8);
         self.sprite_move_xy(slot);
     }
 
     pub fn sprite_mini_moldorm_recoil(&mut self, slot: usize) {
-        if self.arr(SPRITE_STATE, slot) < 9 {
+        if self.ram.sprite(slot).state() < 9 {
             return;
         }
-        let previous_state = self.arr(SPRITE_STATE, slot);
+        let previous_state = self.ram.sprite(slot).state();
         self.w8(0xfb5, previous_state);
-        let damage = self.arr(SPRITE_GIVE_DAMAGE, slot);
+        let damage = self.ram.sprite(slot).damage();
         if damage == 253 {
-            self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+            self.ram.set_sprite_damage(slot, 0);
             self.hooks.sprite_sfx3_with_pan(&mut self.ram, slot, 9);
-            self.set_arr(SPRITE_STATE, slot, 7);
-            self.set_arr(SPRITE_DELAY_MAIN, slot, 0x70);
-            self.set_arr(
-                SPRITE_FLAGS2,
-                slot,
-                self.arr(SPRITE_FLAGS2, slot).wrapping_add(2),
-            );
-            self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+            self.ram.set_sprite_state(slot, 7);
+            self.ram.set_sprite_main_delay(slot, 0x70);
+            self.ram
+                .set_sprite_flags2(slot, self.ram.sprite(slot).flags2().wrapping_add(2));
+            self.ram.set_sprite_damage(slot, 0);
             return;
         }
         if damage >= 251 {
-            self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+            self.ram.set_sprite_damage(slot, 0);
             if previous_state == 11 {
                 return;
             }
             let frozen = u8::from(damage == 254);
-            self.set_arr(SPRITE_UNK5, slot, frozen);
+            self.ram.set_sprite_unknown5(slot, frozen);
             if frozen != 0 {
-                self.set_arr(SPRITE_DEFL_BITS, slot, self.arr(SPRITE_DEFL_BITS, slot) | 8);
-                self.set_arr(SPRITE_FLAGS5, slot, self.arr(SPRITE_FLAGS5, slot) & !0x80);
+                self.ram
+                    .set_sprite_deflection_bits(slot, self.ram.sprite(slot).deflection_bits() | 8);
+                self.ram
+                    .set_sprite_flags5(slot, self.ram.sprite(slot).flags5() & !0x80);
                 self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 15);
-                self.set_arr(SPRITE_Z_VEL, slot, 24);
-                self.set_arr(
-                    SPRITE_BUMP_DAMAGE,
-                    slot,
-                    self.arr(SPRITE_BUMP_DAMAGE, slot) & !0x80,
-                );
+                self.ram.set_sprite_velocity_z(slot, 24);
+                self.ram
+                    .set_sprite_bump_damage(slot, self.ram.sprite(slot).bump_damage() & !0x80);
                 self.sprite_zero_velocity_xy(slot);
             }
-            self.set_arr(SPRITE_STATE, slot, 11);
-            self.set_arr(SPRITE_DELAY_MAIN, slot, 64);
+            self.ram.set_sprite_state(slot, 11);
+            self.ram.set_sprite_main_delay(slot, 64);
             const STUN: [u8; 5] = [0x20, 0x80, 0, 0, 0xff];
-            self.set_arr(
-                SPRITE_STUNNED,
-                slot,
-                STUN[usize::from(damage.wrapping_add(5))],
-            );
-            if self.arr(SPRITE_TYPE, slot) == 0x23 {
-                self.set_arr(SPRITE_TYPE, slot, 0x24);
+            self.ram
+                .set_sprite_stunned(slot, STUN[usize::from(damage.wrapping_add(5))]);
+            if self.ram.sprite(slot).kind() == 0x23 {
+                self.ram.set_sprite_kind(slot, 0x24);
             }
             return;
         }
-        let health = i16::from(self.arr(SPRITE_HEALTH, slot)) - i16::from(damage);
-        self.set_arr(SPRITE_HEALTH, slot, health as u8);
-        self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+        let health = i16::from(self.ram.sprite(slot).health()) - i16::from(damage);
+        self.ram.set_sprite_health(slot, health as u8);
+        self.ram.set_sprite_damage(slot, 0);
         if health > 0 {
             return;
         }
-        if self.arr(SPRITE_DIE_ACTION, slot) == 0 {
+        if self.ram.sprite(slot).death_action() == 0 {
             if previous_state == 11 {
-                self.set_arr(SPRITE_DIE_ACTION, slot, 3);
+                self.ram.set_sprite_death_action(slot, 3);
             }
-            if self.arr(SPRITE_UNK1, slot) != 0 {
-                self.set_arr(SPRITE_UNK1, slot, 0);
-                self.set_arr(SPRITE_FLAGS5, slot, 0);
+            if self.ram.sprite(slot).unknown1() != 0 {
+                self.ram.set_sprite_unknown1(slot, 0);
+                self.ram.set_sprite_flags5(slot, 0);
             }
         }
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         if kind != 0x1b {
             self.hooks.sprite_sfx3_with_pan(&mut self.ram, slot, 9);
         }
@@ -2252,7 +2249,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             let address = 0xf280 + usize::from(self.r8(0x8a));
             self.w8(address, self.r8(address) | 0x40);
         } else if kind == 0xec {
-            if self.arr(SPRITE_C, slot) == 2 {
+            if self.ram.sprite(slot).scratch_c() == 2 {
                 self.throwable_scenery_transmute_to_debris(slot);
             }
             return;
@@ -2261,100 +2258,96 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.w8(0x308, 0);
             self.w8(0x309, 0);
         }
-        self.set_arr(SPRITE_STATE, slot, 6);
+        self.ram.set_sprite_state(slot, 6);
         let mut common = false;
         let mut clear_sound = false;
         match kind {
             0x0c => self.sprite_func3(slot),
             0x92 => {
                 self.sprite_kill_friends();
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 0xff);
+                self.ram.set_sprite_main_delay(slot, 0xff);
                 common = true;
             }
             0xcb => {
-                self.set_arr(SPRITE_AI_STATE, slot, 128);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 128);
-                self.set_arr(SPRITE_STATE, slot, 9);
+                self.ram.set_sprite_ai_state(slot, 128);
+                self.ram.set_sprite_main_delay(slot, 128);
+                self.ram.set_sprite_state(slot, 9);
                 common = true;
             }
             0xcc | 0xcd => {
-                self.set_arr(SPRITE_AI_STATE, slot, 128);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 96);
-                self.set_arr(SPRITE_STATE, slot, 9);
+                self.ram.set_sprite_ai_state(slot, 128);
+                self.ram.set_sprite_main_delay(slot, 96);
+                self.ram.set_sprite_state(slot, 9);
                 common = true;
             }
             0x53 => {
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 35);
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0);
+                self.ram.set_sprite_main_delay(slot, 35);
+                self.ram.set_sprite_hit_timer(slot, 0);
                 clear_sound = true;
             }
             0x54 => {
-                self.set_arr(SPRITE_AI_STATE, slot, 5);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 0xc0);
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0xc0);
+                self.ram.set_sprite_ai_state(slot, 5);
+                self.ram.set_sprite_main_delay(slot, 0xc0);
+                self.ram.set_sprite_hit_timer(slot, 0xc0);
                 common = true;
             }
             0x09 => {
-                self.set_arr(SPRITE_AI_STATE, slot, 3);
-                self.set_arr(SPRITE_DELAY_AUX4, slot, 160);
-                self.set_arr(SPRITE_STATE, slot, 9);
+                self.ram.set_sprite_ai_state(slot, 3);
+                self.ram.set_sprite_aux4_delay(slot, 160);
+                self.ram.set_sprite_state(slot, 9);
                 common = true;
             }
             0x7a => {
                 self.sprite_kill_friends();
-                self.set_arr(SPRITE_STATE, slot, 9);
-                self.set_arr(SPRITE_IGNORE_PROJECTILE, slot, 9);
+                self.ram.set_sprite_state(slot, 9);
+                self.ram.set_sprite_ignore_projectile(slot, 9);
                 if self.r8(0xfff) == 0 {
-                    self.set_arr(SPRITE_AI_STATE, slot, 10);
-                    self.set_arr(SPRITE_DELAY_MAIN, slot, 0xff);
-                    self.set_arr(SPRITE_Z_VEL, slot, 32);
+                    self.ram.set_sprite_ai_state(slot, 10);
+                    self.ram.set_sprite_main_delay(slot, 0xff);
+                    self.ram.set_sprite_velocity_z(slot, 32);
                 } else {
-                    self.set_arr(SPRITE_DELAY_MAIN, slot, 0xff);
-                    self.set_arr(SPRITE_AI_STATE, slot, 8);
-                    self.set_arr(SPRITE_AI_STATE, 1, 9);
-                    self.set_arr(SPRITE_AI_STATE, 2, 9);
-                    self.set_arr(SPRITE_GRAPHICS, 1, 0);
-                    self.set_arr(SPRITE_GRAPHICS, 2, 0);
+                    self.ram.set_sprite_main_delay(slot, 0xff);
+                    self.ram.set_sprite_ai_state(slot, 8);
+                    self.ram.set_sprite_ai_state(1, 9);
+                    self.ram.set_sprite_ai_state(2, 9);
+                    self.ram.set_sprite_graphics(1, 0);
+                    self.ram.set_sprite_graphics(2, 0);
                 }
                 common = true;
             }
-            0x23 if self.arr(SPRITE_C, slot) == 0 => {
-                self.set_arr(SPRITE_AI_STATE, slot, 2);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 32);
-                self.set_arr(SPRITE_STATE, slot, 9);
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0);
+            0x23 if self.ram.sprite(slot).scratch_c() == 0 => {
+                self.ram.set_sprite_ai_state(slot, 2);
+                self.ram.set_sprite_main_delay(slot, 32);
+                self.ram.set_sprite_state(slot, 9);
+                self.ram.set_sprite_hit_timer(slot, 0);
             }
             0x0f => {
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 15);
+                self.ram.set_sprite_hit_timer(slot, 0);
+                self.ram.set_sprite_main_delay(slot, 15);
             }
-            _ if self.arr(SPRITE_FLAGS, slot) & 2 == 0 => {
-                self.set_arr(
-                    SPRITE_DELAY_MAIN,
+            _ if self.ram.sprite(slot).flags() & 2 == 0 => {
+                self.ram.set_sprite_main_delay(
                     slot,
-                    if self.arr(SPRITE_HIT_TIMER, slot) & 0x80 != 0 {
+                    if self.ram.sprite(slot).hit_timer() & 0x80 != 0 {
                         31
                     } else {
                         15
                     },
                 );
-                self.set_arr(
-                    SPRITE_FLAGS2,
-                    slot,
-                    self.arr(SPRITE_FLAGS2, slot).wrapping_add(4),
-                );
+                self.ram
+                    .set_sprite_flags2(slot, self.ram.sprite(slot).flags2().wrapping_add(4));
                 if previous_state == 11 {
-                    self.set_arr(SPRITE_FLAGS5, slot, 1);
+                    self.ram.set_sprite_flags5(slot, 1);
                 }
             }
             _ => {
                 if kind != 0xa2 {
                     self.sprite_kill_friends();
                 }
-                self.set_arr(SPRITE_STATE, slot, 4);
-                self.set_arr(SPRITE_A, slot, 0);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 0xff);
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0xff);
+                self.ram.set_sprite_state(slot, 4);
+                self.ram.set_sprite_scratch_a(slot, 0);
+                self.ram.set_sprite_main_delay(slot, 0xff);
+                self.ram.set_sprite_hit_timer(slot, 0xff);
                 common = true;
             }
         }
@@ -2379,7 +2372,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn prepare_enemy_drop(&mut self, slot: usize, item: u8) {
-        self.set_arr(SPRITE_TYPE, slot, item);
+        self.ram.set_sprite_kind(slot, item);
         if item == 0xe5 {
             self.hooks
                 .sprite_prep_big_key_load_graphics(&mut self.ram, slot);
@@ -2387,15 +2380,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.hooks
                 .sprite_prep_key_set_item_drop(&mut self.ram, slot);
         }
-        self.set_arr(SPRITE_STATE, slot, 9);
-        let saved_z = self.arr(SPRITE_Z, slot);
+        self.ram.set_sprite_state(slot, 9);
+        let saved_z = self.ram.sprite(slot).z();
         self.sprite_prep_load_properties(slot);
-        self.set_arr(
-            SPRITE_IGNORE_PROJECTILE,
+        self.ram.set_sprite_ignore_projectile(
             slot,
-            self.arr(SPRITE_IGNORE_PROJECTILE, slot).wrapping_add(1),
+            self.ram.sprite(slot).ignore_projectile().wrapping_add(1),
         );
-        let prize_index = usize::from(self.arr(SPRITE_TYPE, slot).wrapping_sub(0xd8));
+        let prize_index = usize::from(self.ram.sprite(slot).kind().wrapping_sub(0xd8));
         let z = if prize_index < PRIZE_Z.len() {
             PRIZE_Z[prize_index]
         } else if prize_index < PRIZE_Z.len() + PERISH_OVERLAY_X.len() {
@@ -2405,61 +2397,62 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             // by the pulverized Buzz Blob path. These arrays are adjacent.
             PERISH_OVERLAY_Y[prize_index - PRIZE_Z.len() - PERISH_OVERLAY_X.len()] as u8
         };
-        self.set_arr(SPRITE_Z_VEL, slot, z & 0xf0);
+        self.ram.set_sprite_velocity_z(slot, z & 0xf0);
         self.sprite_set_x(
             slot,
             self.sprite_get_x(slot).wrapping_add(u16::from(z & 0x0f)),
         );
-        self.set_arr(SPRITE_Z, slot, saved_z);
-        self.set_arr(SPRITE_DELAY_AUX4, slot, 21);
-        self.set_arr(SPRITE_STUNNED, slot, 0xff);
+        self.ram.set_sprite_z(slot, saved_z);
+        self.ram.set_sprite_aux4_delay(slot, 21);
+        self.ram.set_sprite_stunned(slot, 0xff);
         self.sprite_death_func4(slot);
     }
 
     pub fn sprite_death_func4(&mut self, slot: usize) {
-        if self.arr(SPRITE_TYPE, slot) == 0xa2 && self.sprite_check_if_screen_is_clear() {
+        if self.ram.sprite(slot).kind() == 0xa2 && self.sprite_check_if_screen_is_clear() {
             self.hooks.ancilla_spawn_falling_prize(&mut self.ram, 4);
         }
         self.sprite_manually_set_death_flag_uw(slot);
         self.w8(0xcfb, self.r8(0xcfb).wrapping_add(1));
-        if self.arr(SPRITE_TYPE, slot) == 0x40 {
-            self.set_arr(SPRITE_STATE, slot, 9);
-            self.set_arr(SPRITE_GRAPHICS, slot, 4);
+        if self.ram.sprite(slot).kind() == 0x40 {
+            self.ram.set_sprite_state(slot, 9);
+            self.ram.set_sprite_graphics(slot, 4);
             // The second-entry death animation is invoked by SpriteDeath_MainEx.
             self.sprite_death_main_ex(slot, true);
         }
     }
 
     pub fn sprite_do_the_death(&mut self, slot: usize) {
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         if kind == 0xbe {
-            self.set_arr(SPRITE_G, 0, self.arr(SPRITE_G, 0).wrapping_sub(1));
+            self.ram
+                .set_sprite_scratch_g(0, self.ram.sprite(0).scratch_g().wrapping_sub(1));
         }
-        if kind == 0xaa && self.arr(SPRITE_E, slot) != 0 {
-            let subtype = self.arr(SPRITE_SUBTYPE, slot);
+        if kind == 0xaa && self.ram.sprite(slot).scratch_e() != 0 {
+            let subtype = self.ram.sprite(slot).subtype();
             self.prepare_enemy_drop(
                 slot,
-                PIKIT_DROP_ITEMS[usize::from(self.arr(SPRITE_E, slot).wrapping_sub(1))],
+                PIKIT_DROP_ITEMS[usize::from(self.ram.sprite(slot).scratch_e().wrapping_sub(1))],
             );
-            self.set_arr(SPRITE_SUBTYPE, slot, subtype);
+            self.ram.set_sprite_subtype(slot, subtype);
             if subtype == 1 {
-                self.set_arr(SPRITE_OAM_FLAGS, slot, 9);
-                self.set_arr(SPRITE_FLAGS3, slot, 0xf0);
+                self.ram.set_sprite_oam_flags(slot, 9);
+                self.ram.set_sprite_flags3(slot, 0xf0);
             }
-            self.set_arr(
-                SPRITE_HEAD_DIR,
+            self.ram.set_sprite_head_direction(
                 slot,
-                self.arr(SPRITE_HEAD_DIR, slot).wrapping_add(1),
+                self.ram.sprite(slot).head_direction().wrapping_add(1),
             );
             return;
         }
         if kind == 0x45 && self.r8(0xf3c5) == 2 && self.r8(0x40a) == 0x18 {
             self.w8(0x12c, 7);
         }
-        let drop = self.arr(SPRITE_DIE_ACTION, slot);
+        let drop = self.ram.sprite(slot).death_action();
         if drop != 0 {
-            self.set_arr(SPRITE_SUBTYPE, slot, self.arr(SPRITE_N, slot));
-            self.set_arr(SPRITE_N, slot, 0xff);
+            self.ram
+                .set_sprite_subtype(slot, self.ram.sprite(slot).scratch_n());
+            self.ram.set_sprite_scratch_n(slot, 0xff);
             self.prepare_enemy_drop(
                 slot,
                 if drop == 1 {
@@ -2472,7 +2465,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             );
             return;
         }
-        let raw_prize = self.arr(SPRITE_FLAGS5, slot) & 0x0f;
+        let raw_prize = self.ram.sprite(slot).flags5() & 0x0f;
         if raw_prize != 0 {
             let prize = raw_prize.wrapping_sub(1);
             let luck = self.r8(0xcf9);
@@ -2491,20 +2484,20 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 return;
             }
         }
-        self.set_arr(SPRITE_STATE, slot, 0);
+        self.ram.set_sprite_state(slot, 0);
         self.sprite_death_func4(slot);
     }
 
     pub fn sprite_death_draw_poof(&mut self, slot: usize) {
         if self.r8(0x46c) == 4 {
-            self.set_arr(SPRITE_OBJ_PRIO, slot, 0x30);
+            self.ram.set_sprite_object_priority(slot, 0x30);
         }
         let mut info = PrepOamCoordsRet::default();
         if self.sprite_prep_oam_coord_or_double_ret(slot, &mut info) {
             return;
         }
-        let offset = (self.arr(SPRITE_FLAGS3, slot) & 0x20) >> 3;
-        let mut frame = usize::from((self.arr(SPRITE_DELAY_MAIN, slot) & 0x1c) ^ 0x1c) + 3;
+        let offset = (self.ram.sprite(slot).flags3() & 0x20) >> 3;
+        let mut frame = usize::from((self.ram.sprite(slot).main_delay() & 0x1c) ^ 0x1c) + 3;
         let first = self.current_oam_index();
         for output in 0..4 {
             if PERISH_OVERLAY_CHAR[frame] != 0 {
@@ -2532,42 +2525,41 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn sprite_death_main_ex(&mut self, slot: usize, second_entry: bool) {
         if !second_entry {
-            let kind = self.arr(SPRITE_TYPE, slot);
+            let kind = self.ram.sprite(slot).kind();
             if kind == 0xec {
                 self.hooks
                     .throwable_scenery_scatter_into_debris(&mut self.ram, slot);
                 return;
             }
-            if matches!(kind, 0x53 | 0x54 | 0x92) || kind == 0x4a && self.arr(SPRITE_C, slot) >= 2 {
+            if matches!(kind, 0x53 | 0x54 | 0x92)
+                || kind == 0x4a && self.ram.sprite(slot).scratch_c() >= 2
+            {
                 self.run_sprite_active_main(slot);
                 return;
             }
-            if self.arr(SPRITE_DELAY_MAIN, slot) == 0 {
+            if self.ram.sprite(slot).main_delay() == 0 {
                 self.sprite_do_the_death(slot);
                 return;
             }
         }
-        if (self.arr(SPRITE_FLAGS3, slot) as i8) < 0 {
+        if (self.ram.sprite(slot).flags3() as i8) < 0 {
             self.run_sprite_active_main(slot);
             return;
         }
         if (self.r8(0x1a) & 3) | self.r8(0x11) | self.r8(0xfc1) == 0 {
-            self.set_arr(
-                SPRITE_DELAY_MAIN,
-                slot,
-                self.arr(SPRITE_DELAY_MAIN, slot).wrapping_add(1),
-            );
+            self.ram
+                .set_sprite_main_delay(slot, self.ram.sprite(slot).main_delay().wrapping_add(1));
         }
         self.sprite_death_draw_poof(slot);
-        if self.arr(SPRITE_TYPE, slot) != 0x40 && self.arr(SPRITE_DELAY_MAIN, slot) < 10 {
+        if self.ram.sprite(slot).kind() != 0x40 && self.ram.sprite(slot).main_delay() < 10 {
             return;
         }
         self.w16(0x90, self.r16(0x90).wrapping_add(16));
         self.w16(0x92, self.r16(0x92).wrapping_add(4));
-        let flags = self.arr(SPRITE_FLAGS2, slot);
-        self.set_arr(SPRITE_FLAGS2, slot, flags.wrapping_sub(4));
+        let flags = self.ram.sprite(slot).flags2();
+        self.ram.set_sprite_flags2(slot, flags.wrapping_sub(4));
         self.run_sprite_active_main(slot);
-        self.set_arr(SPRITE_FLAGS2, slot, flags);
+        self.ram.set_sprite_flags2(slot, flags);
     }
 
     pub fn sprite_module_die(&mut self, slot: usize) {
@@ -2579,30 +2571,27 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             5, 4, 3, 1, 2, 0, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1,
             2, 3, 0,
         ];
-        self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-        let frame = self.arr(SPRITE_DELAY_MAIN, slot).wrapping_sub(1);
+        self.ram.set_sprite_hit_timer(slot, 0);
+        let frame = self.ram.sprite(slot).main_delay().wrapping_sub(1);
         if frame == 0 {
             self.sprite_do_the_death(slot);
             return;
         }
-        let graphics = self.arr(SPRITE_GRAPHICS, slot);
-        let oam_flags = self.arr(SPRITE_OAM_FLAGS, slot);
-        self.set_arr(
-            SPRITE_GRAPHICS,
-            slot,
-            FLAME_GRAPHICS[usize::from(frame >> 3)],
-        );
-        self.set_arr(SPRITE_OAM_FLAGS, slot, 3);
+        let graphics = self.ram.sprite(slot).graphics();
+        let oam_flags = self.ram.sprite(slot).oam_flags();
+        self.ram
+            .set_sprite_graphics(slot, FLAME_GRAPHICS[usize::from(frame >> 3)]);
+        self.ram.set_sprite_oam_flags(slot, 3);
         self.hooks.flame_draw(&mut self.ram, slot);
-        self.set_arr(SPRITE_OAM_FLAGS, slot, oam_flags);
-        self.set_arr(SPRITE_GRAPHICS, slot, graphics);
+        self.ram.set_sprite_oam_flags(slot, oam_flags);
+        self.ram.set_sprite_graphics(slot, graphics);
         self.w16(0x90, self.r16(0x90).wrapping_add(8));
         self.w16(0x92, self.r16(0x92).wrapping_add(2));
-        if self.arr(SPRITE_DELAY_MAIN, slot) >= 0x10 {
-            let flags = self.arr(SPRITE_FLAGS2, slot);
-            self.set_arr(SPRITE_FLAGS2, slot, flags.wrapping_sub(2));
+        if self.ram.sprite(slot).main_delay() >= 0x10 {
+            let flags = self.ram.sprite(slot).flags2();
+            self.ram.set_sprite_flags2(slot, flags.wrapping_sub(2));
             self.run_sprite_active_main(slot);
-            self.set_arr(SPRITE_FLAGS2, slot, flags);
+            self.ram.set_sprite_flags2(slot, flags);
         }
     }
 
@@ -2618,12 +2607,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return;
         }
         self.w16(0xcfe, 0);
-        let mut state = self.arr(SPRITE_STATE, slot);
+        let mut state = self.ram.sprite(slot).state();
         if state == 10 {
-            state = self.arr(SPRITE_UNK4, slot);
+            state = self.ram.sprite(slot).unknown4();
         }
         if state == 11 {
-            self.w8(0xcfe, self.arr(SPRITE_UNK5, slot));
+            self.w8(0xcfe, self.ram.sprite(slot).unknown5());
         }
         let first = self.current_oam_index();
         for (offset, entry) in source.iter().enumerate() {
@@ -2665,15 +2654,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             entry.y = info.y as u8;
             let table_index = usize::from(
                 SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1
-                    .get(usize::from(self.arr(SPRITE_TYPE, slot)))
+                    .get(usize::from(self.ram.sprite(slot).kind()))
                     .copied()
                     .unwrap_or_else(|| {
                         SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(
-                            self.arr(SPRITE_TYPE, slot),
+                            self.ram.sprite(slot).kind(),
                         )
                             - SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1.len()]
                     })
-                    .wrapping_add(self.arr(SPRITE_GRAPHICS, slot)),
+                    .wrapping_add(self.ram.sprite(slot).graphics()),
             );
             entry.charnum = SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[table_index];
             entry.flags = info.flags;
@@ -2683,7 +2672,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             oam::BYTEWISE_EXTENDED_OAM + index,
             2 | u8::from(info.x >= 256),
         );
-        if self.arr(SPRITE_FLAGS3, slot) & 0x10 != 0 {
+        if self.ram.sprite(slot).flags3() & 0x10 != 0 {
             let mut shadow_info = *info;
             self.sprite_draw_shadow(slot, &mut shadow_info);
         }
@@ -2704,8 +2693,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     ) {
         let world_y = self.sprite_get_y(slot).wrapping_add(u16::from(amount));
         info.y = world_y;
-        if self.arr(SPRITE_PAUSE, slot) != 0
-            || self.arr(SPRITE_STATE, slot) == 10 && self.arr(SPRITE_UNK3, slot) == 3
+        if self.ram.sprite(slot).pause() != 0
+            || self.ram.sprite(slot).state() == 10 && self.ram.sprite(slot).unknown3() == 3
         {
             return;
         }
@@ -2714,8 +2703,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if y.wrapping_add(0x10) >= 0x100 {
             return;
         }
-        let index = self.current_oam_index() + usize::from(self.arr(SPRITE_FLAGS2, slot) & 0x1f);
-        if self.arr(SPRITE_FLAGS3, slot) & 0x20 != 0 {
+        let index = self.current_oam_index() + usize::from(self.ram.sprite(slot).flags2() & 0x1f);
+        if self.ram.sprite(slot).flags3() & 0x20 != 0 {
             oam::set_helper1(
                 &mut self.ram,
                 index,
@@ -2754,22 +2743,22 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             entry.y = info.y as u8;
             let table_index = usize::from(
                 SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1
-                    .get(usize::from(self.arr(SPRITE_TYPE, slot)))
+                    .get(usize::from(self.ram.sprite(slot).kind()))
                     .copied()
                     .unwrap_or_else(|| {
                         SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(
-                            self.arr(SPRITE_TYPE, slot),
+                            self.ram.sprite(slot).kind(),
                         )
                             - SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1.len()]
                     })
-                    .wrapping_add(self.arr(SPRITE_GRAPHICS, slot)),
+                    .wrapping_add(self.ram.sprite(slot).graphics()),
             );
             entry.charnum = SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[table_index];
             entry.flags = info.flags;
         }
         oam::write(&mut self.ram, index, entry);
         self.w8(oam::BYTEWISE_EXTENDED_OAM + index, u8::from(info.x >= 256));
-        if self.arr(SPRITE_FLAGS3, slot) & 0x10 != 0 {
+        if self.ram.sprite(slot).flags3() & 0x10 != 0 {
             self.sprite_draw_shadow_custom(slot, &mut info, 2);
         }
     }
@@ -2781,13 +2770,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let table_index = usize::from(
             SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1
-                .get(usize::from(self.arr(SPRITE_TYPE, slot)))
+                .get(usize::from(self.ram.sprite(slot).kind()))
                 .copied()
                 .unwrap_or_else(|| {
-                    SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(self.arr(SPRITE_TYPE, slot))
+                    SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[usize::from(
+                        self.ram.sprite(slot).kind(),
+                    )
                         - SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB1.len()]
                 })
-                .wrapping_add(self.arr(SPRITE_GRAPHICS, slot)),
+                .wrapping_add(self.ram.sprite(slot).graphics()),
         );
         let charnum = SPRITE_PREP_AND_DRAW_SINGLE_LARGE_TAB2[table_index];
         let index = self.current_oam_index();
@@ -2801,7 +2792,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             info.flags,
             0,
         );
-        if self.arr(SPRITE_FLAGS3, slot) & 0x10 != 0 {
+        if self.ram.sprite(slot).flags3() & 0x10 != 0 {
             self.sprite_draw_shadow(slot, &mut info);
         }
     }
@@ -3001,12 +2992,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 ext: 2,
             },
         ];
-        if self.arr(SPRITE_A, slot) != 0 {
-            if self.arr(SPRITE_DELAY_MAIN, slot) == 0 {
-                self.set_arr(SPRITE_STATE, slot, 0);
+        if self.ram.sprite(slot).scratch_a() != 0 {
+            if self.ram.sprite(slot).main_delay() == 0 {
+                self.ram.set_sprite_state(slot, 0);
                 if (0..16)
                     .rev()
-                    .any(|other| self.arr(SPRITE_STATE, other) == 4)
+                    .any(|other| self.ram.sprite(other).state() == 4)
                 {
                     return;
                 }
@@ -3015,18 +3006,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     self.w8(0xffc, 0);
                 }
             } else {
-                let frame = usize::from((self.arr(SPRITE_DELAY_MAIN, slot) >> 2) ^ 7) * 4;
+                let frame = usize::from((self.ram.sprite(slot).main_delay() >> 2) ^ 7) * 4;
                 self.sprite_draw_multiple(slot, &DRAW[frame..frame + 4], None);
             }
             return;
         }
-        self.set_arr(SPRITE_FLOOR, slot, 2);
-        let delay = self.arr(SPRITE_DELAY_MAIN, slot);
+        self.ram.set_sprite_floor(slot, 2);
+        let delay = self.ram.sprite(slot).main_delay();
         if delay == 32 {
-            self.set_arr(SPRITE_STATE, slot, 0);
+            self.ram.set_sprite_state(slot, 0);
             self.w8(0x2e4, 0);
             if self.r8(0x5b) != 2 && self.sprite_check_if_screen_is_clear() {
-                let kind = self.arr(SPRITE_TYPE, slot);
+                let kind = self.ram.sprite(slot).kind();
                 if kind >= 0xd6 {
                     self.w8(0x12c, 0x13);
                 } else if kind == 0x7a {
@@ -3041,7 +3032,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if delay >= 64 && (delay >= 0x70 || delay & 1 == 0) {
             self.run_sprite_active_main(slot);
         }
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         if delay >= 0xc0 {
             return;
         }
@@ -3058,9 +3049,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let spawned = spawned as usize;
         self.w8(0xaaa, 11);
-        self.set_arr(SPRITE_STATE, spawned, 4);
-        self.set_arr(SPRITE_FLAGS2, spawned, 3);
-        self.set_arr(SPRITE_OAM_FLAGS, spawned, 0x0c);
+        self.ram.set_sprite_state(spawned, 4);
+        self.ram.set_sprite_flags2(spawned, 3);
+        self.ram.set_sprite_oam_flags(spawned, 0x0c);
         const RANDOM_XY: [i8; 16] = [0, 4, 8, 12, -4, -8, -12, 0, 0, 8, 16, 24, -24, -16, -8, 0];
         let bank = if kind == 0x92 { 8 } else { 0 };
         let x = RANDOM_XY[usize::from(self.hooks.random_u8(&mut self.ram) & 7) | bank];
@@ -3072,8 +3063,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 .wrapping_add(y as i16 as u16)
                 .wrapping_sub(u16::from(info.r4_z)),
         );
-        self.set_arr(SPRITE_DELAY_MAIN, spawned, 31);
-        self.set_arr(SPRITE_A, spawned, 31);
+        self.ram.set_sprite_main_delay(spawned, 31);
+        self.ram.set_sprite_scratch_a(spawned, 31);
     }
 
     pub fn sprite_module_drown(&mut self, slot: usize) {
@@ -3131,16 +3122,17 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         const CHAR: [u8; 11] = [
             0xc0, 0xc0, 0xc0, 0xc0, 0xcd, 0xcd, 0xcd, 0xcb, 0xcb, 0xcb, 0xcb,
         ];
-        if self.arr(SPRITE_AI_STATE, slot) != 0 {
-            if self.arr(SPRITE_A, slot) == 6 {
+        if self.ram.sprite(slot).ai_state() != 0 {
+            if self.ram.sprite(slot).scratch_a() == 6 {
                 self.oam_allocate_from_region_c(8);
             }
-            self.set_arr(SPRITE_FLAGS3, slot, self.arr(SPRITE_FLAGS3, slot) ^ 16);
+            self.ram
+                .set_sprite_flags3(slot, self.ram.sprite(slot).flags3() ^ 16);
             self.sprite_draw_single_large(slot);
             let index = self.current_oam_index();
-            let delay = self.arr(SPRITE_DELAY_MAIN, slot);
+            let delay = self.ram.sprite(slot).main_delay();
             if delay == 1 {
-                self.set_arr(SPRITE_STATE, slot, 0);
+                self.ram.set_sprite_state(slot, 0);
             }
             let mut entry = oam::read(&self.ram, index);
             if delay != 0 {
@@ -3150,45 +3142,39 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 return;
             }
             entry.charnum = 0x8a;
-            entry.flags = FLAGS[usize::from((self.arr(SPRITE_SUBTYPE2, slot) >> 2) & 3)] | 0x24;
+            entry.flags = FLAGS[usize::from((self.ram.sprite(slot).subtype2() >> 2) & 3)] | 0x24;
             oam::write(&mut self.ram, index, entry);
             if self.sprite_return_if_paused(slot) {
                 return;
             }
-            self.set_arr(
-                SPRITE_SUBTYPE2,
-                slot,
-                self.arr(SPRITE_SUBTYPE2, slot).wrapping_add(1),
-            );
+            self.ram
+                .set_sprite_subtype2(slot, self.ram.sprite(slot).subtype2().wrapping_add(1));
             self.sprite_move_xy(slot);
             self.sprite_move_z(slot);
-            self.set_arr(
-                SPRITE_Z_VEL,
-                slot,
-                self.arr(SPRITE_Z_VEL, slot).wrapping_sub(2),
-            );
-            if (self.arr(SPRITE_Z, slot) as i8) < 0 {
-                self.set_arr(SPRITE_Z, slot, 0);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 18);
-                self.set_arr(SPRITE_FLAGS3, slot, self.arr(SPRITE_FLAGS3, slot) & !0x10);
+            self.ram
+                .set_sprite_velocity_z(slot, self.ram.sprite(slot).velocity_z().wrapping_sub(2));
+            if (self.ram.sprite(slot).z() as i8) < 0 {
+                self.ram.set_sprite_z(slot, 0);
+                self.ram.set_sprite_main_delay(slot, 18);
+                self.ram
+                    .set_sprite_flags3(slot, self.ram.sprite(slot).flags3() & !0x10);
             }
         } else {
             if self.sprite_return_if_paused(slot) {
                 return;
             }
             if self.r8(0x1a) & 1 == 0 {
-                self.set_arr(
-                    SPRITE_DELAY_MAIN,
+                self.ram.set_sprite_main_delay(
                     slot,
-                    self.arr(SPRITE_DELAY_MAIN, slot).wrapping_add(1),
+                    self.ram.sprite(slot).main_delay().wrapping_add(1),
                 );
             }
-            self.set_arr(SPRITE_OAM_FLAGS, slot, 0);
-            self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-            if self.arr(SPRITE_DELAY_MAIN, slot) == 0 {
-                self.set_arr(SPRITE_STATE, slot, 0);
+            self.ram.set_sprite_oam_flags(slot, 0);
+            self.ram.set_sprite_hit_timer(slot, 0);
+            if self.ram.sprite(slot).main_delay() == 0 {
+                self.ram.set_sprite_state(slot, 0);
             }
-            let frame = usize::from((self.arr(SPRITE_DELAY_MAIN, slot) << 1 & 0xf8) >> 2);
+            let frame = usize::from((self.ram.sprite(slot).main_delay() << 1 & 0xf8) >> 2);
             self.sprite_draw_multiple(slot, &DRAW[frame..frame + 2], None);
         }
     }
@@ -3205,14 +3191,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             0xe4, 0xe4,
         ];
         const EXT: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2];
-        if self.arr(SPRITE_DELAY_MAIN, slot) == 0 {
-            if self.arr(SPRITE_TYPE, slot) == 0x0d && self.arr(SPRITE_HEAD_DIR, slot) != 0 {
+        if self.ram.sprite(slot).main_delay() == 0 {
+            if self.ram.sprite(slot).kind() == 0x0d && self.ram.sprite(slot).head_direction() != 0 {
                 let x = self.sprite_get_x(slot);
                 self.prepare_enemy_drop(slot, 0x0d);
                 self.sprite_set_x(slot, x);
-                self.set_arr(SPRITE_Z_VEL, slot, 0);
-                self.set_arr(SPRITE_IGNORE_PROJECTILE, slot, 0);
-            } else if self.arr(SPRITE_DIE_ACTION, slot) == 0 {
+                self.ram.set_sprite_velocity_z(slot, 0);
+                self.ram.set_sprite_ignore_projectile(slot, 0);
+            } else if self.ram.sprite(slot).death_action() == 0 {
                 self.force_prize_drop(slot, 2, 2);
             } else {
                 self.sprite_do_the_death(slot);
@@ -3223,7 +3209,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if self.sprite_prep_oam_coord_or_double_ret(slot, &mut info) {
             return;
         }
-        let mut frame = usize::from((self.arr(SPRITE_DELAY_MAIN, slot) >> 1) & !3) + 3;
+        let mut frame = usize::from((self.ram.sprite(slot).main_delay() >> 1) & !3) + 3;
         let first = self.current_oam_index();
         for output in 0..4 {
             self.set_oam_plain(
@@ -3334,8 +3320,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 ext: 0,
             },
         ];
-        let mut index = usize::from(self.arr(SPRITE_GRAPHICS, slot));
-        if self.arr(SPRITE_TYPE, slot) == 0x13 {
+        let mut index = usize::from(self.ram.sprite(slot).graphics());
+        if self.ram.sprite(slot).kind() == 0x13 {
             index += 6;
         }
         let mut info = PrepOamCoordsRet::default();
@@ -3347,7 +3333,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if self.sprite_prep_oam_coord_or_double_ret(slot, &mut info) {
             return;
         }
-        let graphics = usize::from(self.arr(SPRITE_GRAPHICS, slot));
+        let graphics = usize::from(self.ram.sprite(slot).graphics());
         let count = if graphics < 12 && graphics & 3 == 0 {
             4
         } else {
@@ -3413,7 +3399,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let active = (0..16)
             .filter(|&slot| {
-                self.arr(SPRITE_STATE, slot) != 0 && self.arr(SPRITE_TYPE, slot) != 0x6c
+                self.ram.sprite(slot).state() != 0 && self.ram.sprite(slot).kind() != 0x6c
             })
             .count();
         if active >= 4 || self.r8(0xf3c5) < 2 {
@@ -3457,21 +3443,21 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     pub fn sprite_bounce_from_tile_collision(&mut self, slot: usize) -> u8 {
         let collision = self.sprite_check_tile_collision(slot);
         if collision & 3 != 0 {
-            self.set_arr(
-                SPRITE_X_VEL,
+            self.ram.set_sprite_velocity_x(
                 slot,
-                (0u8).wrapping_sub(self.arr(SPRITE_X_VEL, slot)),
+                (0u8).wrapping_sub(self.ram.sprite(slot).velocity_x()),
             );
-            self.set_arr(SPRITE_G, slot, self.arr(SPRITE_G, slot).wrapping_add(1));
+            self.ram
+                .set_sprite_scratch_g(slot, self.ram.sprite(slot).scratch_g().wrapping_add(1));
         }
         if collision & 12 != 0 {
-            self.set_arr(
-                SPRITE_Y_VEL,
+            self.ram.set_sprite_velocity_y(
                 slot,
-                (0u8).wrapping_sub(self.arr(SPRITE_Y_VEL, slot)),
+                (0u8).wrapping_sub(self.ram.sprite(slot).velocity_y()),
             );
-            self.set_arr(SPRITE_G, slot, self.arr(SPRITE_G, slot).wrapping_add(1));
-            return self.arr(SPRITE_G, slot);
+            self.ram
+                .set_sprite_scratch_g(slot, self.ram.sprite(slot).scratch_g().wrapping_add(1));
+            return self.ram.sprite(slot).scratch_g();
         }
         0
     }
@@ -3491,47 +3477,46 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_get_tile_attribute(&mut self, slot: usize, x: &mut u16, y: u16) -> u8 {
-        self.get_tile_attribute(self.arr(SPRITE_FLOOR, slot), x, y)
+        self.get_tile_attribute(self.ram.sprite(slot).floor(), x, y)
     }
 
     pub fn sprite_check_tile_collision2(&mut self, slot: usize) {
-        self.set_arr(SPRITE_WALLCOLL, slot, 0);
-        if (self.arr(SPRITE_FLAGS4, slot) as i8) < 0 || self.r8(0x46c) == 0 {
+        self.ram.set_sprite_wall_collision(slot, 0);
+        if (self.ram.sprite(slot).flags4() as i8) < 0 || self.r8(0x46c) == 0 {
             self.sprite_check_tile_collision_single_layer(slot);
             return;
         }
-        self.w8(0xfb6, self.arr(SPRITE_FLOOR, slot));
-        self.set_arr(SPRITE_FLOOR, slot, 1);
+        self.w8(0xfb6, self.ram.sprite(slot).floor());
+        self.ram.set_sprite_floor(slot, 1);
         self.sprite_check_tile_collision_single_layer(slot);
         if self.r8(0x46c) == 4 {
-            self.set_arr(SPRITE_FLOOR, slot, self.r8(0xfb6));
+            self.ram.set_sprite_floor(slot, self.r8(0xfb6));
             return;
         }
-        self.set_arr(SPRITE_FLOOR, slot, 0);
+        self.ram.set_sprite_floor(slot, 0);
         self.sprite_check_tile_collision_single_layer(slot);
         self.set_arr(0x1fabc, slot, self.r8(0xfa5));
     }
 
     pub fn sprite_check_tile_collision_single_layer(&mut self, slot: usize) {
-        if self.arr(SPRITE_FLAGS2, slot) & 0x20 != 0 {
+        if self.ram.sprite(slot).flags2() & 0x20 != 0 {
             if self.sprite_check_tile_property(slot, 0x6a) {
-                self.set_arr(
-                    SPRITE_WALLCOLL,
+                self.ram.set_sprite_wall_collision(
                     slot,
-                    self.arr(SPRITE_WALLCOLL, slot).wrapping_add(1),
+                    self.ram.sprite(slot).wall_collision().wrapping_add(1),
                 );
             }
             return;
         }
-        if (self.arr(SPRITE_FLAGS4, slot) as i8) < 0 || self.r8(0x46c) == 0 {
-            let y_velocity = self.arr(SPRITE_Y_VEL, slot);
+        if (self.ram.sprite(slot).flags4() as i8) < 0 || self.r8(0x46c) == 0 {
+            let y_velocity = self.ram.sprite(slot).velocity_y();
             if y_velocity != 0 {
                 self.sprite_check_for_tile_in_direction_vertical(
                     slot,
                     usize::from(y_velocity as i8 >= 0),
                 );
             }
-            let x_velocity = self.arr(SPRITE_X_VEL, slot);
+            let x_velocity = self.ram.sprite(slot).velocity_x();
             if x_velocity != 0 {
                 self.sprite_check_for_tile_in_direction_horizontal(
                     slot,
@@ -3546,40 +3531,34 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 self.sprite_check_for_tile_in_direction_horizontal(slot, direction);
             }
         }
-        if (self.arr(SPRITE_FLAGS5, slot) as i8) < 0 || self.arr(SPRITE_Z, slot) != 0 {
+        if (self.ram.sprite(slot).flags5() as i8) < 0 || self.ram.sprite(slot).z() != 0 {
             return;
         }
         self.sprite_check_tile_property(slot, 0x68);
         let tile = self.r8(0xfa5);
-        self.set_arr(SPRITE_I, slot, tile);
+        self.ram.set_sprite_scratch_i(slot, tile);
         match tile {
-            0x1c if self.r8(0xfb3) != 0 && self.arr(SPRITE_STATE, slot) == 11 => {
-                self.set_arr(SPRITE_FLOOR, slot, 1);
+            0x1c if self.r8(0xfb3) != 0 && self.ram.sprite(slot).state() == 11 => {
+                self.ram.set_sprite_floor(slot, 1);
             }
-            0x20 if self.arr(SPRITE_FLAGS, slot) & 1 != 0 => {
+            0x20 if self.ram.sprite(slot).flags() & 1 != 0 => {
                 if self.r8(0x1b) == 0 {
                     self.sprite_func8(slot);
                 } else {
-                    self.set_arr(SPRITE_STATE, slot, 5);
-                    if matches!(self.arr(SPRITE_TYPE, slot), 0x13 | 0x26) {
-                        self.set_arr(
-                            SPRITE_OAM_FLAGS,
-                            slot,
-                            self.arr(SPRITE_OAM_FLAGS, slot) & !1,
-                        );
-                        self.set_arr(SPRITE_DELAY_MAIN, slot, 63);
+                    self.ram.set_sprite_state(slot, 5);
+                    if matches!(self.ram.sprite(slot).kind(), 0x13 | 0x26) {
+                        self.ram
+                            .set_sprite_oam_flags(slot, self.ram.sprite(slot).oam_flags() & !1);
+                        self.ram.set_sprite_main_delay(slot, 63);
                     } else {
-                        self.set_arr(SPRITE_DELAY_MAIN, slot, 95);
+                        self.ram.set_sprite_main_delay(slot, 95);
                     }
                 }
             }
             0x0c if self.arr(0x1fabc, slot) == 0x1c => {
                 self.sprite_fall_adjust_position(slot);
-                self.set_arr(
-                    SPRITE_WALLCOLL,
-                    slot,
-                    self.arr(SPRITE_WALLCOLL, slot) | 0x20,
-                );
+                self.ram
+                    .set_sprite_wall_collision(slot, self.ram.sprite(slot).wall_collision() | 0x20);
             }
             0x68..=0x6b => self.sprite_apply_conveyor(slot, tile),
             8 if self.r8(0x46c) == 4 => self.sprite_apply_conveyor(slot, 0x6a),
@@ -3591,13 +3570,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if !self.sprite_check_tile_in_direction(slot, direction) {
             return;
         }
-        self.set_arr(
-            SPRITE_WALLCOLL,
+        self.ram.set_sprite_wall_collision(
             slot,
-            self.arr(SPRITE_WALLCOLL, slot) | SPRITE_FUNC7_TAB[direction],
+            self.ram.sprite(slot).wall_collision() | SPRITE_FUNC7_TAB[direction],
         );
-        if self.arr(SPRITE_SUBTYPE, slot) & 7 < 5 {
-            let displacement = if self.arr(SPRITE_F, slot) != 0 { 3 } else { 1 };
+        if self.ram.sprite(slot).subtype() & 7 < 5 {
+            let displacement = if self.ram.sprite(slot).scratch_f() != 0 {
+                3
+            } else {
+                1
+            };
             self.sprite_add_xy(
                 slot,
                 if direction & 1 != 0 {
@@ -3614,13 +3596,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if !self.sprite_check_tile_in_direction(slot, direction) {
             return;
         }
-        self.set_arr(
-            SPRITE_WALLCOLL,
+        self.ram.set_sprite_wall_collision(
             slot,
-            self.arr(SPRITE_WALLCOLL, slot) | SPRITE_FUNC7_TAB[direction],
+            self.ram.sprite(slot).wall_collision() | SPRITE_FUNC7_TAB[direction],
         );
-        if self.arr(SPRITE_SUBTYPE, slot) & 7 < 5 {
-            let displacement = if self.arr(SPRITE_F, slot) != 0 { 3 } else { 1 };
+        if self.ram.sprite(slot).subtype() & 7 < 5 {
+            let displacement = if self.ram.sprite(slot).scratch_f() != 0 {
+                3
+            } else {
+                1
+            };
             self.sprite_add_xy(
                 slot,
                 0,
@@ -3634,7 +3619,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_check_tile_in_direction(&mut self, slot: usize, direction: usize) -> bool {
-        let flags = self.arr(SPRITE_FLAGS, slot) & 0xf0;
+        let flags = self.ram.sprite(slot).flags() & 0xf0;
         self.sprite_check_tile_property(slot, 2 * (usize::from(flags >> 2) + direction))
     }
 
@@ -3660,18 +3645,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             (x, y, valid)
         };
         if !in_bounds {
-            if self.arr(SPRITE_FLAGS2, slot) & 0x40 != 0 {
-                self.set_arr(SPRITE_STATE, slot, 0);
+            if self.ram.sprite(slot).flags2() & 0x40 != 0 {
+                self.ram.set_sprite_state(slot, 0);
                 return false;
             }
             return true;
         }
         let tile = self.sprite_get_tile_attribute(slot, &mut x, y);
-        if self.arr(SPRITE_DEFL_BITS, slot) & 8 != 0 {
+        if self.ram.sprite(slot).deflection_bits() & 8 != 0 {
             let simplified = SPRITE_SIMPLIFIED_TILE_ATTR[usize::from(tile)];
             if simplified == 4 {
                 if self.r8(0x1b) == 0 {
-                    self.set_arr(SPRITE_E, slot, 4);
+                    self.ram.set_sprite_scratch_e(slot, 4);
                 }
             } else if simplified >= 1 {
                 return if (0x10..0x14).contains(&self.r8(0xfa5)) {
@@ -3682,12 +3667,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             }
             return false;
         }
-        if self.arr(SPRITE_FLAGS5, slot) & 0x40 != 0 {
-            let kind = self.arr(SPRITE_TYPE, slot);
+        if self.ram.sprite(slot).flags5() & 0x40 != 0 {
+            let kind = self.ram.sprite(slot).kind();
             if matches!(kind, 0xd2 | 0x8a) && tile == 9 {
                 return false;
             }
-            if kind == 0x94 && self.arr(SPRITE_E, slot) == 0
+            if kind == 0x94 && self.ram.sprite(slot).scratch_e() == 0
                 || matches!(kind, 0xe3 | 0x8c | 0x9a | 0x81)
             {
                 return !matches!(tile, 8 | 9);
@@ -3700,11 +3685,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return self.entity_check_sloped_tile_collision(x, y);
         }
         if self.r8(0xfa5) == 0x44 {
-            if self.arr(SPRITE_F, slot) != 0 && self.arr(SPRITE_GIVE_DAMAGE, slot) as i8 >= 0 {
-                let damage = if self.arr(SPRITE_TYPE, slot) == 0x88
+            if self.ram.sprite(slot).scratch_f() != 0 && self.ram.sprite(slot).damage() as i8 >= 0 {
+                let damage = if self.ram.sprite(slot).kind() == 0x88
                     && self.hooks.enhanced_features0() & 4096 != 0
                 {
-                    if self.arr(SPRITE_HIT_TIMER, slot) != 0 {
+                    if self.ram.sprite(slot).hit_timer() != 0 {
                         return true;
                     }
                     6
@@ -3712,13 +3697,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                     4
                 };
                 self.ancilla_check_damage_to_sprite_preset(slot, damage);
-                if self.arr(SPRITE_HIT_TIMER, slot) != 0 {
-                    self.set_arr(SPRITE_HIT_TIMER, slot, 153);
-                    self.set_arr(SPRITE_F, slot, 0);
+                if self.ram.sprite(slot).hit_timer() != 0 {
+                    self.ram.set_sprite_hit_timer(slot, 153);
+                    self.ram.set_sprite_scratch_f(slot, 0);
                 }
             }
         } else if self.r8(0xfa5) == 0x20 {
-            return self.arr(SPRITE_FLAGS, slot) & 1 == 0 || self.arr(SPRITE_F, slot) == 0;
+            return self.ram.sprite(slot).flags() & 1 == 0
+                || self.ram.sprite(slot).scratch_f() == 0;
         }
         true
     }
@@ -3735,7 +3721,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn oam_allocate_defer_to_player(&mut self, slot: usize) {
-        if self.arr(SPRITE_FLOOR, slot) != self.r8(0xee) {
+        if self.ram.sprite(slot).floor() != self.r8(0xee) {
             return;
         }
         let right = self.sprite_is_right_of_link(slot);
@@ -3746,7 +3732,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if below.b.wrapping_add(0x20) >= 0x48 {
             return;
         }
-        let bytes = (self.arr(SPRITE_FLAGS2, slot) & 0x1f).wrapping_add(1) << 2;
+        let bytes = (self.ram.sprite(slot).flags2() & 0x1f).wrapping_add(1) << 2;
         if below.a != 0 {
             self.oam_allocate_from_region_c(bytes);
         } else {
@@ -3755,50 +3741,52 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_return_if_recoiling(&mut self, slot: usize) -> bool {
-        let mut timer = self.arr(SPRITE_F, slot);
+        let mut timer = self.ram.sprite(slot).scratch_f();
         if timer == 0 {
             return false;
         }
         if timer & 0x7f == 0 {
-            self.set_arr(SPRITE_F, slot, 0);
+            self.ram.set_sprite_scratch_f(slot, 0);
             return false;
         }
-        let old_y = self.arr(SPRITE_Y_VEL, slot);
-        let old_x = self.arr(SPRITE_X_VEL, slot);
+        let old_y = self.ram.sprite(slot).velocity_y();
+        let old_x = self.ram.sprite(slot).velocity_x();
         timer = timer.wrapping_sub(1);
-        self.set_arr(SPRITE_F, slot, timer);
+        self.ram.set_sprite_scratch_f(slot, timer);
         if timer == 0
-            && (self.arr(SPRITE_X_RECOIL, slot).wrapping_add(0x20) >= 0x40
-                || self.arr(SPRITE_Y_RECOIL, slot).wrapping_add(0x20) >= 0x40)
+            && (self.ram.sprite(slot).recoil_x().wrapping_add(0x20) >= 0x40
+                || self.ram.sprite(slot).recoil_y().wrapping_add(0x20) >= 0x40)
         {
             timer = 144;
-            self.set_arr(SPRITE_F, slot, timer);
+            self.ram.set_sprite_scratch_f(slot, timer);
         }
         if (timer as i8) >= 0
             && self.r8(0x1a) & SPRITE2_RETURN_IF_RECOILING_MASKS[usize::from(timer >> 2)] == 0
         {
-            self.set_arr(SPRITE_Y_VEL, slot, self.arr(SPRITE_Y_RECOIL, slot));
-            self.set_arr(SPRITE_X_VEL, slot, self.arr(SPRITE_X_RECOIL, slot));
-            let collision = if (self.arr(SPRITE_BUMP_DAMAGE, slot) as i8) >= 0 {
+            self.ram
+                .set_sprite_velocity_y(slot, self.ram.sprite(slot).recoil_y());
+            self.ram
+                .set_sprite_velocity_x(slot, self.ram.sprite(slot).recoil_x());
+            let collision = if (self.ram.sprite(slot).bump_damage() as i8) >= 0 {
                 self.sprite_check_tile_collision(slot) & 0xf
             } else {
                 0
             };
             if collision != 0 {
                 if collision < 4 {
-                    self.set_arr(SPRITE_X_RECOIL, slot, 0);
-                    self.set_arr(SPRITE_X_VEL, slot, 0);
+                    self.ram.set_sprite_recoil_x(slot, 0);
+                    self.ram.set_sprite_velocity_x(slot, 0);
                 } else {
-                    self.set_arr(SPRITE_Y_RECOIL, slot, 0);
-                    self.set_arr(SPRITE_Y_VEL, slot, 0);
+                    self.ram.set_sprite_recoil_y(slot, 0);
+                    self.ram.set_sprite_velocity_y(slot, 0);
                 }
             } else {
                 self.sprite_move_xy(slot);
             }
         }
-        self.set_arr(SPRITE_Y_VEL, slot, old_y);
-        self.set_arr(SPRITE_X_VEL, slot, old_x);
-        self.arr(SPRITE_TYPE, slot) != 0x7a
+        self.ram.set_sprite_velocity_y(slot, old_y);
+        self.ram.set_sprite_velocity_x(slot, old_x);
+        self.ram.sprite(slot).kind() != 0x7a
     }
 
     pub fn sprite_nullify_hookshot_drag(&mut self) {
@@ -3822,12 +3810,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_behave_as_barrier(&mut self, slot: usize) {
-        let flags = self.arr(SPRITE_FLAGS4, slot);
-        self.set_arr(SPRITE_FLAGS4, slot, 0);
+        let flags = self.ram.sprite(slot).flags4();
+        self.ram.set_sprite_flags4(slot, 0);
         if self.sprite_check_damage_to_link_same_layer(slot) {
             self.sprite_halt_all_movement();
         }
-        self.set_arr(SPRITE_FLAGS4, slot, flags);
+        self.ram.set_sprite_flags4(slot, flags);
     }
 
     pub fn sprite_overworld_proximity_motivated_load(&mut self, x: u16, y: u16) {
@@ -3885,24 +3873,23 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 return;
             };
             self.w8(loaded_address, self.r8(loaded_address) | mask);
-            self.w16(0xbc0 + slot * 2, block);
-            self.set_arr(SPRITE_TYPE, slot, sprite_to_spawn.wrapping_sub(1));
-            self.set_arr(SPRITE_STATE, slot, 8);
-            self.set_arr(SPRITE_X_LO, slot, (block << 4) as u8 & 0xf0);
-            self.set_arr(SPRITE_Y_LO, slot, block as u8 & 0xf0);
-            self.set_arr(
-                SPRITE_X_HI,
+            self.ram.set_sprite_scratch_n_word(slot, block);
+            self.ram
+                .set_sprite_kind(slot, sprite_to_spawn.wrapping_sub(1));
+            self.ram.set_sprite_state(slot, 8);
+            self.ram.set_sprite_x_low(slot, (block << 4) as u8 & 0xf0);
+            self.ram.set_sprite_y_low(slot, block as u8 & 0xf0);
+            self.ram.set_sprite_x_high(
                 slot,
                 ((block >> 8) as u8 & 3).wrapping_add((self.r16(0xfbc) >> 8) as u8),
             );
-            self.set_arr(
-                SPRITE_Y_HI,
+            self.ram.set_sprite_y_high(
                 slot,
                 ((block >> 10) as u8).wrapping_add((self.r16(0xfbe) >> 8) as u8),
             );
-            self.set_arr(SPRITE_FLOOR, slot, 0);
-            self.set_arr(SPRITE_SUBTYPE, slot, 0);
-            self.set_arr(SPRITE_DIE_ACTION, slot, 0);
+            self.ram.set_sprite_floor(slot, 0);
+            self.ram.set_sprite_subtype(slot, 0);
+            self.ram.set_sprite_death_action(slot, 0);
         }
     }
 
@@ -4034,25 +4021,29 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
     }
     pub fn sprite_setup_hit_box(&self, slot: usize, hitbox: &mut SpriteHitBox) {
-        if (self.arr(SPRITE_Z, slot) as i8) < 0 {
+        if (self.ram.sprite(slot).z() as i8) < 0 {
             hitbox.r10_spr_xhi = 0x80;
             return;
         }
-        let index = usize::from(self.arr(SPRITE_FLAGS4, slot) & 0x1f);
-        let xlow = u16::from(self.arr(SPRITE_X_LO, slot))
+        let index = usize::from(self.ram.sprite(slot).flags4() & 0x1f);
+        let xlow = u16::from(self.ram.sprite(slot).x_low())
             .wrapping_add(u16::from(SPRITE_HITBOX_X_LO[index] as u8));
         hitbox.r4_spr_xlo = xlow as u8;
         hitbox.r10_spr_xhi = self
-            .arr(SPRITE_X_HI, slot)
+            .ram
+            .sprite(slot)
+            .x_high()
             .wrapping_add(SPRITE_HITBOX_X_HI[index] as u8)
             .wrapping_add((xlow >> 8) as u8);
-        let ylow = u16::from(self.arr(SPRITE_Y_LO, slot))
+        let ylow = u16::from(self.ram.sprite(slot).y_low())
             .wrapping_add(u16::from(SPRITE_HITBOX_Y_LO[index] as u8));
-        let borrow_source = (ylow as u8).wrapping_sub(self.arr(SPRITE_Z, slot));
+        let borrow_source = (ylow as u8).wrapping_sub(self.ram.sprite(slot).z());
         hitbox.r5_spr_ylo = borrow_source;
         hitbox.r11_spr_yhi = self
-            .arr(SPRITE_Y_HI, slot)
-            .wrapping_sub(u8::from((ylow as u8) < self.arr(SPRITE_Z, slot)))
+            .ram
+            .sprite(slot)
+            .y_high()
+            .wrapping_sub(u8::from((ylow as u8) < self.ram.sprite(slot).z()))
             .wrapping_add((ylow >> 8) as u8)
             .wrapping_add(SPRITE_HITBOX_Y_HI[index] as u8);
         hitbox.r6_spr_xsize = SPRITE_HITBOX_X_SIZE[index];
@@ -4066,7 +4057,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             && self
                 .r16(0x20)
                 .wrapping_sub(self.r16(0xfda))
-                .wrapping_add(u16::from(self.arr(SPRITE_Z, slot)))
+                .wrapping_add(u16::from(self.ram.sprite(slot).z()))
                 .wrapping_add(16)
                 < 24
     }
@@ -4166,7 +4157,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         hitbox.r10_spr_xhi = (x >> 8) as u8;
         hitbox.r5_spr_ylo = y as u8;
         hitbox.r11_spr_yhi = (y >> 8) as u8;
-        let size = if self.arr(SPRITE_TYPE, slot) == 0x6a {
+        let size = if self.ram.sprite(slot).kind() == 0x6a {
             16
         } else {
             3
@@ -4191,13 +4182,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.w8(0x46, 19);
         self.sprite_apply_recoil_to_link(slot, 24);
         self.w8(0x4d, 1);
-        let damage_class = self.arr(SPRITE_BUMP_DAMAGE, slot) & 0x0f;
+        let damage_class = self.ram.sprite(slot).bump_damage() & 0x0f;
         let armor = self.r8(0xf35b);
         let damage = PLAYER_DAMAGES[usize::from(damage_class) * 3 + usize::from(armor)];
         self.w8(0x373, damage as u8);
-        if self.arr(SPRITE_TYPE, slot) == 0x61 && self.arr(SPRITE_C, slot) != 0 {
-            self.w8(0x28, self.arr(SPRITE_X_VEL, slot).wrapping_mul(2));
-            self.w8(0x27, self.arr(SPRITE_Y_VEL, slot).wrapping_mul(2));
+        if self.ram.sprite(slot).kind() == 0x61 && self.ram.sprite(slot).scratch_c() != 0 {
+            self.w8(0x28, self.ram.sprite(slot).velocity_x().wrapping_mul(2));
+            self.w8(0x27, self.ram.sprite(slot).velocity_y().wrapping_mul(2));
         }
     }
 
@@ -4217,7 +4208,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_check_damage_to_player_1(&mut self, slot: usize) -> bool {
-        if ((slot as u8 ^ self.r8(0x1a)) & 3) | self.arr(SPRITE_HIT_TIMER, slot) != 0 {
+        if ((slot as u8 ^ self.r8(0x1a)) & 3) | self.ram.sprite(slot).hit_timer() != 0 {
             false
         } else {
             self.sprite_check_damage_to_link_same_layer(slot)
@@ -4225,15 +4216,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_check_damage_to_link_same_layer(&mut self, slot: usize) -> bool {
-        self.arr(SPRITE_FLOOR, slot) == self.r8(0xee)
+        self.ram.sprite(slot).floor() == self.r8(0xee)
             && self.sprite_check_damage_to_link_ignore_layer(slot)
     }
 
     pub fn sprite_check_damage_to_link_ignore_layer(&mut self, slot: usize) -> bool {
-        let collision = if self.arr(SPRITE_FLAGS4, slot) != 0 {
+        let collision = if self.ram.sprite(slot).flags4() != 0 {
             let mut hitbox = SpriteHitBox::default();
             self.link_setup_hit_box(&mut hitbox);
-            let kind = self.arr(SPRITE_TYPE, slot);
+            let kind = self.ram.sprite(slot).kind();
             if (0xd8..=0xe6).contains(&kind) && self.hooks.enhanced_features0() & 16 != 0 {
                 self.link_update_hit_box_with_sword(&mut hitbox);
             }
@@ -4242,7 +4233,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         } else {
             self.sprite_setup_hit_box00(slot)
         };
-        if (self.arr(SPRITE_FLAGS2, slot) as i8) < 0 {
+        if (self.ram.sprite(slot).flags2() as i8) < 0 {
             return collision;
         }
         if !collision || self.r8(0x4d) != 0 {
@@ -4250,32 +4241,32 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         let shield_failure = self.r8(0x2e0) != 0
             || (self.r8(0x308) as i8) < 0
-            || self.arr(SPRITE_FLAGS5, slot) & 0x20 == 0
+            || self.ram.sprite(slot).flags5() & 0x20 == 0
             || self.r8(0xf35a) == 0;
         if !shield_failure {
-            self.set_arr(SPRITE_STATE, slot, 0);
+            self.ram.set_sprite_state(slot, 0);
             let direction = if self.r8(0x3c) != 0 {
                 SPRITE_DAMAGE_TAB2[usize::from(self.r8(0x2f) >> 1)]
             } else {
                 self.r8(0x2f)
             };
-            if direction == SPRITE_DAMAGE_TAB3[usize::from(self.arr(SPRITE_D, slot))] {
+            if direction == SPRITE_DAMAGE_TAB3[usize::from(self.ram.sprite(slot).scratch_d())] {
                 self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 6);
                 self.sprite_place_rupulse_spark_2(slot);
-                match self.arr(SPRITE_TYPE, slot) {
+                match self.ram.sprite(slot).kind() {
                     0x95 => {
                         self.hooks.sprite_sfx3_with_pan(&mut self.ram, slot, 0x26);
                         return false;
                     }
                     0x9b => {
                         self.sprite_invert_xy_speeds(slot);
-                        self.set_arr(SPRITE_D, slot, self.arr(SPRITE_D, slot) ^ 1);
-                        self.set_arr(
-                            SPRITE_AI_STATE,
+                        self.ram
+                            .set_sprite_scratch_d(slot, self.ram.sprite(slot).scratch_d() ^ 1);
+                        self.ram.set_sprite_ai_state(
                             slot,
-                            self.arr(SPRITE_AI_STATE, slot).wrapping_add(1),
+                            self.ram.sprite(slot).ai_state().wrapping_add(1),
                         );
-                        self.set_arr(SPRITE_STATE, slot, 9);
+                        self.ram.set_sprite_state(slot, 9);
                         return false;
                     }
                     0x1b => {
@@ -4291,15 +4282,15 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             }
         }
         self.sprite_attempt_damage_to_link_plus_recoil(slot);
-        if self.arr(SPRITE_TYPE, slot) == 0x0c {
+        if self.ram.sprite(slot).kind() == 0x0c {
             self.sprite_func3(slot);
         }
         true
     }
 
     pub fn sprite_check_damage_from_link(&mut self, slot: usize) -> u8 {
-        if self.arr(SPRITE_HIT_TIMER, slot) & 0x80 != 0
-            || self.arr(SPRITE_FLOOR, slot) != self.r8(0xee)
+        if self.ram.sprite(slot).hit_timer() & 0x80 != 0
+            || self.ram.sprite(slot).floor() != self.r8(0xee)
             || self.r8(0x44) == 0x80
         {
             return 0;
@@ -4315,33 +4306,30 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return 3;
         }
         if self.r8(0x301) & 10 != 0 {
-            if self.arr(SPRITE_TYPE, slot) >= 0xd6 {
+            if self.ram.sprite(slot).kind() >= 0xd6 {
                 return 0;
             }
-            if self.arr(SPRITE_STATE, slot) == 11 && self.arr(SPRITE_UNK5, slot) != 0 {
-                self.set_arr(SPRITE_STATE, slot, 2);
-                self.set_arr(SPRITE_DELAY_MAIN, slot, 32);
-                self.set_arr(
-                    SPRITE_FLAGS2,
-                    slot,
-                    (self.arr(SPRITE_FLAGS2, slot) & 0xe0) | 3,
-                );
+            if self.ram.sprite(slot).state() == 11 && self.ram.sprite(slot).unknown5() != 0 {
+                self.ram.set_sprite_state(slot, 2);
+                self.ram.set_sprite_main_delay(slot, 32);
+                self.ram
+                    .set_sprite_flags2(slot, (self.ram.sprite(slot).flags2() & 0xe0) | 3);
                 self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x1f);
                 return 3;
             }
         }
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         if kind == 0x7b {
             if self.r8(0x3c).wrapping_sub(9) as i8 >= 0 {
                 return 0;
             }
         } else if kind == 9 {
-            if self.arr(SPRITE_A, slot) == 0 {
+            if self.ram.sprite(slot).scratch_a() == 0 {
                 self.sprite_apply_recoil_to_link(slot, 48);
                 self.w8(0x47, 144);
                 self.w8(0x46, 16);
                 self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x21);
-                self.set_arr(SPRITE_DELAY_AUX1, slot, 48);
+                self.ram.set_sprite_aux1_delay(slot, 48);
                 let effect = if self.hooks.enhanced_features0() & 4096 != 0 {
                     0x32
                 } else {
@@ -4353,7 +4341,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 return 1;
             }
         } else if kind == 0x92 {
-            if self.arr(SPRITE_C, slot) < 3 {
+            if self.ram.sprite(slot).scratch_c() < 3 {
                 if self.r8(0x47) == 0 {
                     self.sprite_apply_recoil_to_link(slot, 4);
                     self.w8(0x46, 16);
@@ -4368,13 +4356,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         } else if matches!(kind, 0x26 | 0x13 | 2) {
             let parry = kind == 2
                 || kind == 0x13
-                    && SPRITE_DAMAGE_TAB3[usize::from(self.arr(SPRITE_D, slot))] == self.r8(0x2f);
+                    && SPRITE_DAMAGE_TAB3[usize::from(self.ram.sprite(slot).scratch_d())]
+                        == self.r8(0x2f);
             self.sprite_attempt_zap_damage(slot);
             self.sprite_apply_recoil_to_link(slot, 32);
             self.w8(0x47, 16);
             self.w8(0x46, 16);
             if parry {
-                self.set_arr(SPRITE_HIT_TIMER, slot, 0);
+                self.ram.set_sprite_hit_timer(slot, 0);
                 self.link_place_weapon_tink();
             }
             return 0;
@@ -4383,7 +4372,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.w8(0x47, 144);
             self.w8(0x46, 16);
         }
-        if self.arr(SPRITE_DEFL_BITS, slot) & 4 == 0 {
+        if self.ram.sprite(slot).deflection_bits() & 4 == 0 {
             self.sprite_attempt_zap_damage(slot);
             return 1;
         }
@@ -4397,9 +4386,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn guard_parry_sword_attacks(&mut self, slot: usize) {
-        if self.arr(SPRITE_FLOOR, slot) != self.r8(0xee)
+        if self.ram.sprite(slot).floor() != self.r8(0xee)
             || self.r8(0x46) | self.r8(0x4d) != 0
-            || (self.arr(SPRITE_HIT_TIMER, slot) as i8) < 0
+            || (self.ram.sprite(slot).hit_timer() as i8) < 0
         {
             return;
         }
@@ -4419,9 +4408,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             }
             return;
         }
-        if self.arr(SPRITE_TYPE, slot) != 0x6a {
+        if self.ram.sprite(slot).kind() != 0x6a {
             let random = usize::from(self.hooks.random_u8(&mut self.ram) & 7);
-            self.set_arr(SPRITE_F, slot, SPRITE_FUNC1_TAB[random]);
+            self.ram
+                .set_sprite_scratch_f(slot, SPRITE_FUNC1_TAB[random]);
         }
         let random = usize::from(self.hooks.random_u8(&mut self.ram) & 7);
         self.w8(0x46, SPRITE_FUNC1_TAB2[random]);
@@ -4431,8 +4421,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             24
         };
         let projected = self.sprite_project_speed_towards_link(slot, velocity);
-        self.set_arr(SPRITE_X_RECOIL, slot, (-(projected.x as i8)) as u8);
-        self.set_arr(SPRITE_Y_RECOIL, slot, (-(projected.y as i8)) as u8);
+        self.ram
+            .set_sprite_recoil_x(slot, (-(projected.x as i8)) as u8);
+        self.ram
+            .set_sprite_recoil_y(slot, (-(projected.y as i8)) as u8);
         self.sprite_apply_recoil_to_link(
             slot,
             if (self.r8(0x3c).wrapping_sub(9) as i8) < 0 {
@@ -4446,16 +4438,16 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_attempt_zap_damage(&mut self, slot: usize) {
-        let mut kind = self.arr(SPRITE_TYPE, slot);
+        let mut kind = self.ram.sprite(slot).kind();
         let zaps = kind == 0x7a
             || kind == 0x0d && {
                 kind = self.r8(0xf359);
                 kind < 4
             }
-            || matches!(kind, 0x24 | 0x23) && self.arr(SPRITE_DELAY_MAIN, slot) != 0;
-        if zaps && self.arr(SPRITE_STATE, slot) == 9 {
+            || matches!(kind, 0x24 | 0x23) && self.ram.sprite(slot).main_delay() != 0;
+        if zaps && self.ram.sprite(slot).state() == 9 {
             if self.r8(0x31f) == 0 {
-                self.set_arr(SPRITE_DELAY_AUX1, slot, 64);
+                self.ram.set_sprite_aux1_delay(slot, 64);
                 self.w8(0x360, 64);
                 self.sprite_attempt_damage_to_link_plus_recoil(slot);
             }
@@ -4466,17 +4458,19 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 0x40
             };
             let velocity = self.sprite_project_speed_towards_link(slot, speed);
-            self.set_arr(SPRITE_X_RECOIL, slot, (-(velocity.x as i8)) as u8);
-            self.set_arr(SPRITE_Y_RECOIL, slot, (-(velocity.y as i8)) as u8);
+            self.ram
+                .set_sprite_recoil_x(slot, (-(velocity.x as i8)) as u8);
+            self.ram
+                .set_sprite_recoil_y(slot, (-(velocity.y as i8)) as u8);
             self.sprite_calculate_sword_damage(slot);
         }
     }
 
     pub fn sprite_calculate_sword_damage(&mut self, slot: usize) {
-        if self.arr(SPRITE_FLAGS3, slot) & 0x40 != 0 {
+        if self.ram.sprite(slot).flags3() & 0x40 != 0 {
             return;
         }
-        self.set_arr(SPRITE_UNK1, slot, self.r8(0x372));
+        self.ram.set_sprite_unknown1(slot, self.r8(0x372));
         let mut index = self.r8(0xf359).wrapping_sub(1);
         if self.r8(0x372) == 0 {
             index |= if (self.r8(0x3c) as i8) < 0 {
@@ -4497,12 +4491,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn ancilla_check_damage_to_sprite_preset(&mut self, slot: usize, damage_type: u8) {
-        if damage_type == 15 && self.arr(SPRITE_Z, slot) != 0 {
+        if damage_type == 15 && self.ram.sprite(slot).z() != 0 {
             return;
         }
         self.sprite_func15(slot, damage_type);
         if damage_type != 0 && damage_type != 7
-            || self.arr(SPRITE_GIVE_DAMAGE, slot) != 0
+            || self.ram.sprite(slot).damage() != 0
             || self.r8(0xfac) != 0
         {
             return;
@@ -4522,12 +4516,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn sprite_apply_calculated_damage(&mut self, slot: usize, hit_timer: u8) {
-        if self.arr(SPRITE_FLAGS3, slot) & 0x40 != 0 || self.arr(SPRITE_TYPE, slot) >= 0xd8 {
+        if self.ram.sprite(slot).flags3() & 0x40 != 0 || self.ram.sprite(slot).kind() >= 0xd8 {
             return;
         }
         let damage_type = self.r8(0xcf2);
-        let enemy_class = self
-            .r8(0x16000 + usize::from(self.arr(SPRITE_TYPE, slot)) * 16 + usize::from(damage_type));
+        let enemy_class = self.r8(0x16000
+            + usize::from(self.ram.sprite(slot).kind()) * 16
+            + usize::from(damage_type));
         let damage = ENEMY_DAMAGES[(usize::from(damage_type) * 8) | usize::from(enemy_class)];
         self.sprite_give_damage(slot, damage, hit_timer);
     }
@@ -4539,54 +4534,54 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         }
         if damage == 250 {
             self.sprite_func18(slot, 0x8f);
-            self.set_arr(SPRITE_AI_STATE, slot, 2);
-            self.set_arr(SPRITE_Z_VEL, slot, 32);
-            self.set_arr(SPRITE_OAM_FLAGS, slot, 8);
-            self.set_arr(SPRITE_F, slot, 0);
-            self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-            self.set_arr(SPRITE_HEALTH, slot, 0);
-            self.set_arr(SPRITE_BUMP_DAMAGE, slot, 1);
-            self.set_arr(SPRITE_FLAGS5, slot, 1);
+            self.ram.set_sprite_ai_state(slot, 2);
+            self.ram.set_sprite_velocity_z(slot, 32);
+            self.ram.set_sprite_oam_flags(slot, 8);
+            self.ram.set_sprite_scratch_f(slot, 0);
+            self.ram.set_sprite_hit_timer(slot, 0);
+            self.ram.set_sprite_health(slot, 0);
+            self.ram.set_sprite_bump_damage(slot, 1);
+            self.ram.set_sprite_flags5(slot, 1);
             return;
         }
-        if damage >= self.arr(SPRITE_GIVE_DAMAGE, slot) {
-            self.set_arr(SPRITE_GIVE_DAMAGE, slot, damage);
+        if damage >= self.ram.sprite(slot).damage() {
+            self.ram.set_sprite_damage(slot, damage);
         }
         if damage == 0 {
             if self.r8(0xcf2) != 10 {
-                if self.arr(SPRITE_FLAGS, slot) & 4 != 0 {
+                if self.ram.sprite(slot).flags() & 4 != 0 {
                     self.finish_sprite_damage(slot);
                     return;
                 }
                 self.w8(0x2e3, 0);
             }
-            self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-            self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+            self.ram.set_sprite_hit_timer(slot, 0);
+            self.ram.set_sprite_damage(slot, 0);
             return;
         }
-        if damage >= 254 && self.arr(SPRITE_STATE, slot) == 11 {
-            self.set_arr(SPRITE_HIT_TIMER, slot, 0);
-            self.set_arr(SPRITE_GIVE_DAMAGE, slot, 0);
+        if damage >= 254 && self.ram.sprite(slot).state() == 11 {
+            self.ram.set_sprite_hit_timer(slot, 0);
+            self.ram.set_sprite_damage(slot, 0);
             return;
         }
-        if self.arr(SPRITE_TYPE, slot) == 0x9a && self.arr(SPRITE_GIVE_DAMAGE, slot) < 0xf0 {
-            self.set_arr(SPRITE_STATE, slot, 9);
-            self.set_arr(SPRITE_AI_STATE, slot, 4);
-            self.set_arr(SPRITE_DELAY_MAIN, slot, 15);
+        if self.ram.sprite(slot).kind() == 0x9a && self.ram.sprite(slot).damage() < 0xf0 {
+            self.ram.set_sprite_state(slot, 9);
+            self.ram.set_sprite_ai_state(slot, 4);
+            self.ram.set_sprite_main_delay(slot, 15);
             self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x28);
             return;
         }
-        if self.arr(SPRITE_TYPE, slot) == 0x1b {
+        if self.ram.sprite(slot).kind() == 0x1b {
             self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 5);
             self.sprite_schedule_for_breakage(slot);
             self.sprite_place_weapon_tink(slot);
             return;
         }
-        self.set_arr(SPRITE_HIT_TIMER, slot, hit_timer);
-        if self.arr(SPRITE_TYPE, slot) != 0x92 || self.arr(SPRITE_C, slot) >= 3 {
-            let effect = if self.arr(SPRITE_FLAGS, slot) & 2 != 0 {
+        self.ram.set_sprite_hit_timer(slot, hit_timer);
+        if self.ram.sprite(slot).kind() != 0x92 || self.ram.sprite(slot).scratch_c() >= 3 {
+            let effect = if self.ram.sprite(slot).flags() & 2 != 0 {
                 0x21
-            } else if self.arr(SPRITE_FLAGS5, slot) & 0x10 != 0 {
+            } else if self.ram.sprite(slot).flags5() & 0x10 != 0 {
                 0x1c
             } else {
                 8
@@ -4598,7 +4593,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     fn finish_sprite_damage(&mut self, slot: usize) {
-        let kind = self.arr(SPRITE_TYPE, slot);
+        let kind = self.ram.sprite(slot).kind();
         let value = if self.r8(0xcf2) >= 13 {
             0
         } else if kind == 9 {
@@ -4608,7 +4603,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         } else {
             15
         };
-        self.set_arr(SPRITE_F, slot, value);
+        self.ram.set_sprite_scratch_f(slot, value);
     }
 
     pub fn sprite_check_damage_to_and_from_link(&mut self, slot: usize) -> bool {
@@ -4636,10 +4631,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         if x & !0xff != 0 || y & !0xff != 0 {
             return;
         }
-        self.w8(0xfad, self.arr(SPRITE_X_LO, slot));
-        self.w8(0xfae, self.arr(SPRITE_Y_LO, slot));
+        self.w8(0xfad, self.ram.sprite(slot).x_low());
+        self.w8(0xfae, self.ram.sprite(slot).y_low());
         self.w8(0xfac, 5);
-        self.w8(0xb68, self.arr(SPRITE_FLOOR, slot));
+        self.w8(0xb68, self.ram.sprite(slot).floor());
     }
 
     pub fn sprite_place_weapon_tink(&mut self, slot: usize) {
@@ -4665,13 +4660,14 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             false
         } else {
             self.w8(0xf6, 0);
-            self.set_arr(SPRITE_E, slot, 0);
+            self.ram.set_sprite_scratch_e(slot, 0);
             self.hooks.sprite_sfx2_with_pan(&mut self.ram, slot, 0x1d);
-            self.set_arr(SPRITE_UNK4, slot, self.arr(SPRITE_STATE, slot));
-            self.set_arr(SPRITE_STATE, slot, 10);
-            self.set_arr(SPRITE_DELAY_MAIN, slot, 16);
-            self.set_arr(SPRITE_UNK3, slot, 0);
-            self.set_arr(SPRITE_I, slot, 0);
+            self.ram
+                .set_sprite_unknown4(slot, self.ram.sprite(slot).state());
+            self.ram.set_sprite_state(slot, 10);
+            self.ram.set_sprite_main_delay(slot, 16);
+            self.ram.set_sprite_unknown3(slot, 0);
+            self.ram.set_sprite_scratch_i(slot, 0);
             let direction = usize::from(self.sprite_direction_to_face_link(slot).0);
             self.w8(0x2f, SPRITE_RETURN_IF_LIFTED_DIRS[direction]);
             true
@@ -4680,18 +4676,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn sprite_return_if_lifted(&mut self, slot: usize) -> bool {
         if self.r8(0x11) | self.r8(0x3c) | self.r8(0xfc1) != 0
-            || self.arr(SPRITE_FLOOR, slot) != self.r8(0xee)
+            || self.ram.sprite(slot).floor() != self.r8(0xee)
         {
             return false;
         }
         if (0..16)
             .rev()
-            .any(|other| self.arr(SPRITE_STATE, other) == 10)
+            .any(|other| self.ram.sprite(other).state() == 10)
         {
             return false;
         }
-        if !matches!(self.arr(SPRITE_TYPE, slot), 0x0b | 0x4a)
-            && self.arr(SPRITE_X_VEL, slot) | self.arr(SPRITE_Y_VEL, slot) != 0
+        if !matches!(self.ram.sprite(slot).kind(), 0x0b | 0x4a)
+            && self.ram.sprite(slot).velocity_x() | self.ram.sprite(slot).velocity_y() != 0
         {
             return false;
         }
@@ -4755,8 +4751,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             return;
         };
         let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
-        let flags =
-            (self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite)) & 0xf0 | 4;
+        let flags = (self.ram.sprite(sprite).oam_flags()
+            | self.ram.sprite(sprite).object_priority())
+            & 0xf0
+            | 4;
         self.set_oam_plain(
             self.current_oam_index(),
             x,
@@ -4810,7 +4808,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             x,
             y,
             0x28,
-            self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite),
+            self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority(),
             2,
         );
     }
@@ -4822,7 +4820,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             u16::from(self.arr(GARNISH_X_LO, slot)).wrapping_sub(self.r16(0xe2)),
             u16::from(self.arr(GARNISH_Y_LO, slot)).wrapping_sub(self.r16(0xe8)),
             0xaa,
-            self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite),
+            self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority(),
             2,
         );
     }
@@ -4852,7 +4850,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             x,
             y,
             0x75,
-            self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite),
+            self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority(),
             0,
         );
     }
@@ -4881,7 +4879,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             x.wrapping_add(offset),
             y.wrapping_add(offset),
             CHAR[frame],
-            (self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite)) & !1,
+            (self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority()) & !1,
             0,
         );
     }
@@ -4932,7 +4930,9 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             x,
             y,
             CHAR[usize::from(self.arr(GARNISH_COUNTDOWN, slot) >> 3)],
-            (self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite)) & 0xf0 | 0x0e,
+            (self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority())
+                & 0xf0
+                | 0x0e,
             0,
         );
     }
@@ -4948,7 +4948,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             x,
             y,
             CHAR[usize::from(self.arr(GARNISH_OAM_FLAGS, slot).wrapping_sub(7))],
-            self.arr(SPRITE_OAM_FLAGS, sprite) | self.arr(SPRITE_OBJ_PRIO, sprite),
+            self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority(),
             0,
         );
     }
@@ -5269,12 +5269,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             garnish,
             self.sprite_get_y(slot)
                 .wrapping_add(y)
-                .wrapping_sub(u16::from(self.arr(SPRITE_Z, slot)))
+                .wrapping_sub(u16::from(self.ram.sprite(slot).z()))
                 .wrapping_add(16),
         );
         self.set_arr(GARNISH_COUNTDOWN, garnish, 31);
         self.set_arr(GARNISH_SPRITE, garnish, slot as u8);
-        self.set_arr(GARNISH_FLOOR, garnish, self.arr(SPRITE_FLOOR, slot));
+        self.set_arr(GARNISH_FLOOR, garnish, self.ram.sprite(slot).floor());
         self.w8(15, garnish as u8);
         garnish as i32
     }
@@ -5292,67 +5292,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             13
         };
         (0..=top).rev().find(|&i| {
-            self.arr(SPRITE_STATE, i) == 0
-                || self.arr(SPRITE_TYPE, i) == 0x41 && self.arr(SPRITE_C, i) != 0
+            self.ram.sprite(i).state() == 0
+                || self.ram.sprite(i).kind() == 0x41 && self.ram.sprite(i).scratch_c() != 0
         })
     }
 }
 
 const OVERLORD_TYPE: usize = 0xb00;
-const SPRITE_Y_LO: usize = 0xd00;
-const SPRITE_X_LO: usize = 0xd10;
-const SPRITE_Y_HI: usize = 0xd20;
-const SPRITE_X_HI: usize = 0xd30;
-const SPRITE_Y_VEL: usize = 0xd40;
-const SPRITE_X_VEL: usize = 0xd50;
-const SPRITE_Y_SUBPIXEL: usize = 0xd60;
-const SPRITE_X_SUBPIXEL: usize = 0xd70;
-const SPRITE_AI_STATE: usize = 0xd80;
-const SPRITE_C: usize = 0xdb0;
-const SPRITE_GRAPHICS: usize = 0xdc0;
-const SPRITE_STATE: usize = 0xdd0;
-const SPRITE_D: usize = 0xde0;
-const SPRITE_DELAY_MAIN: usize = 0xdf0;
-const SPRITE_DELAY_AUX1: usize = 0xe00;
-const SPRITE_DELAY_AUX2: usize = 0xe10;
-const SPRITE_TYPE: usize = 0xe20;
-const SPRITE_SUBTYPE: usize = 0xe30;
-const SPRITE_SUBTYPE2: usize = 0xe80;
-const SPRITE_E: usize = 0xe90;
-const SPRITE_A: usize = 0xd90;
-const SPRITE_B: usize = 0xda0;
-const SPRITE_HEAD_DIR: usize = 0xeb0;
-const SPRITE_ANIM_CLOCK: usize = 0xec0;
-const SPRITE_G: usize = 0xed0;
-const SPRITE_DELAY_AUX3: usize = 0xee0;
-const SPRITE_HIT_TIMER: usize = 0xef0;
-const SPRITE_FLOOR: usize = 0xf20;
-const SPRITE_WALLCOLL: usize = 0xe70;
-const SPRITE_PAUSE: usize = 0xf00;
-const SPRITE_DEFL_BITS: usize = 0xcaa;
-const SPRITE_FLAGS4: usize = 0xf60;
-const SPRITE_FLAGS2: usize = 0xe40;
-const SPRITE_HEALTH: usize = 0xe50;
-const SPRITE_FLAGS3: usize = 0xe60;
-const SPRITE_FLAGS5: usize = 0xbe0;
-const SPRITE_FLAGS: usize = 0xb6b;
-const SPRITE_N: usize = 0xbc0;
-const SPRITE_ROOM: usize = 0xc9a;
-const SPRITE_DIE_ACTION: usize = 0xcba;
-const SPRITE_BUMP_DAMAGE: usize = 0xcd2;
-const SPRITE_GIVE_DAMAGE: usize = 0xce2;
-const SPRITE_OAM_FLAGS: usize = 0xf50;
-const SPRITE_STUNNED: usize = 0xb58;
-const SPRITE_IGNORE_PROJECTILE: usize = 0xba0;
-const SPRITE_OBJ_PRIO: usize = 0xb89;
-const SPRITE_UNK2: usize = 0xbb0;
-const SPRITE_F: usize = 0xea0;
-const SPRITE_X_RECOIL: usize = 0xf40;
-const SPRITE_Y_RECOIL: usize = 0xf30;
-const SPRITE_DELAY_AUX4: usize = 0xf10;
-const SPRITE_Z: usize = 0xf70;
-const SPRITE_Z_VEL: usize = 0xf80;
-const SPRITE_Z_SUBPOS: usize = 0xf90;
 const GARNISH_TYPE: usize = 0x1f800;
 const GARNISH_Y_LO: usize = 0x1f81e;
 const GARNISH_X_LO: usize = 0x1f83c;
@@ -5366,11 +5312,6 @@ const GARNISH_COUNTDOWN: usize = 0x1f90e;
 const GARNISH_SPRITE: usize = 0x1f92c;
 const GARNISH_FLOOR: usize = 0x1f968;
 const GARNISH_OAM_FLAGS: usize = 0x1f9fe;
-const SPRITE_I: usize = 0x1f9c2;
-const SPRITE_UNK3: usize = 0x1fa1c;
-const SPRITE_UNK4: usize = 0x1fa2c;
-const SPRITE_UNK5: usize = 0x1fa3c;
-const SPRITE_UNK1: usize = 0x1fa4c;
 
 pub const ABSORB_BIG_KEY: [u8; 2] = [0x40, 0x20];
 pub const ABSORPTION_SFX: [u8; 15] = [
@@ -5824,15 +5765,15 @@ mod tests {
         let mut hooks = Hooks;
         let mut sprites = Sprite::new(&mut bytes, &mut hooks);
         sprites.sprite_set_x(0, 0x1234);
-        sprites.set_arr(SPRITE_X_SUBPIXEL, 0, 0xf8);
-        sprites.set_arr(SPRITE_X_VEL, 0, (-2i8) as u8);
+        sprites.ram.set_sprite_subpixel_x(0, 0xf8);
+        sprites.ram.set_sprite_velocity_x(0, (-2i8) as u8);
         sprites.sprite_move_x(0);
         assert_eq!(sprites.sprite_get_x(0), 0x1234);
-        assert_eq!(sprites.arr(SPRITE_X_SUBPIXEL, 0), 0xd8);
-        sprites.set_arr(SPRITE_X_VEL, 0, 8);
+        assert_eq!(sprites.ram.sprite(0).subpixel_x(), 0xd8);
+        sprites.ram.set_sprite_velocity_x(0, 8);
         sprites.sprite_move_x(0);
         assert_eq!(sprites.sprite_get_x(0), 0x1235);
-        assert_eq!(sprites.arr(SPRITE_X_SUBPIXEL, 0), 0x58);
+        assert_eq!(sprites.ram.sprite(0).subpixel_x(), 0x58);
     }
 
     #[test]
@@ -5979,11 +5920,11 @@ mod tests {
         let mut bytes = [0u8; WRAM_SIZE];
         let mut hooks = ExecutionHooks::default();
         let mut sprites = Sprite::new(&mut bytes, &mut hooks);
-        sprites.set_arr(SPRITE_FLOOR, 0, 0);
-        sprites.set_arr(SPRITE_HIT_TIMER, 0, 0x80);
+        sprites.ram.set_sprite_floor(0, 0);
+        sprites.ram.set_sprite_hit_timer(0, 0x80);
         sprites.guard_parry_sword_attacks(0);
         assert_eq!(sprites.hooks.random_calls, 0);
-        assert_eq!(sprites.arr(SPRITE_F, 0), 0);
+        assert_eq!(sprites.ram.sprite(0).scratch_f(), 0);
     }
 
     #[test]
@@ -6063,13 +6004,13 @@ mod tests {
         let block = 0x0132u16;
         sprites.w8(0x1df80 + usize::from(block), 0x22);
         sprites.overworld_load_proxima_sprite_if_alive(block);
-        assert_eq!(sprites.arr(SPRITE_STATE, 13), 8);
-        assert_eq!(sprites.arr(SPRITE_TYPE, 13), 0x21);
+        assert_eq!(sprites.ram.sprite(13).state(), 8);
+        assert_eq!(sprites.ram.sprite(13).kind(), 0x21);
         assert_eq!(sprites.r16(0xbc0 + 13 * 2), block);
-        assert_eq!(sprites.arr(SPRITE_X_LO, 13), 0x20);
-        assert_eq!(sprites.arr(SPRITE_Y_LO, 13), 0x30);
-        assert_eq!(sprites.arr(SPRITE_X_HI, 13), 3);
-        assert_eq!(sprites.arr(SPRITE_Y_HI, 13), 4);
+        assert_eq!(sprites.ram.sprite(13).x_low(), 0x20);
+        assert_eq!(sprites.ram.sprite(13).y_low(), 0x30);
+        assert_eq!(sprites.ram.sprite(13).x_high(), 3);
+        assert_eq!(sprites.ram.sprite(13).y_high(), 4);
         assert_ne!(
             sprites.r8(0x1ef80 + usize::from(block >> 3)) & (0x80 >> (block & 7)),
             0
@@ -6083,7 +6024,7 @@ mod tests {
         let mut sprites = Sprite::new(&mut bytes, &mut hooks);
         sprites.w8(0x1b, 1);
         sprites.w16(0x48e, 3);
-        sprites.set_arr(0xbc0, 12, 12);
+        sprites.ram.set_sprite_scratch_n(12, 12);
         sprites.sprite_manually_set_death_flag_uw(12);
         assert_eq!(sprites.r16(0x1df80 + 6), 0x1000);
     }
@@ -6099,12 +6040,12 @@ mod tests {
             sprites.sprite_spawn_throwable_terrain_silently(2, 0x1234, 0x5678),
             15
         );
-        assert_eq!(sprites.arr(SPRITE_STATE, 15), 10);
-        assert_eq!(sprites.arr(SPRITE_TYPE, 15), 0xec);
+        assert_eq!(sprites.ram.sprite(15).state(), 10);
+        assert_eq!(sprites.ram.sprite(15).kind(), 0xec);
         assert_eq!(sprites.sprite_get_x(15), 0x1234);
         assert_eq!(sprites.sprite_get_y(15), 0x5678);
-        assert_eq!(sprites.arr(SPRITE_OAM_FLAGS, 15), 0x50);
-        assert_eq!(sprites.arr(SPRITE_UNK4, 15), 9);
+        assert_eq!(sprites.ram.sprite(15).oam_flags(), 0x50);
+        assert_eq!(sprites.ram.sprite(15).unknown4(), 9);
         assert_eq!(sprites.r8(0x314), 2);
         assert_eq!(sprites.r8(0xfb2), 2);
     }
@@ -6114,11 +6055,11 @@ mod tests {
         let mut bytes = [0u8; WRAM_SIZE];
         let mut hooks = Hooks;
         let mut sprites = Sprite::new(&mut bytes, &mut hooks);
-        sprites.set_arr(SPRITE_TYPE, 0, 0xda);
-        sprites.set_arr(SPRITE_STATE, 0, 9);
+        sprites.ram.set_sprite_kind(0, 0xda);
+        sprites.ram.set_sprite_state(0, 9);
         sprites.w16(0xf360, 0xffff);
         sprites.sprite_handle_absorption_by_player(0);
-        assert_eq!(sprites.arr(SPRITE_STATE, 0), 0);
+        assert_eq!(sprites.ram.sprite(0).state(), 0);
         assert_eq!(sprites.r16(0xf360), 4);
     }
 
@@ -6127,14 +6068,14 @@ mod tests {
         let mut bytes = [0u8; WRAM_SIZE];
         let mut hooks = Hooks;
         let mut sprites = Sprite::new(&mut bytes, &mut hooks);
-        sprites.set_arr(SPRITE_STATE, 3, 9);
-        sprites.set_arr(SPRITE_GIVE_DAMAGE, 3, 253);
-        sprites.set_arr(SPRITE_FLAGS2, 3, 0x22);
+        sprites.ram.set_sprite_state(3, 9);
+        sprites.ram.set_sprite_damage(3, 253);
+        sprites.ram.set_sprite_flags2(3, 0x22);
         sprites.sprite_mini_moldorm_recoil(3);
-        assert_eq!(sprites.arr(SPRITE_STATE, 3), 7);
-        assert_eq!(sprites.arr(SPRITE_DELAY_MAIN, 3), 0x70);
-        assert_eq!(sprites.arr(SPRITE_FLAGS2, 3), 0x24);
-        assert_eq!(sprites.arr(SPRITE_GIVE_DAMAGE, 3), 0);
+        assert_eq!(sprites.ram.sprite(3).state(), 7);
+        assert_eq!(sprites.ram.sprite(3).main_delay(), 0x70);
+        assert_eq!(sprites.ram.sprite(3).flags2(), 0x24);
+        assert_eq!(sprites.ram.sprite(3).damage(), 0);
     }
 
     #[test]
@@ -6148,7 +6089,7 @@ mod tests {
         sprites.sprite_set_y(0, 0x0040);
         sprites.w16(0xe2, 0x0100);
         sprites.w16(0xe8, 0);
-        sprites.set_arr(SPRITE_DELAY_MAIN, 0, 12);
+        sprites.ram.set_sprite_main_delay(0, 12);
         sprites.sprite_fall_draw(
             0,
             &PrepOamCoordsRet {
@@ -6172,8 +6113,8 @@ mod tests {
         sprites.w16(0x48e, 0x0020);
         sprites.dungeon_load_sprites();
         assert_eq!(sprites.r8(0xfb3), 1);
-        assert_eq!(sprites.arr(SPRITE_STATE, 0), 8);
-        assert_eq!(sprites.arr(SPRITE_TYPE, 0), 0x21);
+        assert_eq!(sprites.ram.sprite(0).state(), 8);
+        assert_eq!(sprites.ram.sprite(0).kind(), 0x21);
         // The C loader masks the packed local coordinate to nine bits.
         assert_eq!(sprites.sprite_get_x(0), 0x0140);
         assert_eq!(sprites.sprite_get_y(0), 0x0520);
@@ -6196,7 +6137,7 @@ mod tests {
         sprites.sprite_set_x(0, 0x1000);
         sprites.prepare_enemy_drop(0, 0x0d);
         assert_eq!(sprites.sprite_get_x(0), 0x1008);
-        assert_eq!(sprites.arr(SPRITE_Z_VEL, 0), 0);
+        assert_eq!(sprites.ram.sprite(0).velocity_z(), 0);
     }
 
     #[test]
@@ -6206,7 +6147,7 @@ mod tests {
         let mut sprites = Sprite::new(&mut bytes, &mut hooks);
         sprites.w16(0xe2, 0x300);
         sprites.w16(0x22, 0x380);
-        sprites.set_arr(SPRITE_FLAGS5, 3, 0x10);
+        sprites.ram.set_sprite_flags5(3, 0x10);
         sprites.sprite_set_x(3, 0x330);
         sprites.sprite_give_damage(3, 1, 0x20);
         assert_eq!(sprites.r8(0x12f), 0x9c);

@@ -21,53 +21,6 @@ use crate::sprite_main_bank0::{
     GANON_DRAW_X, GANON_DRAW_Y, LARGE_SHADOW_DRAW_DATA, SINUS_LOOKUP_TABLE,
 };
 
-const SPRITE_Y_LO: usize = 0xd00;
-const SPRITE_X_LO: usize = 0xd10;
-const SPRITE_Y_HI: usize = 0xd20;
-const SPRITE_X_HI: usize = 0xd30;
-const SPRITE_Y_VEL: usize = 0xd40;
-const SPRITE_X_VEL: usize = 0xd50;
-const SPRITE_AI_STATE: usize = 0xd80;
-const SPRITE_A: usize = 0xd90;
-const SPRITE_B: usize = 0xda0;
-const SPRITE_C: usize = 0xdb0;
-const SPRITE_GRAPHICS: usize = 0xdc0;
-const SPRITE_STATE: usize = 0xdd0;
-const SPRITE_D: usize = 0xde0;
-const SPRITE_DELAY_MAIN: usize = 0xdf0;
-const SPRITE_DELAY_AUX1: usize = 0xe00;
-const SPRITE_DELAY_AUX2: usize = 0xe10;
-const SPRITE_TYPE: usize = 0xe20;
-const SPRITE_SUBTYPE: usize = 0xe30;
-const SPRITE_FLAGS2: usize = 0xe40;
-const SPRITE_HEALTH: usize = 0xe50;
-const SPRITE_FLAGS3: usize = 0xe60;
-const SPRITE_WALLCOLL: usize = 0xe70;
-const SPRITE_SUBTYPE2: usize = 0xe80;
-const SPRITE_E: usize = 0xe90;
-const SPRITE_F: usize = 0xea0;
-const SPRITE_HEAD_DIR: usize = 0xeb0;
-const SPRITE_ANIM_CLOCK: usize = 0xec0;
-const SPRITE_G: usize = 0xed0;
-const SPRITE_DELAY_AUX3: usize = 0xee0;
-const SPRITE_HIT_TIMER: usize = 0xef0;
-const SPRITE_PAUSE: usize = 0xf00;
-const SPRITE_DELAY_AUX4: usize = 0xf10;
-const SPRITE_FLOOR: usize = 0xf20;
-const SPRITE_Y_RECOIL: usize = 0xf30;
-const SPRITE_X_RECOIL: usize = 0xf40;
-const SPRITE_OAM_FLAGS: usize = 0xf50;
-const SPRITE_FLAGS4: usize = 0xf60;
-const SPRITE_Z: usize = 0xf70;
-const SPRITE_Z_VEL: usize = 0xf80;
-const SPRITE_OBJ_PRIO: usize = 0xb89;
-const SPRITE_ROOM: usize = 0xc9a;
-const SPRITE_FLAGS: usize = 0xb6b;
-const SPRITE_IGNORE_PROJECTILE: usize = 0xba0;
-const SPRITE_FLAGS5: usize = 0xbe0;
-const SPRITE_DEFL_BITS: usize = 0xcaa;
-const SPRITE_BUMP_DAMAGE: usize = 0xcd2;
-
 const OVERLORD_X_LO: usize = 0xb08;
 const OVERLORD_TYPE: usize = 0xb00;
 const OVERLORD_X_HI: usize = 0xb10;
@@ -109,8 +62,6 @@ const SWAMOLA_Y_LO: usize = 0x1fbdc;
 const SWAMOLA_Y_HI: usize = 0x1fc9c;
 const ENHANCED_FEATURES0: usize = 0x64c;
 const BYTE_7E0FB6: usize = 0xfb6;
-const SPRITE_STUNNED: usize = 0xb58;
-const SPRITE_Z_SUBPOS: usize = 0xf90;
 const SPRITE_LIMIT_INSTANCE: usize = 0xb6a;
 const BYTE_7E0B69: usize = 0xb69;
 const FOLLOWER_INDICATOR: usize = 0xf3cc;
@@ -442,14 +393,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             0xce => self.sprite_prep_blind_prepare_battle(k),
             0xcf => {
                 self.sprite_prep_swamola_initialize_segments(k);
+                self.ram.set_sprite_scratch_a(k, self.ram.sprite(k).x_low());
                 self.ram
-                    .write_u8(SPRITE_A + k, self.ram.read_u8(SPRITE_X_LO + k));
+                    .set_sprite_scratch_b(k, self.ram.sprite(k).x_high());
+                self.ram.set_sprite_scratch_c(k, self.ram.sprite(k).y_low());
                 self.ram
-                    .write_u8(SPRITE_B + k, self.ram.read_u8(SPRITE_X_HI + k));
-                self.ram
-                    .write_u8(SPRITE_C + k, self.ram.read_u8(SPRITE_Y_LO + k));
-                self.ram
-                    .write_u8(SPRITE_HEAD_DIR + k, self.ram.read_u8(SPRITE_Y_HI + k));
+                    .set_sprite_head_direction(k, self.ram.sprite(k).y_high());
             }
             _ => return false,
         }
@@ -458,29 +407,23 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
 
     #[inline]
     fn sprite_x(&self, k: usize) -> u16 {
-        u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_X_LO + k),
-            self.ram.read_u8(SPRITE_X_HI + k),
-        ])
+        u16::from_le_bytes([self.ram.sprite(k).x_low(), self.ram.sprite(k).x_high()])
     }
     #[inline]
     fn sprite_y(&self, k: usize) -> u16 {
-        u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_Y_LO + k),
-            self.ram.read_u8(SPRITE_Y_HI + k),
-        ])
+        u16::from_le_bytes([self.ram.sprite(k).y_low(), self.ram.sprite(k).y_high()])
     }
     #[inline]
     fn set_sprite_x(&mut self, k: usize, v: u16) {
         let [lo, hi] = v.to_le_bytes();
-        self.ram.write_u8(SPRITE_X_LO + k, lo);
-        self.ram.write_u8(SPRITE_X_HI + k, hi);
+        self.ram.set_sprite_x_low(k, lo);
+        self.ram.set_sprite_x_high(k, hi);
     }
     #[inline]
     fn set_sprite_y(&mut self, k: usize, v: u16) {
         let [lo, hi] = v.to_le_bytes();
-        self.ram.write_u8(SPRITE_Y_LO + k, lo);
-        self.ram.write_u8(SPRITE_Y_HI + k, hi);
+        self.ram.set_sprite_y_low(k, lo);
+        self.ram.set_sprite_y_high(k, hi);
     }
 
     pub fn fish_draw(&mut self, k: usize) {
@@ -513,7 +456,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (0, 11, 0x0438, 0),
             (0, 11, 0x0438, 0),
         ];
-        let g = self.ram.read_u8(SPRITE_GRAPHICS + k);
+        let g = self.ram.sprite(k).graphics();
         if g == 0 {
             self.runtime.prep_oam(self.ram, k);
             return;
@@ -531,9 +474,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             CUR_SPRITE_Y,
             self.ram
                 .read_u16(CUR_SPRITE_Y)
-                .wrapping_add(self.ram.read_u8(SPRITE_Z + k) as u16),
+                .wrapping_add(self.ram.sprite(k).z() as u16),
         );
-        let j = (self.ram.read_u8(SPRITE_Z + k) >> 2).min(2) as usize;
+        let j = (self.ram.sprite(k).z() >> 2).min(2) as usize;
         self.ram
             .write_u16(OAM_CUR_PTR, self.ram.read_u16(OAM_CUR_PTR).wrapping_add(8));
         self.ram.write_u16(
@@ -556,7 +499,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (1, 7, 0x0096, 0),
             (7, 7, 0x0097, 0),
         ];
-        let i = (self.ram.read_u8(SPRITE_GRAPHICS + k) as usize & 1) * 4;
+        let i = (self.ram.sprite(k).graphics() as usize & 1) * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
     }
 
@@ -569,99 +512,96 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     pub fn sprite_chimney(&mut self, k: usize) {
-        self.ram.write_u8(SPRITE_FLAGS3 + k, 64);
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 64);
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
-            if self.runtime.return_if_inactive(self.ram, k)
-                || self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0
+        self.ram.set_sprite_flags3(k, 64);
+        self.ram.set_sprite_ignore_projectile(k, 64);
+        if self.ram.sprite(k).ai_state() == 0 {
+            if self.runtime.return_if_inactive(self.ram, k) || self.ram.sprite(k).main_delay() != 0
             {
                 return;
             }
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 67);
+            self.ram.set_sprite_main_delay(k, 67);
             if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xd1) {
                 self.runtime.set_spawned_coordinates(self.ram, j);
-                let t = self.ram.read_u8(SPRITE_X_LO + j).wrapping_add(8);
+                let t = self.ram.sprite(j).x_low().wrapping_add(8);
                 let carry = u8::from(t < 8);
-                self.ram.write_u8(SPRITE_X_LO + j, t);
-                self.ram.write_u8(
-                    SPRITE_Y_LO + j,
+                self.ram.set_sprite_x_low(j, t);
+                self.ram.set_sprite_y_low(
+                    j,
                     self.ram
-                        .read_u8(SPRITE_Y_LO + j)
+                        .sprite(j)
+                        .y_low()
                         .wrapping_add(4)
                         .wrapping_add(carry),
                 );
-                self.ram.write_u8(SPRITE_OAM_FLAGS + j, 4);
-                self.ram.write_u8(SPRITE_AI_STATE + j, 4);
-                self.ram.write_u8(SPRITE_FLAGS2 + j, 67);
-                self.ram.write_u8(SPRITE_FLAGS3 + j, 67);
-                self.ram.write_u8(SPRITE_X_VEL + j, (-4i8) as u8);
-                self.ram.write_u8(SPRITE_Y_VEL + j, (-6i8) as u8);
+                self.ram.set_sprite_oam_flags(j, 4);
+                self.ram.set_sprite_ai_state(j, 4);
+                self.ram.set_sprite_flags2(j, 67);
+                self.ram.set_sprite_flags3(j, 67);
+                self.ram.set_sprite_velocity_x(j, (-4i8) as u8);
+                self.ram.set_sprite_velocity_y(j, (-6i8) as u8);
             }
         } else {
-            self.ram.write_u8(SPRITE_OBJ_PRIO + k, 0x30);
+            self.ram.set_sprite_object_priority(k, 0x30);
             self.chimney_smoke_draw(k);
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
             self.runtime.move_xy(self.ram, k);
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
             if s & 7 == 0 {
-                let d = self.ram.read_u8(SPRITE_D + k) & 1;
-                let v =
-                    self.ram
-                        .read_u8(SPRITE_X_VEL + k)
-                        .wrapping_add(if d != 0 { 255 } else { 1 });
-                self.ram.write_u8(SPRITE_X_VEL + k, v);
+                let d = self.ram.sprite(k).scratch_d() & 1;
+                let v = self
+                    .ram
+                    .sprite(k)
+                    .velocity_x()
+                    .wrapping_add(if d != 0 { 255 } else { 1 });
+                self.ram.set_sprite_velocity_x(k, v);
                 if v == if d != 0 { (-4i8) as u8 } else { 4 } {
                     self.ram
-                        .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_D + k).wrapping_add(1));
+                        .set_sprite_scratch_d(k, self.ram.sprite(k).scratch_d().wrapping_add(1));
                 }
             }
             if s & 31 == 0 {
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    self.ram.read_u8(SPRITE_GRAPHICS + k).wrapping_add(1),
-                );
+                self.ram
+                    .set_sprite_graphics(k, self.ram.sprite(k).graphics().wrapping_add(1));
             }
         }
     }
 
     pub fn sprite_bunny_beam(&mut self, k: usize) {
         const GFX: [u8; 6] = [0xd7, 0xd7, 0xd7, 0x91, 0x91, 0x91];
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
+        if self.ram.sprite(k).ai_state() == 0 {
             self.runtime.prep_oam(self.ram, k);
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
             if !self.runtime.check_tile_collision(self.ram, k) {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
+                self.ram.set_sprite_ai_state(k, 1);
+                self.ram.set_sprite_main_delay(k, 128);
             }
             return;
         }
         self.runtime.antfairy_draw(self.ram, k);
-        if self.ram.read_u8(SPRITE_PAUSE + k) == 0 {
-            self.runtime.antfairy_retile(
-                self.ram,
-                GFX[self.ram.read_u8(SPRITE_GRAPHICS + k) as usize],
-            );
+        if self.ram.sprite(k).pause() == 0 {
+            self.runtime
+                .antfairy_retile(self.ram, GFX[self.ram.sprite(k).graphics() as usize]);
         }
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-            self.ram.write_u8(SPRITE_BUMP_DAMAGE + k, 0x30);
+        if self.ram.sprite(k).main_delay() == 0 {
+            self.ram.set_sprite_bump_damage(k, 0x30);
             if self.runtime.check_damage_to_link(self.ram, k) {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
                 self.ram.write_u16(LINK_TIMER_TEMPBUNNY, 256);
             }
-            if self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL) == self.ram.read_u8(SPRITE_FLOOR + k) {
+            if self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL) == self.ram.sprite(k).floor() {
                 self.runtime.apply_speed_towards_link(self.ram, k, 16);
             }
             self.runtime.move_xy(self.ram, k);
             if self.runtime.check_tile_collision(self.ram, k) {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
                 self.runtime.spawn_poof_garnish(self.ram, k);
                 self.runtime.sfx2_with_pan(self.ram, k, 0x15);
             }
@@ -678,11 +618,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         let d = self.runtime.direction_to_face_link(self.ram, k);
-        self.ram.write_u8(SPRITE_D + k, d);
+        self.ram.set_sprite_scratch_d(k, d);
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     const XT: [i8; 4] = [-96, 96, 0, 0];
                     const YT: [i8; 4] = [8, 8, -96, 112];
                     let x = self
@@ -695,27 +635,27 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         .wrapping_add_signed(YT[d as usize] as i16);
                     let [a, b] = x.to_le_bytes();
                     let [c, e] = y.to_le_bytes();
-                    self.ram.write_u8(SPRITE_A + k, a);
-                    self.ram.write_u8(SPRITE_B + k, b);
-                    self.ram.write_u8(SPRITE_C + k, c);
-                    self.ram.write_u8(SPRITE_E + k, e);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 80);
+                    self.ram.set_sprite_scratch_a(k, a);
+                    self.ram.set_sprite_scratch_b(k, b);
+                    self.ram.set_sprite_scratch_c(k, c);
+                    self.ram.set_sprite_scratch_e(k, e);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 80);
                 }
-                let i = ((self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 4) | d) as usize;
-                self.ram.write_u8(SPRITE_GRAPHICS + k, GFX[i]);
+                let i = ((self.ram.sprite(k).subtype2() & 4) | d) as usize;
+                self.ram.set_sprite_graphics(k, GFX[i]);
             }
             1 => {
-                let mut advance = self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0;
+                let mut advance = self.ram.sprite(k).main_delay() == 0;
                 if !advance {
                     if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 == 0 {
                         let x = u16::from_le_bytes([
-                            self.ram.read_u8(SPRITE_A + k),
-                            self.ram.read_u8(SPRITE_B + k),
+                            self.ram.sprite(k).scratch_a(),
+                            self.ram.sprite(k).scratch_b(),
                         ]);
                         let y = u16::from_le_bytes([
-                            self.ram.read_u8(SPRITE_C + k),
-                            self.ram.read_u8(SPRITE_E + k),
+                            self.ram.sprite(k).scratch_c(),
+                            self.ram.sprite(k).scratch_e(),
                         ]);
                         advance = x
                             .wrapping_sub(self.ram.read_u16(CUR_SPRITE_X))
@@ -728,42 +668,41 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                             let (xv, yv) = self
                                 .runtime
                                 .project_speed_towards_location(self.ram, k, x, y, 24);
-                            self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                            self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                            self.ram.set_sprite_velocity_x(k, xv);
+                            self.ram.set_sprite_velocity_y(k, yv);
                         }
                     }
                     if !advance {
                         self.runtime.move_xy(self.ram, k);
                         advance = self.runtime.check_tile_collision(self.ram, k);
                         if !advance {
-                            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-                            self.ram
-                                .write_u8(SPRITE_GRAPHICS + k, GFX[((s & 4) | d) as usize]);
+                            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                            self.ram.set_sprite_subtype2(k, s);
+                            self.ram.set_sprite_graphics(k, GFX[((s & 4) | d) as usize]);
                         }
                     }
                 }
                 if advance {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_main_delay(k, 32);
                 }
             }
             2 => {
-                let delay = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let delay = self.ram.sprite(k).main_delay();
                 if delay == 0 {
                     let next = (self.runtime.random_number(self.ram) & 15) + 16;
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, next);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+                    self.ram.set_sprite_main_delay(k, next);
+                    self.ram.set_sprite_ai_state(k, 0);
                     return;
                 }
                 if delay == 16 {
                     if let Some(j) = self.runtime.spawn_fire_phlegm(self.ram, k) {
                         if self.ram.read_u8(LINK_SHIELD_TYPE) != 3 {
-                            self.ram.write_u8(SPRITE_FLAGS5 + j, 0);
+                            self.ram.set_sprite_flags5(j, 0);
                         }
                     }
                 }
-                self.ram.write_u8(SPRITE_GRAPHICS + k, ATTACK[d as usize]);
+                self.ram.set_sprite_graphics(k, ATTACK[d as usize]);
                 let _ = self.runtime.check_tile_collision(self.ram, k);
             }
             _ => {}
@@ -806,7 +745,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-4, 0, 0x40ee, 2),
             (4, 0, 0x40ed, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 3;
+        let i = self.ram.sprite(k).graphics() as usize * 3;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 3]);
         self.runtime.draw_shadow(self.ram, k);
     }
@@ -814,10 +753,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn sprite_spawn_phantom_ganon(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc9) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 2);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 2);
-            self.ram.write_u8(SPRITE_ANIM_CLOCK + j, 1);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 0);
+            self.ram.set_sprite_flags2(j, 2);
+            self.ram.set_sprite_ignore_projectile(j, 2);
+            self.ram.set_sprite_animation_clock(j, 1);
+            self.ram.set_sprite_oam_flags(j, 0);
         }
     }
 
@@ -825,31 +764,31 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const GFX: [u8; 4] = [0, 1, 2, 1];
         const XV: [u8; 2] = [32, (-32i8) as u8];
         const YV: [u8; 2] = [16, (-16i8) as u8];
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
+        if self.ram.sprite(k).ai_state() == 0 {
             self.phantom_ganon_draw(k);
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
             self.runtime.move_y(self.ram, k);
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
             if s & 31 == 0 {
-                let yv = self.ram.read_u8(SPRITE_Y_VEL + k).wrapping_sub(1);
-                self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                let yv = self.ram.sprite(k).velocity_y().wrapping_sub(1);
+                self.ram.set_sprite_velocity_y(k, yv);
                 if yv == 252 {
                     if let Some(j) = self.runtime.spawn_boss_poof(self.ram, k) {
                         self.set_sprite_y(j, self.sprite_y(j).wrapping_sub(20));
                     }
                 } else if yv == 251 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, (-4i8) as u8);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 255);
+                    self.ram.set_sprite_velocity_y(k, (-4i8) as u8);
                 }
             }
         } else {
             self.ganon_bat_draw(k);
-            if self.ram.read_u8(SPRITE_PAUSE + k) != 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+            if self.ram.sprite(k).pause() != 0 {
+                self.ram.set_sprite_state(k, 0);
                 self.ram.write_u16(
                     DUNG_SAVEGAME_STATE_BITS,
                     self.ram.read_u16(DUNG_SAVEGAME_STATE_BITS) | 0x8000,
@@ -858,35 +797,35 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
-                GFX[(self.ram.read_u8(FRAME_COUNTER) >> 2 & 3) as usize],
-            );
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) < 208 {
-                    let j = (self.ram.read_u8(SPRITE_HEAD_DIR + k) & 1) as usize;
-                    let y = self.ram.read_u8(SPRITE_Y_VEL + k).wrapping_add(if j != 0 {
-                        255
-                    } else {
-                        1
-                    });
-                    self.ram.write_u8(SPRITE_Y_VEL + k, y);
+            self.ram
+                .set_sprite_graphics(k, GFX[(self.ram.read_u8(FRAME_COUNTER) >> 2 & 3) as usize]);
+            if self.ram.sprite(k).main_delay() != 0 {
+                if self.ram.sprite(k).main_delay() < 208 {
+                    let j = (self.ram.sprite(k).head_direction() & 1) as usize;
+                    let y =
+                        self.ram
+                            .sprite(k)
+                            .velocity_y()
+                            .wrapping_add(if j != 0 { 255 } else { 1 });
+                    self.ram.set_sprite_velocity_y(k, y);
                     if y == YV[j] {
-                        self.ram.write_u8(
-                            SPRITE_HEAD_DIR + k,
-                            self.ram.read_u8(SPRITE_HEAD_DIR + k).wrapping_add(1),
+                        self.ram.set_sprite_head_direction(
+                            k,
+                            self.ram.sprite(k).head_direction().wrapping_add(1),
                         );
                     }
-                    let j = (self.ram.read_u8(SPRITE_D + k) & 1) as usize;
-                    let x = self.ram.read_u8(SPRITE_X_VEL + k).wrapping_add(if j != 0 {
-                        255
-                    } else {
-                        1
-                    });
-                    self.ram.write_u8(SPRITE_X_VEL + k, x);
-                    if x == XV[j] {
+                    let j = (self.ram.sprite(k).scratch_d() & 1) as usize;
+                    let x =
                         self.ram
-                            .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_D + k).wrapping_add(1));
+                            .sprite(k)
+                            .velocity_x()
+                            .wrapping_add(if j != 0 { 255 } else { 1 });
+                    self.ram.set_sprite_velocity_x(k, x);
+                    if x == XV[j] {
+                        self.ram.set_sprite_scratch_d(
+                            k,
+                            self.ram.sprite(k).scratch_d().wrapping_add(1),
+                        );
                     }
                     if x == 0 {
                         self.runtime.sfx3_with_pan(self.ram, k, 0x1e);
@@ -897,24 +836,20 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 let (ptx, pty) = self
                     .runtime
                     .project_speed_towards_location(self.ram, k, x, y, 5);
-                let xv = self.ram.read_u8(SPRITE_X_VEL + k);
-                let yv = self.ram.read_u8(SPRITE_Y_VEL + k);
-                self.ram.write_u8(SPRITE_X_VEL + k, xv.wrapping_add(ptx));
-                self.ram.write_u8(SPRITE_Y_VEL + k, yv.wrapping_add(pty));
+                let xv = self.ram.sprite(k).velocity_x();
+                let yv = self.ram.sprite(k).velocity_y();
+                self.ram.set_sprite_velocity_x(k, xv.wrapping_add(ptx));
+                self.ram.set_sprite_velocity_y(k, yv.wrapping_add(pty));
                 self.runtime.move_xy(self.ram, k);
-                self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                self.ram.set_sprite_velocity_x(k, xv);
+                self.ram.set_sprite_velocity_y(k, yv);
             } else {
                 self.runtime.move_xy(self.ram, k);
-                if self.ram.read_u8(SPRITE_X_VEL + k) != 64 {
-                    self.ram.write_u8(
-                        SPRITE_X_VEL + k,
-                        self.ram.read_u8(SPRITE_X_VEL + k).wrapping_add(1),
-                    );
-                    self.ram.write_u8(
-                        SPRITE_Y_VEL + k,
-                        self.ram.read_u8(SPRITE_Y_VEL + k).wrapping_sub(1),
-                    );
+                if self.ram.sprite(k).velocity_x() != 64 {
+                    self.ram
+                        .set_sprite_velocity_x(k, self.ram.sprite(k).velocity_x().wrapping_add(1));
+                    self.ram
+                        .set_sprite_velocity_y(k, self.ram.sprite(k).velocity_y().wrapping_sub(1));
                 }
             }
         }
@@ -929,7 +864,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-8, 0, 0x0544, 2),
             (8, 0, 0x4544, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        let i = self.ram.sprite(k).graphics() as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
     }
     pub fn phantom_ganon_draw(&mut self, k: usize) {
@@ -953,7 +888,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         ];
         self.ram.write_u16(OAM_CUR_PTR, 0x950);
         self.ram.write_u16(OAM_EXT_CUR_PTR, 0xa74);
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 8;
+        let i = self.ram.sprite(k).graphics() as usize * 8;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 8]);
     }
     pub fn swish_every16_frames(&mut self, k: usize) {
@@ -971,11 +906,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.swish_every16_frames(k);
         self.runtime.move_xy(self.ram, k);
         const GF: [u8; 8] = [8, 7, 6, 5, 4, 3, 2, 1];
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_sub(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-        self.ram.write_u8(SPRITE_G + k, GF[(s >> 2 & 7) as usize]);
-        if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 1 != 0 {
+        let s = self.ram.sprite(k).subtype2().wrapping_sub(1);
+        self.ram.set_sprite_subtype2(k, s);
+        self.ram.set_sprite_scratch_g(k, GF[(s >> 2 & 7) as usize]);
+        if self.ram.sprite(k).main_delay() != 0 {
+            if self.ram.sprite(k).main_delay() & 1 != 0 {
                 return;
             }
             let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 32);
@@ -983,16 +918,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         } else {
             let x = self
                 .sprite_x(0)
-                .wrapping_add_signed(if self.ram.read_u8(SPRITE_D) != 0 {
+                .wrapping_add_signed(if self.ram.sprite(0).scratch_d() != 0 {
                     -16
                 } else {
                     24
                 });
             let y = self.sprite_y(0).wrapping_sub(16);
             if self.ganon_attempt_trident_catch(x, y) {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
-                self.ram.write_u8(SPRITE_AI_STATE, 3);
-                self.ram.write_u8(SPRITE_DELAY_MAIN, 16);
+                self.ram.set_sprite_state(k, 0);
+                self.ram.set_sprite_ai_state(0, 3);
+                self.ram.set_sprite_main_delay(0, 16);
             }
             let (xv, yv) = self
                 .runtime
@@ -1012,12 +947,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         let x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_A + k),
-            self.ram.read_u8(SPRITE_B + k),
+            self.ram.sprite(k).scratch_a(),
+            self.ram.sprite(k).scratch_b(),
         ]);
         let y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_E + k),
+            self.ram.sprite(k).scratch_c(),
+            self.ram.sprite(k).scratch_e(),
         ]);
         let (a, b) = self
             .runtime
@@ -1025,19 +960,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         let (c, d) = self
             .runtime
             .project_speed_towards_location(self.ram, k, x, y, 80);
-        self.ram.write_u8(SPRITE_X_VEL + k, d.wrapping_sub(a));
+        self.ram.set_sprite_velocity_x(k, d.wrapping_sub(a));
         self.ram
-            .write_u8(SPRITE_Y_VEL + k, (0u8).wrapping_sub(c).wrapping_sub(b));
+            .set_sprite_velocity_y(k, (0u8).wrapping_sub(c).wrapping_sub(b));
         self.fire_bat_move(k);
     }
     pub fn fire_bat_move(&mut self, k: usize) {
         self.fire_bat_animate(k);
         self.runtime.move_xy(self.ram, k);
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 7 == 0 {
+        if self.ram.sprite(k).subtype2() & 7 == 0 {
             let j = self.runtime.garnish_flame_trail(self.ram, k, true);
             self.ram.write_u8(
                 GARNISH_COUNTDOWN + j,
-                if self.ram.read_u8(SPRITE_ANIM_CLOCK + k) == 5 {
+                if self.ram.sprite(k).animation_clock() == 5 {
                     0x2f
                 } else {
                     0x4f
@@ -1051,28 +986,28 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         let _ = self.runtime.check_damage_to_link(self.ram, k);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
                 self.get_position_relative_to_the_great_overlord_ganon(k);
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                    self.ram.set_sprite_ai_state(k, 1);
                 } else {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, d >> 2 & 1);
+                    self.ram.set_sprite_graphics(k, d >> 2 & 1);
                 }
             }
             1 => {
                 self.get_position_relative_to_the_great_overlord_ganon(k);
-                let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-                self.ram.write_u8(SPRITE_GRAPHICS + k, s >> 2 & 1);
+                let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                self.ram.set_sprite_subtype2(k, s);
+                self.ram.set_sprite_graphics(k, s >> 2 & 1);
             }
             2 => {
                 self.runtime.move_xy(self.ram, k);
-                self.ram.write_u8(SPRITE_DEFL_BITS + k, 64);
-                let a = self.ram.read_u8(SPRITE_DELAY_AUX1 + k);
+                self.ram.set_sprite_deflection_bits(k, 64);
+                let a = self.ram.sprite(k).aux1_delay();
                 if a == 0 {
-                    let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                    let d = self.ram.sprite(k).main_delay();
                     if d == 0 {
                         self.fire_bat_animate(k);
                         self.fire_bat_animate(k);
@@ -1080,9 +1015,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         let mut t = d.wrapping_sub(1);
                         if t == 0 {
                             t = 35;
-                            self.ram.write_u8(SPRITE_DELAY_AUX1 + k, t);
+                            self.ram.set_sprite_aux1_delay(k, t);
                         }
-                        self.ram.write_u8(SPRITE_GRAPHICS + k, t >> 2 & 1);
+                        self.ram.set_sprite_graphics(k, t >> 2 & 1);
                     }
                 } else if a == 1 {
                     self.runtime.apply_speed_towards_link(self.ram, k, 48);
@@ -1091,7 +1026,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     self.fire_bat_animate(k);
                 } else {
                     const G: [u8; 9] = [4, 4, 4, 3, 3, 3, 2, 2, 2];
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, G[(a >> 2) as usize]);
+                    self.ram.set_sprite_graphics(k, G[(a >> 2) as usize]);
                 }
             }
             _ => {}
@@ -1100,7 +1035,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn get_position_relative_to_the_great_overlord_ganon(&mut self, k: usize) {
         const X: [i8; 2] = [20, -18];
         const Y: [i8; 2] = [-20, -20];
-        let j = self.ram.read_u8(SPRITE_D) as usize;
+        let j = self.ram.sprite(0).scratch_d() as usize;
         let x = u16::from_le_bytes([
             self.ram.read_u8(OVERLORD_X_HI + k),
             self.ram.read_u8(OVERLORD_Y_HI + k),
@@ -1116,10 +1051,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
     pub fn fire_bat_animate(&mut self, k: usize) {
         const G: [u8; 4] = [4, 5, 6, 5];
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-        self.ram
-            .write_u8(SPRITE_GRAPHICS + k, G[(s >> 2 & 3) as usize]);
+        let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, s);
+        self.ram.set_sprite_graphics(k, G[(s >> 2 & 3) as usize]);
     }
     pub fn fire_bat_draw(&mut self, k: usize) {
         const X: [i8; 2] = [-8, 8];
@@ -1128,7 +1062,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             0, 0xc0, 0x80, 0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0, 0x40,
         ];
         if let Some((x, y, flags)) = self.runtime.prep_oam_or_double_ret_wide(self.ram, k) {
-            let g = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
+            let g = self.ram.sprite(k).graphics() as usize;
             let first = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4;
             for (entry, i) in (0..2).rev().enumerate() {
                 crate::oam::set_helper0(
@@ -1167,10 +1101,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.ram.write_u16(OVERLORD_X_LO, phase);
         for i in 0..8 {
             let t = phase.wrapping_add((i * 64) as u16) & 0x1ff;
-            if self.ram.read_u8(SPRITE_AI_STATE + i + 1) != 2 {
+            if self.ram.sprite(i + 1).ai_state() != 2 {
                 let j = (((t >> 5).wrapping_sub(4)) & 15) as usize;
-                self.ram.write_u8(SPRITE_X_VEL + i + 1, (X[j] >> 2) as u8);
-                self.ram.write_u8(SPRITE_Y_VEL + i + 1, (Y[j] >> 2) as u8);
+                self.ram.set_sprite_velocity_x(i + 1, (X[j] >> 2) as u8);
+                self.ram.set_sprite_velocity_y(i + 1, (Y[j] >> 2) as u8);
             }
             let x = self
                 .sprite_x(0)
@@ -1189,46 +1123,44 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn ganon_spawn_spiral_bat(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic_ex(self.ram, k, 0xc9, 8) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_ANIM_CLOCK + j, 4);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 3);
-            self.ram.write_u8(SPRITE_FLAGS3 + j, 0x40);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 1);
-            self.ram.write_u8(SPRITE_DEFL_BITS + j, 0x80);
-            self.ram.write_u8(SPRITE_Y_HI + j, 128);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 48);
-            self.ram.write_u8(SPRITE_BUMP_DAMAGE + j, 7);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 7);
+            self.ram.set_sprite_animation_clock(j, 4);
+            self.ram.set_sprite_oam_flags(j, 3);
+            self.ram.set_sprite_flags3(j, 0x40);
+            self.ram.set_sprite_flags2(j, 1);
+            self.ram.set_sprite_deflection_bits(j, 0x80);
+            self.ram.set_sprite_y_high(j, 128);
+            self.ram.set_sprite_main_delay(j, 48);
+            self.ram.set_sprite_bump_damage(j, 7);
+            self.ram.set_sprite_ignore_projectile(j, 7);
         }
     }
 
     pub fn sprite_d6_ganon(&mut self, k: usize) {
-        let state = self.ram.read_u8(SPRITE_AI_STATE + k);
+        let state = self.ram.sprite(k).ai_state();
         if (state as i8) < 0 {
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+            if self.ram.sprite(k).main_delay() == 0 {
+                self.ram.set_sprite_state(k, 0);
             }
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 1 == 0 {
+            if self.ram.sprite(k).main_delay() & 1 == 0 {
                 self.ganon_draw(k);
             }
             return;
         }
-        if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) != 0 {
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
-                [16, 10][self.ram.read_u8(SPRITE_D + k) as usize],
-            );
+        if self.ram.sprite(k).aux4_delay() != 0 {
+            self.ram
+                .set_sprite_graphics(k, [16, 10][self.ram.sprite(k).scratch_d() as usize]);
         }
         let room = self.ram.read_u8(CURRENT_DUNGEON_ROOM);
-        if room == 2 && room != self.ram.read_u8(SPRITE_ROOM + k) {
-            self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 64);
+        if room == 2 && room != self.ram.sprite(k).room() {
+            self.ram.set_sprite_aux1_delay(k, 64);
         }
-        self.ram.write_u8(SPRITE_ROOM + k, room);
+        self.ram.set_sprite_room(k, room);
         self.ganon_draw(k);
-        if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) != 0 {
-            self.ram.write_u8(SPRITE_GRAPHICS + k, 15);
+        if self.ram.sprite(k).aux1_delay() != 0 {
+            self.ram.set_sprite_graphics(k, 15);
             self.ganon_enable_invincibility(k);
             self.runtime.check_damage_to_and_from_link(self.ram, k);
             return;
@@ -1236,46 +1168,42 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        match self.ram.read_u8(SPRITE_DELAY_AUX2 + k) {
+        match self.ram.sprite(k).aux2_delay() {
             1 => self.runtime.extinguish_torch(self.ram, false),
             16 => self.runtime.extinguish_torch(self.ram, true),
             _ => {}
         }
         let (side, delta) = self.runtime.is_right_of_link(self.ram, k);
         const HEAD: [u8; 2] = [2, 0];
-        self.ram.write_u8(
-            SPRITE_HEAD_DIR + k,
+        self.ram.set_sprite_head_direction(
+            k,
             if (delta as u8).wrapping_add(32) < 64 {
                 1
             } else {
                 HEAD[side as usize]
             },
         );
-        if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) != 0 {
-            self.ram.write_u8(
-                SPRITE_IGNORE_PROJECTILE + k,
-                self.ram.read_u8(SPRITE_DELAY_AUX4 + k),
-            );
+        if self.ram.sprite(k).aux4_delay() != 0 {
+            self.ram
+                .set_sprite_ignore_projectile(k, self.ram.sprite(k).aux4_delay());
             if self.runtime.return_if_recoiling(self.ram, k) {
                 return;
             }
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 0);
+            self.ram.set_sprite_main_delay(k, 0);
             return;
         }
-        if self.ram.read_u8(SPRITE_IGNORE_PROJECTILE + k)
-            | self.ram.read_u8(FLAG_IS_LINK_IMMOBILIZED)
-            == 0
+        if self.ram.sprite(k).ignore_projectile() | self.ram.read_u8(FLAG_IS_LINK_IMMOBILIZED) == 0
             && room == 2
         {
             self.runtime.check_damage_to_and_from_link(self.ram, k);
         }
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 0);
+        self.ram.set_sprite_ignore_projectile(k, 0);
         match state {
             0 => {
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 128);
                 } else if d == 32 {
                     self.ram.write_u8(MUSIC_CONTROL, 0x1f);
                 } else if d == 64 {
@@ -1285,14 +1213,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             1 => {
                 self.ganon_health_floor(k, 208);
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d < 64 {
                     if d == 0 {
                         self.ganon_select_warp_location(k, 5);
                     } else {
-                        self.ram.write_u8(
-                            SPRITE_GRAPHICS + k,
-                            [2, 10][self.ram.read_u8(SPRITE_D + k) as usize],
+                        self.ram.set_sprite_graphics(
+                            k,
+                            [2, 10][self.ram.sprite(k).scratch_d() as usize],
                         );
                     }
                 } else if d != 64 {
@@ -1306,65 +1234,61 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     const YV: [i8; 16] = [
                         0, 16, 24, 28, 32, 28, 24, 16, 0, -16, -24, -28, -32, -28, -24, -16,
                     ];
-                    self.ram.write_u8(SPRITE_G + k, 0);
+                    self.ram.set_sprite_scratch_g(k, 0);
                     if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc9) {
                         self.runtime.set_spawned_coordinates(self.ram, j);
-                        let side = self.ram.read_u8(SPRITE_D + k) as usize;
+                        let side = self.ram.sprite(k).scratch_d() as usize;
                         self.set_sprite_x(j, self.sprite_x(j).wrapping_add_signed(X[side] as i16));
                         self.set_sprite_y(j, self.sprite_y(j).wrapping_add_signed(Y[side] as i16));
                         self.runtime.apply_speed_towards_link(self.ram, k, 31);
                         let a = self
                             .runtime
                             .convert_velocity_to_angle(
-                                self.ram.read_u8(SPRITE_X_VEL + k),
-                                self.ram.read_u8(SPRITE_Y_VEL + k),
+                                self.ram.sprite(k).velocity_x(),
+                                self.ram.sprite(k).velocity_y(),
                             )
                             .wrapping_sub(2)
                             & 15;
-                        self.ram.write_u8(SPRITE_X_VEL + j, XV[a as usize] as u8);
-                        self.ram.write_u8(SPRITE_Y_VEL + j, YV[a as usize] as u8);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + j, 112);
-                        self.ram.write_u8(SPRITE_ANIM_CLOCK + j, 2);
-                        self.ram.write_u8(SPRITE_OAM_FLAGS + j, 1);
-                        self.ram.write_u8(SPRITE_FLAGS2 + j, 4);
-                        self.ram.write_u8(SPRITE_DEFL_BITS + j, 0x84);
-                        self.ram.write_u8(SPRITE_D + j, 2);
-                        self.ram.write_u8(SPRITE_BUMP_DAMAGE + j, 7);
-                        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 7);
+                        self.ram.set_sprite_velocity_x(j, XV[a as usize] as u8);
+                        self.ram.set_sprite_velocity_y(j, YV[a as usize] as u8);
+                        self.ram.set_sprite_main_delay(j, 112);
+                        self.ram.set_sprite_animation_clock(j, 2);
+                        self.ram.set_sprite_oam_flags(j, 1);
+                        self.ram.set_sprite_flags2(j, 4);
+                        self.ram.set_sprite_deflection_bits(j, 0x84);
+                        self.ram.set_sprite_scratch_d(j, 2);
+                        self.ram.set_sprite_bump_damage(j, 7);
+                        self.ram.set_sprite_ignore_projectile(j, 7);
                     }
                 }
             }
             2 => {
                 self.ganon_health_floor(k, 208);
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    [0, 8][self.ram.read_u8(SPRITE_D + k) as usize],
-                );
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
-                    self.ram.write_u8(
-                        SPRITE_IGNORE_PROJECTILE + k,
-                        self.ram
-                            .read_u8(SPRITE_IGNORE_PROJECTILE + k)
-                            .wrapping_add(1),
+                self.ram
+                    .set_sprite_graphics(k, [0, 8][self.ram.sprite(k).scratch_d() as usize]);
+                if self.ram.sprite(k).main_delay() != 0 {
+                    self.ram.set_sprite_ignore_projectile(
+                        k,
+                        self.ram.sprite(k).ignore_projectile().wrapping_add(1),
                     );
-                    if self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 1 != 0 {
-                        self.ram.write_u8(SPRITE_GRAPHICS + k, 255);
+                    if self.ram.sprite(k).main_delay() & 1 != 0 {
+                        self.ram.set_sprite_graphics(k, 255);
                     }
                 }
             }
             3 => {
                 self.ganon_health_floor(k, 208);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
+                if self.ram.sprite(k).main_delay() != 0 {
                     self.ganon_phase1_animate_trident_spin(k);
                 } else {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 6);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 127);
+                    self.ram.set_sprite_ai_state(k, 6);
+                    self.ram.set_sprite_main_delay(k, 127);
                     self.ganon_handle_animation_idle(k);
                 }
             }
             4 => {
                 self.ganon_health_floor(k, 208);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
+                if self.ram.sprite(k).main_delay() != 0 {
                     self.ganon_shake_head(k);
                 } else {
                     self.ganon_select_warp_location(k, 5);
@@ -1372,26 +1296,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             5 | 10 | 13 | 18 => {
                 if state == 13 {
-                    self.ram.write_u8(SPRITE_HEALTH + k, 100);
+                    self.ram.set_sprite_health(k, 100);
                 }
-                self.ram.write_u8(
-                    SPRITE_IGNORE_PROJECTILE + k,
-                    self.ram
-                        .read_u8(SPRITE_IGNORE_PROJECTILE + k)
-                        .wrapping_add(1),
+                self.ram.set_sprite_ignore_projectile(
+                    k,
+                    self.ram.sprite(k).ignore_projectile().wrapping_add(1),
                 );
                 let x = u16::from_le_bytes([
                     self.ram.read_u8(SWAMOLA_TARGET_X_LO),
-                    self.ram.read_u8(SPRITE_X_HI + k),
+                    self.ram.sprite(k).x_high(),
                 ]);
                 let y = u16::from_le_bytes([
                     self.ram.read_u8(SWAMOLA_TARGET_Y_LO),
-                    self.ram.read_u8(SPRITE_Y_HI + k),
+                    self.ram.sprite(k).y_high(),
                 ]);
                 if self.ganon_attempt_trident_catch(x, y) {
                     self.ram
-                        .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_SUBTYPE + k) >> 2);
-                    let hp = self.ram.read_u8(SPRITE_HEALTH + k);
+                        .set_sprite_scratch_d(k, self.ram.sprite(k).subtype() >> 2);
+                    let hp = self.ram.sprite(k).health();
                     let (ns, delay) = if state == 5 {
                         (2, 32)
                     } else if hp >= 161 {
@@ -1401,51 +1323,45 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     } else {
                         (17, 104)
                     };
-                    self.ram.write_u8(SPRITE_AI_STATE + k, ns);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, delay);
+                    self.ram.set_sprite_ai_state(k, ns);
+                    self.ram.set_sprite_main_delay(k, delay);
                 } else {
                     let (xv, yv) = self
                         .runtime
                         .project_speed_towards_location(self.ram, k, x, y, 32);
                     self.runtime.approach_target_speed(self.ram, k, xv, yv);
                     self.runtime.move_xy(self.ram, k);
-                    if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0
+                    if self.ram.sprite(k).main_delay() == 0
                         || self.ram.read_u8(FRAME_COUNTER) & 1 != 0
                     {
-                        self.ram.write_u8(SPRITE_GRAPHICS + k, 255);
+                        self.ram.set_sprite_graphics(k, 255);
                         return;
                     }
-                    self.ram.write_u8(
-                        SPRITE_GRAPHICS + k,
-                        [2, 10][self.ram.read_u8(SPRITE_D + k) as usize],
-                    );
+                    self.ram
+                        .set_sprite_graphics(k, [2, 10][self.ram.sprite(k).scratch_d() as usize]);
                     if self.ram.read_u8(FRAME_COUNTER) & 7 == 0 {
                         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xd6) {
                             self.runtime.set_spawned_coordinates(self.ram, j);
-                            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 24);
-                            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 24);
-                            self.ram.write_u8(SPRITE_AI_STATE + j, 255);
-                            self.ram.write_u8(
-                                SPRITE_GRAPHICS + j,
-                                self.ram.read_u8(SPRITE_GRAPHICS + k),
-                            );
-                            self.ram.write_u8(
-                                SPRITE_HEAD_DIR + j,
-                                self.ram.read_u8(SPRITE_HEAD_DIR + k),
-                            );
+                            self.ram.set_sprite_ignore_projectile(j, 24);
+                            self.ram.set_sprite_main_delay(j, 24);
+                            self.ram.set_sprite_ai_state(j, 255);
+                            self.ram
+                                .set_sprite_graphics(j, self.ram.sprite(k).graphics());
+                            self.ram
+                                .set_sprite_head_direction(j, self.ram.sprite(k).head_direction());
                         }
                     }
                 }
             }
             6 => {
                 self.ganon_health_floor(k, 208);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    if self.ram.read_u8(SPRITE_HEALTH + k) >= 209 {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    if self.ram.sprite(k).health() >= 209 {
+                        self.ram.set_sprite_ai_state(k, 1);
+                        self.ram.set_sprite_main_delay(k, 128);
                     } else {
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 7);
+                        self.ram.set_sprite_main_delay(k, 255);
+                        self.ram.set_sprite_ai_state(k, 7);
                     }
                 } else {
                     self.ganon_shake_head(k);
@@ -1454,10 +1370,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             7 => {
                 self.ganon_health_floor(k, 160);
                 self.ram.write_u8(OVERLORD_X_LO + 2, 40);
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 8);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
+                    self.ram.set_sprite_ai_state(k, 8);
+                    self.ram.set_sprite_main_delay(k, 255);
                 } else {
                     if d < 0xc0 && d & 15 == 0 {
                         self.ganon_spawn_spiral_bat(k);
@@ -1470,14 +1386,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 const TAB: [i8; 16] = [0, 0, 0, 0, -1, -1, -2, -1, 0, 0, 0, 0, 1, 2, 1, 1];
                 const DEL: [u8; 8] = [0x10, 0x30, 0x50, 0x70, 0x90, 0xb0, 0xd0, 0xbd];
                 self.ganon_health_floor(k, 160);
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 9);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 127);
+                    self.ram.set_sprite_ai_state(k, 9);
+                    self.ram.set_sprite_main_delay(k, 127);
                     self.ganon_handle_animation_idle(k);
                     for j in (1..=8).rev() {
-                        self.ram.write_u8(SPRITE_AI_STATE + j, 2);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + j, DEL[j - 1]);
+                        self.ram.set_sprite_ai_state(j, 2);
+                        self.ram.set_sprite_main_delay(j, DEL[j - 1]);
                     }
                 } else {
                     self.ram.write_u8(
@@ -1492,25 +1408,23 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             9 => {
                 self.ganon_health_floor(k, 160);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     self.ganon_select_warp_location(k, 10);
                 } else {
                     self.ganon_shake_head(k);
                 }
             }
             11 => {
-                self.ram.write_u8(
-                    SPRITE_IGNORE_PROJECTILE + k,
-                    self.ram
-                        .read_u8(SPRITE_IGNORE_PROJECTILE + k)
-                        .wrapping_add(1),
+                self.ram.set_sprite_ignore_projectile(
+                    k,
+                    self.ram.sprite(k).ignore_projectile().wrapping_add(1),
                 );
                 self.ganon_handle_animation_idle(k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 7);
-                } else if self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 1 != 0 {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 255);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_main_delay(k, 255);
+                    self.ram.set_sprite_ai_state(k, 7);
+                } else if self.ram.sprite(k).main_delay() & 1 != 0 {
+                    self.ram.set_sprite_graphics(k, 255);
                 }
             }
             _ => self.ganon_late_state(k, state),
@@ -1518,12 +1432,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     fn ganon_health_floor(&mut self, k: usize, floor: u8) {
-        if self.ram.read_u8(SPRITE_HEALTH + k) < floor.wrapping_add(1) {
-            self.ram.write_u8(SPRITE_HEALTH + k, floor);
+        if self.ram.sprite(k).health() < floor.wrapping_add(1) {
+            self.ram.set_sprite_health(k, floor);
         }
     }
     fn ganon_late_state(&mut self, k: usize, state: u8) {
-        let delay = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+        let delay = self.ram.sprite(k).main_delay();
         match state {
             12 => {
                 if delay == 0 {
@@ -1540,56 +1454,52 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         frame = 2;
                     }
                 }
-                if self.ram.read_u8(SPRITE_D + k) != 0 {
+                if self.ram.sprite(k).scratch_d() != 0 {
                     frame += 3;
                 }
                 self.ram
-                    .write_u8(SPRITE_GRAPHICS + k, [5, 6, 7, 13, 14, 10][frame]);
-                if self.ram.read_u8(SPRITE_HIT_TIMER + k) & 127 == 1 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 15);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 24);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 0);
+                    .set_sprite_graphics(k, [5, 6, 7, 13, 14, 10][frame]);
+                if self.ram.sprite(k).hit_timer() & 127 == 1 {
+                    self.ram.set_sprite_ai_state(k, 15);
+                    self.ram.set_sprite_velocity_z(k, 24);
+                    self.ram.set_sprite_main_delay(k, 0);
                 }
             }
             14 => {
-                self.ram.write_u8(
-                    SPRITE_IGNORE_PROJECTILE + k,
-                    self.ram
-                        .read_u8(SPRITE_IGNORE_PROJECTILE + k)
-                        .wrapping_add(1),
+                self.ram.set_sprite_ignore_projectile(
+                    k,
+                    self.ram.sprite(k).ignore_projectile().wrapping_add(1),
                 );
                 self.ganon_handle_animation_idle(k);
-                self.ram.write_u8(SPRITE_G + k, 0);
+                self.ram.set_sprite_scratch_g(k, 0);
                 if delay == 0 {
                     if self.runtime.random_number(self.ram) & 1 != 0 {
                         self.ganon_select_warp_location(k, 13);
                     } else {
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 127);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 12);
+                        self.ram.set_sprite_main_delay(k, 127);
+                        self.ram.set_sprite_ai_state(k, 12);
                     }
                 } else if delay & 1 != 0 {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 255);
+                    self.ram.set_sprite_graphics(k, 255);
                 }
             }
             15 => {
                 if delay != 0 {
                     if delay == 1 {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 16);
-                        self.ram.write_u8(SPRITE_Z_VEL + k, 160);
+                        self.ram.set_sprite_ai_state(k, 16);
+                        self.ram.set_sprite_velocity_z(k, 160);
                         return;
                     }
                 } else {
                     self.runtime.move_z(self.ram, k);
-                    let z = self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(1);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, z);
+                    let z = self.ram.sprite(k).velocity_z().wrapping_sub(1);
+                    self.ram.set_sprite_velocity_z(k, z);
                     if z == 0 {
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+                        self.ram.set_sprite_main_delay(k, 32);
                     }
                 }
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    [6, 14][self.ram.read_u8(SPRITE_D + k) as usize],
-                );
+                self.ram
+                    .set_sprite_graphics(k, [6, 14][self.ram.sprite(k).scratch_d() as usize]);
             }
             16 => {
                 self.ram.write_u16(BG1_Y_OFFSET, 0);
@@ -1599,10 +1509,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         self.ganon_select_warp_location(k, 13);
                         self.ram.write_u8(FLAG_IS_LINK_IMMOBILIZED, 0);
                         self.ganon_spawn_falling_tiles_overlord(k);
-                        if self.ram.read_u8(SPRITE_ANIM_CLOCK + k) >= 4 {
+                        if self.ram.sprite(k).animation_clock() >= 4 {
                             self.ganon_select_warp_location(k, 10);
-                            self.ram.write_u8(SPRITE_HEALTH + k, 96);
-                            self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 224);
+                            self.ram.set_sprite_health(k, 96);
+                            self.ram.set_sprite_aux2_delay(k, 224);
                             self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x170);
                             self.runtime.show_message_minimal(self.ram);
                         }
@@ -1619,61 +1529,51 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     }
                 } else {
                     self.runtime.move_z(self.ram, k);
-                    if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                        self.ram.write_u8(SPRITE_Z_VEL + k, 0);
-                        self.ram.write_u8(SPRITE_Z + k, 0);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 96);
+                    if (self.ram.sprite(k).z() as i8) < 0 {
+                        self.ram.set_sprite_velocity_z(k, 0);
+                        self.ram.set_sprite_z(k, 0);
+                        self.ram.set_sprite_main_delay(k, 96);
                         self.ram.write_u8(SOUND_EFFECT_AMBIENT, 7);
                         self.runtime.sfx2_with_pan(self.ram, k, 0xc);
                     }
-                    self.ram.write_u8(
-                        SPRITE_GRAPHICS + k,
-                        [2, 10][self.ram.read_u8(SPRITE_D + k) as usize],
-                    );
+                    self.ram
+                        .set_sprite_graphics(k, [2, 10][self.ram.sprite(k).scratch_d() as usize]);
                 }
             }
             17 => {
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    [6, 14][self.ram.read_u8(SPRITE_D + k) as usize],
-                );
+                self.ram
+                    .set_sprite_graphics(k, [6, 14][self.ram.sprite(k).scratch_d() as usize]);
                 if delay == 0 {
                     self.ganon_select_warp_location(k, 18);
                     return;
                 } else if delay == 52 {
                     self.ganon_func1(k, 5);
                 } else if delay < 52 {
-                    self.ram.write_u8(
-                        SPRITE_GRAPHICS + k,
-                        [7, 10][self.ram.read_u8(SPRITE_D + k) as usize],
-                    );
+                    self.ram
+                        .set_sprite_graphics(k, [7, 10][self.ram.sprite(k).scratch_d() as usize]);
                 }
                 if delay >= 72 || delay < 40 {
-                    self.ram.write_u8(
-                        SPRITE_IGNORE_PROJECTILE + k,
-                        self.ram
-                            .read_u8(SPRITE_IGNORE_PROJECTILE + k)
-                            .wrapping_add(1),
+                    self.ram.set_sprite_ignore_projectile(
+                        k,
+                        self.ram.sprite(k).ignore_projectile().wrapping_add(1),
                     );
                     if delay & 1 != 0 {
-                        self.ram.write_u8(SPRITE_GRAPHICS + k, 255);
+                        self.ram.set_sprite_graphics(k, 255);
                     }
                 }
                 self.ganon_enable_invincibility(k);
             }
             19 => {
-                self.ram.write_u8(SPRITE_OAM_FLAGS + k, 5);
-                self.ram.write_u8(SPRITE_FLAGS + k, 2);
+                self.ram.set_sprite_oam_flags(k, 5);
+                self.ram.set_sprite_flags(k, 2);
                 if delay == 0 {
-                    self.ram.write_u8(SPRITE_OAM_FLAGS + k, 1);
+                    self.ram.set_sprite_oam_flags(k, 1);
                     self.ganon_select_warp_location(k, 18);
-                    self.ram.write_u8(SPRITE_TYPE + k, 0xd6);
-                    self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
+                    self.ram.set_sprite_kind(k, 0xd6);
+                    self.ram.set_sprite_hit_timer(k, 0);
                 } else {
-                    self.ram.write_u8(
-                        SPRITE_GRAPHICS + k,
-                        [5, 13][self.ram.read_u8(SPRITE_D + k) as usize],
-                    );
+                    self.ram
+                        .set_sprite_graphics(k, [5, 13][self.ram.sprite(k).scratch_d() as usize]);
                 }
             }
             _ => {}
@@ -1682,9 +1582,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn ganon_draw(&mut self, k: usize) {
         // The runtime's Ganon callback routes back to this bank; implement the
         // C draw directly rather than recursing through that callback.
-        if (self.ram.read_u8(SPRITE_GRAPHICS + k) as i8) < 0
-            || (self.ram.read_u8(SPRITE_AI_STATE + k) != 19
-                && self.ram.read_u8(SPRITE_DELAY_AUX4 + k) == 0
+        if (self.ram.sprite(k).graphics() as i8) < 0
+            || (self.ram.sprite(k).ai_state() != 19
+                && self.ram.sprite(k).aux4_delay() == 0
                 && self.ram.read_u8(CURRENT_DUNGEON_ROOM) == 0)
         {
             self.runtime.prep_oam_or_double_ret(self.ram, k);
@@ -1695,7 +1595,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         };
         let first = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4 + 5;
-        let g = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
+        let g = self.ram.sprite(k).graphics() as usize;
         for i in 0..12 {
             let j = g * 12 + i;
             crate::oam::set_plain(
@@ -1711,8 +1611,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const HEAD_OFFSET: [usize; 17] = [1, 1, 1, 1, 1, 1, 15, 1, 4, 4, 4, 4, 4, 4, 4, 15, 15];
         if HEAD_OFFSET[g] != 15 {
             let entry = first + HEAD_OFFSET[g];
-            let j = usize::from(self.ram.read_u8(SPRITE_HEAD_DIR + k)) * 2
-                + if self.ram.read_u8(SPRITE_D + k) != 0 {
+            let j = usize::from(self.ram.sprite(k).head_direction()) * 2
+                + if self.ram.sprite(k).scratch_d() != 0 {
                     6
                 } else {
                     0
@@ -1727,13 +1627,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.ram.read_u8(SUBMODULE_INDEX) != 0 {
             self.runtime.correct_oam_entries(self.ram, k, 9, 0xff);
         }
-        if self.ram.read_u8(SPRITE_G + k) == 9 {
+        if self.ram.sprite(k).scratch_g() == 9 {
             self.ram.write_u16(OAM_CUR_PTR, 0x828);
             self.ram.write_u16(OAM_EXT_CUR_PTR, 0xa2a);
             self.runtime
                 .draw_multiple(self.ram, k, &[(16, -3, 0x4c0a, 2), (16, 5, 0x4c1a, 2)]);
         }
-        let z = u16::from(self.ram.read_u8(SPRITE_Z + k)).wrapping_sub(1);
+        let z = u16::from(self.ram.sprite(k).z()).wrapping_sub(1);
         let frame = usize::from((z >> 11).min(4));
         self.ram.write_u16(
             CUR_SPRITE_Y,
@@ -1741,24 +1641,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         );
         self.ram.write_u16(OAM_CUR_PTR, 0x9f4);
         self.ram.write_u16(OAM_EXT_CUR_PTR, 0xa9d);
-        let saved_flags = self.ram.read_u8(SPRITE_OAM_FLAGS + k);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, 0);
-        self.ram.write_u8(SPRITE_OBJ_PRIO + k, 48);
+        let saved_flags = self.ram.sprite(k).oam_flags();
+        self.ram.set_sprite_oam_flags(k, 0);
+        self.ram.set_sprite_object_priority(k, 48);
         self.runtime.draw_multiple(
             self.ram,
             k,
             &LARGE_SHADOW_DRAW_DATA[frame * 3..frame * 3 + 3],
         );
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, saved_flags);
+        self.ram.set_sprite_oam_flags(k, saved_flags);
         self.runtime.get_16bit_coords(self.ram, k);
     }
 
     pub fn ganon_enable_invincibility(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_HIT_TIMER + k) & 127 == 26 {
-            self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
-            self.ram.write_u8(SPRITE_AI_STATE + k, 19);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 127);
-            self.ram.write_u8(SPRITE_TYPE + k, 215);
+        if self.ram.sprite(k).hit_timer() & 127 == 26 {
+            self.ram.set_sprite_hit_timer(k, 0);
+            self.ram.set_sprite_ai_state(k, 19);
+            self.ram.set_sprite_main_delay(k, 127);
+            self.ram.set_sprite_kind(k, 215);
         }
     }
 
@@ -1772,11 +1672,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         else {
             return;
         };
-        let t = self.ram.read_u8(SPRITE_ANIM_CLOCK + k) as usize;
+        let t = self.ram.sprite(k).animation_clock() as usize;
         if t >= 4 {
             return;
         }
-        self.ram.write_u8(SPRITE_ANIM_CLOCK + k, (t + 1) as u8);
+        self.ram.set_sprite_animation_clock(k, (t + 1) as u8);
         self.ram.write_u8(OVERLORD_TYPE + j, TY[t]);
         self.ram.write_u8(OVERLORD_X_LO + j, X[t]);
         self.ram
@@ -1795,53 +1695,51 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         };
         self.runtime.sfx2_with_pan(self.ram, k, 0x2a);
         self.runtime.set_spawned_coordinates(self.ram, j);
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, t);
-        self.ram.write_u8(SPRITE_ANIM_CLOCK + j, t);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + j, 3);
-        self.ram.write_u8(SPRITE_FLAGS3 + j, 0x40);
-        self.ram.write_u8(SPRITE_FLAGS2 + j, 0x21);
-        self.ram.write_u8(SPRITE_DEFL_BITS + j, 0x40);
+        self.ram.set_sprite_ignore_projectile(j, t);
+        self.ram.set_sprite_animation_clock(j, t);
+        self.ram.set_sprite_oam_flags(j, 3);
+        self.ram.set_sprite_flags3(j, 0x40);
+        self.ram.set_sprite_flags2(j, 0x21);
+        self.ram.set_sprite_deflection_bits(j, 0x40);
         self.set_sprite_y(
             j,
             self.sprite_y(j)
-                .wrapping_add_signed(if self.ram.read_u8(SPRITE_D + k) != 0 {
+                .wrapping_add_signed(if self.ram.sprite(k).scratch_d() != 0 {
                     -16
                 } else {
                     0
                 }),
         );
         self.runtime.apply_speed_towards_link(self.ram, j, 32);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + j, 16);
+        self.ram.set_sprite_main_delay(j, 16);
+        self.ram.set_sprite_scratch_a(j, self.ram.sprite(0).x_low());
         self.ram
-            .write_u8(SPRITE_A + j, self.ram.read_u8(SPRITE_X_LO));
+            .set_sprite_scratch_b(j, self.ram.sprite(0).x_high());
+        self.ram.set_sprite_scratch_c(j, self.ram.sprite(0).y_low());
         self.ram
-            .write_u8(SPRITE_B + j, self.ram.read_u8(SPRITE_X_HI));
-        self.ram
-            .write_u8(SPRITE_C + j, self.ram.read_u8(SPRITE_Y_LO));
-        self.ram
-            .write_u8(SPRITE_E + j, self.ram.read_u8(SPRITE_Y_HI));
-        self.ram.write_u8(SPRITE_BUMP_DAMAGE + j, 7);
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 7);
+            .set_sprite_scratch_e(j, self.ram.sprite(0).y_high());
+        self.ram.set_sprite_bump_damage(j, 7);
+        self.ram.set_sprite_ignore_projectile(j, 7);
     }
 
     pub fn ganon_phase1_animate_trident_spin(&mut self, k: usize) {
         const GF: [u8; 16] = [8, 7, 6, 5, 4, 3, 2, 1, 8, 7, 6, 5, 4, 3, 2, 1];
         const GX: [u8; 16] = [0, 0, 1, 1, 0, 0, 1, 1, 8, 8, 9, 9, 8, 8, 9, 9];
-        let j = ((self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 2 & 7)
-            + if self.ram.read_u8(SPRITE_D + k) != 0 {
+        let j = ((self.ram.sprite(k).main_delay() >> 2 & 7)
+            + if self.ram.sprite(k).scratch_d() != 0 {
                 8
             } else {
                 0
             }) as usize;
-        self.ram.write_u8(SPRITE_G + k, GF[j]);
-        self.ram.write_u8(SPRITE_GRAPHICS + k, GX[j]);
+        self.ram.set_sprite_scratch_g(k, GF[j]);
+        self.ram.set_sprite_graphics(k, GX[j]);
         self.swish_every16_frames(k);
     }
 
     pub fn ganon_handle_animation_idle(&mut self, k: usize) {
-        let d = self.ram.read_u8(SPRITE_D + k) as usize;
-        self.ram.write_u8(SPRITE_G + k, [9, 10][d]);
-        self.ram.write_u8(SPRITE_GRAPHICS + k, [2, 10][d]);
+        let d = self.ram.sprite(k).scratch_d() as usize;
+        self.ram.set_sprite_scratch_g(k, [9, 10][d]);
+        self.ram.set_sprite_graphics(k, [2, 10][d]);
     }
 
     pub fn ganon_select_warp_location(&mut self, k: usize, state: u8) {
@@ -1852,23 +1750,21 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const Y: [u8; 8] = [0x40, 0x30, 0x30, 0x40, 0xb0, 0xc0, 0xc0, 0xb0];
         const X: [u8; 8] = [0x30, 0x50, 0xa0, 0xc0, 0x40, 0x60, 0x90, 0xb0];
         let j = NEXT[((self.runtime.random_number(self.ram) & 3)
-            | self.ram.read_u8(SPRITE_SUBTYPE + k).wrapping_shl(2)) as usize];
-        self.ram.write_u8(SPRITE_SUBTYPE + k, j);
+            | self.ram.sprite(k).subtype().wrapping_shl(2)) as usize];
+        self.ram.set_sprite_subtype(k, j);
         self.ram.write_u8(SWAMOLA_TARGET_X_LO, X[j as usize]);
         self.ram.write_u8(SWAMOLA_TARGET_Y_LO, Y[j as usize]);
-        self.ram.write_u8(SPRITE_AI_STATE + k, state);
-        self.ram.write_u8(SPRITE_X_VEL + k, 0);
-        self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+        self.ram.set_sprite_ai_state(k, state);
+        self.ram.set_sprite_velocity_x(k, 0);
+        self.ram.set_sprite_velocity_y(k, 0);
+        self.ram.set_sprite_main_delay(k, 48);
         self.runtime.sfx3_with_pan(self.ram, k, 0x28);
     }
 
     pub fn ganon_shake_head(&mut self, k: usize) {
         const H: [u8; 18] = [0, 0, 0, 1, 2, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 16];
-        self.ram.write_u8(
-            SPRITE_HEAD_DIR + k,
-            H[(self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 3) as usize],
-        );
+        self.ram
+            .set_sprite_head_direction(k, H[(self.ram.sprite(k).main_delay() >> 3) as usize]);
     }
 
     pub fn sprite_prep_swamola_initialize_segments(&mut self, k: usize) {
@@ -1880,13 +1776,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         };
         for _ in 0..32 {
             self.ram
-                .write_u8(SWAMOLA_X_LO + j, self.ram.read_u8(SPRITE_X_LO + k));
+                .write_u8(SWAMOLA_X_LO + j, self.ram.sprite(k).x_low());
             self.ram
-                .write_u8(SWAMOLA_X_HI + j, self.ram.read_u8(SPRITE_X_HI + k));
+                .write_u8(SWAMOLA_X_HI + j, self.ram.sprite(k).x_high());
             self.ram
-                .write_u8(SWAMOLA_Y_LO + j, self.ram.read_u8(SPRITE_Y_LO + k));
+                .write_u8(SWAMOLA_Y_LO + j, self.ram.sprite(k).y_low());
             self.ram
-                .write_u8(SWAMOLA_Y_HI + j, self.ram.read_u8(SPRITE_Y_HI + k));
+                .write_u8(SWAMOLA_Y_HI + j, self.ram.sprite(k).y_high());
             j += 1;
         }
     }
@@ -1895,7 +1791,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const DIR: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
         const X: [i8; 9] = [0, 0, 32, 32, 32, 0, -32, -32, -32];
         const Y: [i8; 9] = [0, -32, -32, 0, 32, 32, 32, 0, -32];
-        let state = self.ram.read_u8(SPRITE_AI_STATE + k);
+        let state = self.ram.sprite(k).ai_state();
         if state != 0 {
             if (state as i8) < 0 {
                 self.sprite_swamola_ripples(k);
@@ -1907,31 +1803,27 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1),
-        );
+        self.ram
+            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        let old = self.ram.read_u8(SPRITE_Y_VEL + k);
-        self.ram.write_u8(
-            SPRITE_Y_VEL + k,
-            old.wrapping_add(self.ram.read_u8(SPRITE_Z_VEL + k)),
-        );
+        let old = self.ram.sprite(k).velocity_y();
+        self.ram
+            .set_sprite_velocity_y(k, old.wrapping_add(self.ram.sprite(k).velocity_z()));
         self.runtime.move_xy(self.ram, k);
-        self.ram.write_u8(SPRITE_Y_VEL + k, old);
+        self.ram.set_sprite_velocity_y(k, old);
         match state {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     let j = DIR[(self.runtime.random_number(self.ram) & 7) as usize];
-                    if j != self.ram.read_u8(SPRITE_D + k) {
+                    if j != self.ram.sprite(k).scratch_d() {
                         let x = u16::from_le_bytes([
-                            self.ram.read_u8(SPRITE_A + k),
-                            self.ram.read_u8(SPRITE_B + k),
+                            self.ram.sprite(k).scratch_a(),
+                            self.ram.sprite(k).scratch_b(),
                         ])
                         .wrapping_add_signed(X[j as usize] as i16);
                         let y = u16::from_le_bytes([
-                            self.ram.read_u8(SPRITE_C + k),
-                            self.ram.read_u8(SPRITE_HEAD_DIR + k),
+                            self.ram.sprite(k).scratch_c(),
+                            self.ram.sprite(k).head_direction(),
                         ])
                         .wrapping_add_signed(Y[j as usize] as i16);
                         let [a, b] = x.to_le_bytes();
@@ -1940,35 +1832,36 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         self.ram.write_u8(SWAMOLA_TARGET_X_HI + k, b);
                         self.ram.write_u8(SWAMOLA_TARGET_Y_LO + k, c);
                         self.ram.write_u8(SWAMOLA_TARGET_Y_HI + k, d);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                        self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                        self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                        self.ram.write_u8(SPRITE_Z_VEL + k, (-15i8) as u8);
+                        self.ram.set_sprite_ai_state(k, 1);
+                        self.ram.set_sprite_velocity_x(k, 0);
+                        self.ram.set_sprite_velocity_y(k, 0);
+                        self.ram.set_sprite_velocity_z(k, (-15i8) as u8);
                         self.swamola_spawn_ripples(k);
                     }
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 3 == 0 {
-                    let z = self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, z);
+                if self.ram.sprite(k).subtype2() & 3 == 0 {
+                    let z = self.ram.sprite(k).velocity_z().wrapping_add(1);
+                    self.ram.set_sprite_velocity_z(k, z);
                     if z == 0 {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                        self.ram.set_sprite_ai_state(k, 2);
                     }
                     let (x, y) = self.swamola_project_velocity_towards_target(k);
                     self.runtime.approach_target_speed(self.ram, k, x, y);
                 }
             }
             2 => {
-                let j = (self.ram.read_u8(SPRITE_G + k) & 1) as usize;
+                let j = (self.ram.sprite(k).scratch_g() & 1) as usize;
                 let z = self
                     .ram
-                    .read_u8(SPRITE_Z_VEL + k)
+                    .sprite(k)
+                    .velocity_z()
                     .wrapping_add_signed([2, -2][j]);
-                self.ram.write_u8(SPRITE_Z_VEL + k, z);
+                self.ram.set_sprite_velocity_z(k, z);
                 if z == [12, (-12i8) as u8][j] {
                     self.ram
-                        .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_G + k).wrapping_add(1));
+                        .set_sprite_scratch_g(k, self.ram.sprite(k).scratch_g().wrapping_add(1));
                 }
                 let x = u16::from_le_bytes([
                     self.ram.read_u8(SWAMOLA_TARGET_X_LO + k),
@@ -1991,46 +1884,46 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         .wrapping_add(8)
                         < 16
                 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
+                    self.ram.set_sprite_ai_state(k, 3);
                 }
                 let (xv, yv) = self.swamola_project_velocity_towards_target(k);
-                self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                self.ram.set_sprite_velocity_x(k, xv);
+                self.ram.set_sprite_velocity_y(k, yv);
             }
             3 => {
-                if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 3 == 0 {
-                    let z = self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, z);
+                if self.ram.sprite(k).subtype2() & 3 == 0 {
+                    let z = self.ram.sprite(k).velocity_z().wrapping_add(1);
+                    self.ram.set_sprite_velocity_z(k, z);
                     if z == 16 {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 4);
+                        self.ram.set_sprite_ai_state(k, 4);
                         self.swamola_spawn_ripples(k);
-                        self.ram.write_u8(SPRITE_Y_HI + k, 128);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 80);
+                        self.ram.set_sprite_y_high(k, 128);
+                        self.ram.set_sprite_main_delay(k, 80);
                     }
                     self.runtime.approach_target_speed(self.ram, k, 0, 0);
                 }
             }
             4 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     let j = DIR[(self.runtime.random_number(self.ram) & 7) as usize];
-                    self.ram.write_u8(SPRITE_D + k, j);
+                    self.ram.set_sprite_scratch_d(k, j);
                     let x = u16::from_le_bytes([
-                        self.ram.read_u8(SPRITE_A + k),
-                        self.ram.read_u8(SPRITE_B + k),
+                        self.ram.sprite(k).scratch_a(),
+                        self.ram.sprite(k).scratch_b(),
                     ])
                     .wrapping_add_signed(X[j as usize] as i16);
                     let y = u16::from_le_bytes([
-                        self.ram.read_u8(SPRITE_C + k),
-                        self.ram.read_u8(SPRITE_HEAD_DIR + k),
+                        self.ram.sprite(k).scratch_c(),
+                        self.ram.sprite(k).head_direction(),
                     ])
                     .wrapping_add_signed(Y[j as usize] as i16);
                     self.set_sprite_x(k, x);
                     self.set_sprite_y(k, y);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 0);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 48);
+                    self.ram.set_sprite_velocity_x(k, 0);
+                    self.ram.set_sprite_velocity_y(k, 0);
+                    self.ram.set_sprite_velocity_z(k, 0);
                 }
             }
             _ => {}
@@ -2052,19 +1945,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn swamola_spawn_ripples(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xcf) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_AI_STATE + j, 128);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 32);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 4);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 4);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0);
+            self.ram.set_sprite_ai_state(j, 128);
+            self.ram.set_sprite_main_delay(j, 32);
+            self.ram.set_sprite_oam_flags(j, 4);
+            self.ram.set_sprite_ignore_projectile(j, 4);
+            self.ram.set_sprite_flags2(j, 0);
         }
     }
     pub fn sprite_swamola_ripples(&mut self, k: usize) {
         self.swamola_ripples_draw(k);
-        if !self.runtime.return_if_inactive(self.ram, k)
-            && self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0
-        {
-            self.ram.write_u8(SPRITE_STATE + k, 0);
+        if !self.runtime.return_if_inactive(self.ram, k) && self.ram.sprite(k).main_delay() == 0 {
+            self.ram.set_sprite_state(k, 0);
         }
     }
     pub fn swamola_ripples_draw(&mut self, k: usize) {
@@ -2079,7 +1970,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (8, 4, 0x40d9, 0),
         ];
         self.runtime.oam_allocate_region_b(self.ram, 8);
-        let i = (self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 2 & 3) as usize * 2;
+        let i = (self.ram.sprite(k).main_delay() >> 2 & 3) as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
     }
     pub fn swamola_draw(&mut self, k: usize) {
@@ -2090,27 +1981,26 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         ];
         const OFF: [u8; 4] = [8, 16, 22, 26];
         let a = self.runtime.convert_velocity_to_angle(
-            self.ram.read_u8(SPRITE_X_VEL + k),
+            self.ram.sprite(k).velocity_x(),
             self.ram
-                .read_u8(SPRITE_Y_VEL + k)
-                .wrapping_add(self.ram.read_u8(SPRITE_Z_VEL + k)),
+                .sprite(k)
+                .velocity_y()
+                .wrapping_add(self.ram.sprite(k).velocity_z()),
         ) as usize;
-        self.ram.write_u8(SPRITE_GRAPHICS + k, G[a]);
-        self.ram.write_u8(
-            SPRITE_OAM_FLAGS + k,
-            self.ram.read_u8(SPRITE_OAM_FLAGS + k) & 63 | FL[a],
-        );
+        self.ram.set_sprite_graphics(k, G[a]);
+        self.ram
+            .set_sprite_oam_flags(k, self.ram.sprite(k).oam_flags() & 63 | FL[a]);
         self.runtime.draw_single_large(self.ram, k);
-        let mut j = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 31) as usize + k * 32;
+        let mut j = (self.ram.sprite(k).subtype2() & 31) as usize + k * 32;
         self.ram
-            .write_u8(SWAMOLA_X_LO + j, self.ram.read_u8(SPRITE_X_LO + k));
+            .write_u8(SWAMOLA_X_LO + j, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(SWAMOLA_X_HI + j, self.ram.read_u8(SPRITE_X_HI + k));
+            .write_u8(SWAMOLA_X_HI + j, self.ram.sprite(k).x_high());
         self.ram
-            .write_u8(SWAMOLA_Y_LO + j, self.ram.read_u8(SPRITE_Y_LO + k));
+            .write_u8(SWAMOLA_Y_LO + j, self.ram.sprite(k).y_low());
         self.ram
-            .write_u8(SWAMOLA_Y_HI + j, self.ram.read_u8(SPRITE_Y_HI + k));
-        let neg = (self.ram.read_u8(SPRITE_Y_VEL + k) as i8) < 0;
+            .write_u8(SWAMOLA_Y_HI + j, self.ram.sprite(k).y_high());
+        let neg = (self.ram.sprite(k).velocity_y() as i8) < 0;
         let delta: i16 = if neg { -1 } else { 1 };
         if neg {
             self.ram
@@ -2121,8 +2011,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             );
         }
         for i in 0..4 {
-            self.ram.write_u8(SPRITE_GRAPHICS + k, G2[i]);
-            j = (self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_sub(OFF[i]) & 31) as usize + k * 32;
+            self.ram.set_sprite_graphics(k, G2[i]);
+            j = (self.ram.sprite(k).subtype2().wrapping_sub(OFF[i]) & 31) as usize + k * 32;
             self.ram.write_u16(
                 CUR_SPRITE_X,
                 u16::from_le_bytes([
@@ -2158,14 +2048,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.ram.read_u8(FOLLOWER_INDICATOR) != 6
             && self.ram.read_u16(DUNG_SAVEGAME_STATE_BITS) & 0x2000 != 0
         {
-            self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 96);
-            self.ram.write_u8(SPRITE_C + k, 1);
-            self.ram.write_u8(SPRITE_D + k, 2);
-            self.ram.write_u8(SPRITE_HEAD_DIR + k, 4);
-            self.ram.write_u8(SPRITE_GRAPHICS + k, 7);
+            self.ram.set_sprite_aux2_delay(k, 96);
+            self.ram.set_sprite_scratch_c(k, 1);
+            self.ram.set_sprite_scratch_d(k, 2);
+            self.ram.set_sprite_head_direction(k, 4);
+            self.ram.set_sprite_graphics(k, 7);
             self.ram.write_u8(BYTE_7E0B69, 0);
         } else {
-            self.ram.write_u8(SPRITE_STATE + k, 0);
+            self.ram.set_sprite_state(k, 0);
         }
     }
     pub fn blind_laser_spawn_trail_garnish(&mut self, j: usize) {
@@ -2173,12 +2063,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.ram.write_u8(GARNISH_TYPE + k, 15);
         self.ram.write_u8(GARNISH_ACTIVE, 15);
         self.ram
-            .write_u8(GARNISH_OAM_FLAGS + k, self.ram.read_u8(SPRITE_GRAPHICS + j));
+            .write_u8(GARNISH_OAM_FLAGS + k, self.ram.sprite(j).graphics());
         self.ram.write_u8(GARNISH_SPRITE + k, j as u8);
         self.ram
-            .write_u8(GARNISH_X_LO + k, self.ram.read_u8(SPRITE_X_LO + j));
+            .write_u8(GARNISH_X_LO + k, self.ram.sprite(j).x_low());
         self.ram
-            .write_u8(GARNISH_X_HI + k, self.ram.read_u8(SPRITE_X_HI + j));
+            .write_u8(GARNISH_X_HI + k, self.ram.sprite(j).x_high());
         let y = self.sprite_y(j).wrapping_add(16);
         self.ram.write_u8(GARNISH_Y_LO + k, y as u8);
         self.ram.write_u8(GARNISH_Y_HI + k, (y >> 8) as u8);
@@ -2196,106 +2086,96 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const FL: [u8; 16] = [
             0, 0, 0, 0, 0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0, 0, 0, 0,
         ];
-        self.ram.write_u8(
-            SPRITE_OBJ_PRIO + k,
-            self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 48,
-        );
+        self.ram
+            .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 48);
         self.runtime.draw_single_large(self.ram, k);
-        let h = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
+        let h = self.ram.sprite(k).head_direction() as usize;
         self.runtime
             .set_current_oam_char_flags(self.ram, CH[h], FL[h]);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if self.ram.read_u8(SPRITE_F + k) == 14 {
-            self.ram.write_u8(SPRITE_F + k, 8);
+        if self.ram.sprite(k).scratch_f() == 14 {
+            self.ram.set_sprite_scratch_f(k, 8);
         }
         if self.runtime.return_if_recoiling(self.ram, k) {
             return;
         }
-        let sub = self.ram.read_u8(SPRITE_SUBTYPE + k).wrapping_sub(1);
-        self.ram.write_u8(SPRITE_SUBTYPE + k, sub);
+        let sub = self.ram.sprite(k).subtype().wrapping_sub(1);
+        self.ram.set_sprite_subtype(k, sub);
         if (sub as i8) < 0 {
-            self.ram.write_u8(SPRITE_SUBTYPE + k, 2);
-            self.ram.write_u8(
-                SPRITE_HEAD_DIR + k,
-                self.ram.read_u8(SPRITE_HEAD_DIR + k).wrapping_add(1) & 15,
+            self.ram.set_sprite_subtype(k, 2);
+            self.ram.set_sprite_head_direction(
+                k,
+                self.ram.sprite(k).head_direction().wrapping_add(1) & 15,
             );
         }
-        if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
+        if self.ram.sprite(k).main_delay() != 0 {
             return;
         }
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1),
-        );
+        self.ram
+            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
         if let Some(j) = self.blind_spit_fireball(k, 0x1f) {
-            let z = self.ram.read_u8(SPRITE_Z_SUBPOS + k).wrapping_sub(1);
-            self.ram.write_u8(SPRITE_Z_SUBPOS + k, z);
+            let z = self.ram.sprite(k).subpixel_z().wrapping_sub(1);
+            self.ram.set_sprite_subpixel_z(k, z);
             if (z as i8) < 0 {
-                self.ram.write_u8(SPRITE_Z_SUBPOS + k, 4);
+                self.ram.set_sprite_subpixel_z(k, 4);
                 let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 32);
-                self.ram.write_u8(SPRITE_X_VEL + j, x);
-                self.ram.write_u8(SPRITE_Y_VEL + j, y);
+                self.ram.set_sprite_velocity_x(j, x);
+                self.ram.set_sprite_velocity_y(j, y);
             }
         }
-        let j = (self.ram.read_u8(SPRITE_G + k) & 1) as usize;
-        let x = self.ram.read_u8(SPRITE_X_VEL + k);
+        let j = (self.ram.sprite(k).scratch_g() & 1) as usize;
+        let x = self.ram.sprite(k).velocity_x();
         if x != XV[j] {
-            self.ram.write_u8(
-                SPRITE_X_VEL + k,
-                x.wrapping_add(if j != 0 { 255 } else { 1 }),
-            );
-        }
-        if self.ram.read_u8(SPRITE_X_LO + k) & !1 == XL[j] {
             self.ram
-                .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_G + k).wrapping_add(1));
+                .set_sprite_velocity_x(k, x.wrapping_add(if j != 0 { 255 } else { 1 }));
         }
-        let j = (self.ram.read_u8(SPRITE_ANIM_CLOCK + k) & 1) as usize;
-        let y = self.ram.read_u8(SPRITE_Y_VEL + k);
+        if self.ram.sprite(k).x_low() & !1 == XL[j] {
+            self.ram
+                .set_sprite_scratch_g(k, self.ram.sprite(k).scratch_g().wrapping_add(1));
+        }
+        let j = (self.ram.sprite(k).animation_clock() & 1) as usize;
+        let y = self.ram.sprite(k).velocity_y();
         if y != YV[j] {
-            self.ram.write_u8(
-                SPRITE_Y_VEL + k,
-                y.wrapping_add(if j != 0 { 255 } else { 1 }),
+            self.ram
+                .set_sprite_velocity_y(k, y.wrapping_add(if j != 0 { 255 } else { 1 }));
+        }
+        if self.ram.sprite(k).y_low() & !1 == YL[j] {
+            self.ram.set_sprite_animation_clock(
+                k,
+                self.ram.sprite(k).animation_clock().wrapping_add(1),
             );
         }
-        if self.ram.read_u8(SPRITE_Y_LO + k) & !1 == YL[j] {
-            self.ram.write_u8(
-                SPRITE_ANIM_CLOCK + k,
-                self.ram.read_u8(SPRITE_ANIM_CLOCK + k).wrapping_add(1),
-            );
-        }
-        if self.ram.read_u8(SPRITE_F + k) == 0 {
+        if self.ram.sprite(k).scratch_f() == 0 {
             self.runtime.move_xy(self.ram, k);
         }
     }
     pub fn blind_spawn_head(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xce) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_FLAGS3 + j, 0x5b);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 0xb);
-            self.ram.write_u8(SPRITE_DEFL_BITS + j, 4);
-            self.ram.write_u8(SPRITE_A + j, 2);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 1);
-            self.ram.write_u8(SPRITE_FLAGS4 + j, 0);
-            self.ram.write_u8(SPRITE_FLAGS + j, 0);
-            self.ram.write_u8(SPRITE_Z + j, 23);
-            self.ram.write_u8(
-                SPRITE_Y_LO + j,
-                self.ram.read_u8(SPRITE_Y_LO + j).wrapping_add(23),
-            );
+            self.ram.set_sprite_flags3(j, 0x5b);
+            self.ram.set_sprite_oam_flags(j, 0xb);
+            self.ram.set_sprite_deflection_bits(j, 4);
+            self.ram.set_sprite_scratch_a(j, 2);
+            self.ram.set_sprite_flags2(j, 1);
+            self.ram.set_sprite_flags4(j, 0);
+            self.ram.set_sprite_flags(j, 0);
+            self.ram.set_sprite_z(j, 23);
             self.ram
-                .write_u8(SPRITE_G + j, (self.ram.read_u8(SPRITE_X_LO + j) >> 7) & 1);
-            self.ram.write_u8(
-                SPRITE_ANIM_CLOCK + j,
-                (self.ram.read_u8(SPRITE_Y_LO + j).wrapping_sub(23) >> 7) & 1,
+                .set_sprite_y_low(j, self.ram.sprite(j).y_low().wrapping_add(23));
+            self.ram
+                .set_sprite_scratch_g(j, (self.ram.sprite(j).x_low() >> 7) & 1);
+            self.ram.set_sprite_animation_clock(
+                j,
+                (self.ram.sprite(j).y_low().wrapping_sub(23) >> 7) & 1,
             );
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 48);
+            self.ram.set_sprite_main_delay(j, 48);
         }
     }
     pub fn sprite_ce_blind(&mut self, k: usize) {
-        let a = self.ram.read_u8(SPRITE_A + k);
+        let a = self.ram.sprite(k).scratch_a();
         if (a as i8) < 0 {
             self.sprite_blind_laser(k);
         } else if a == 2 {
@@ -2309,17 +2189,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const F: [u8; 16] = [
             0, 0, 0, 0, 0, 0x40, 0x40, 0x40, 0x40, 0x40, 0xc0, 0xc0, 0x80, 0x80, 0x80, 0x80,
         ];
-        let h = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
-        self.ram.write_u8(SPRITE_GRAPHICS + k, G[h]);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, F[h] | 3);
+        let h = self.ram.sprite(k).head_direction() as usize;
+        self.ram.set_sprite_graphics(k, G[h]);
+        self.ram.set_sprite_oam_flags(k, F[h] | 3);
         self.runtime.prep_oam(self.ram, k);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+        let d = self.ram.sprite(k).main_delay();
         if d != 0 {
             if d == 1 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
             }
             return;
         }
@@ -2327,57 +2207,53 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.set_sprite_x(
             k,
             self.sprite_x(k)
-                .wrapping_add_signed(self.ram.read_u8(SPRITE_X_VEL + k) as i8 as i16),
+                .wrapping_add_signed(self.ram.sprite(k).velocity_x() as i8 as i16),
         );
         self.set_sprite_y(
             k,
             self.sprite_y(k)
-                .wrapping_add_signed(self.ram.read_u8(SPRITE_Y_VEL + k) as i8 as i16),
+                .wrapping_add_signed(self.ram.sprite(k).velocity_y() as i8 as i16),
         );
         if self.runtime.check_tile_collision(self.ram, k) {
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 12);
+            self.ram.set_sprite_main_delay(k, 12);
         }
         self.blind_laser_spawn_trail_garnish(k);
     }
     pub fn sprite_blind_blind_blind(&mut self, k: usize) {
-        self.ram.write_u8(
-            SPRITE_OBJ_PRIO + k,
-            self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 0x30,
-        );
+        self.ram
+            .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 0x30);
         self.blind_draw(k);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, 1);
+        self.ram.set_sprite_oam_flags(k, 1);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        let a = self.ram.read_u8(SPRITE_F + k);
+        let a = self.ram.sprite(k).scratch_f();
         if a != 0 {
-            self.ram.write_u8(SPRITE_F + k, a - 1);
+            self.ram.set_sprite_scratch_f(k, a - 1);
         }
         if a == 11 {
-            self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
-            self.ram.write_u8(SPRITE_WALLCOLL + k, 0);
-            if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) == 0 {
-                self.ram.write_u8(SPRITE_HEALTH + k, 128);
-                self.ram.write_u8(SPRITE_DELAY_AUX4 + k, 48);
-                self.ram.write_u8(
-                    SPRITE_OAM_FLAGS + k,
-                    self.ram.read_u8(SPRITE_OAM_FLAGS + k) & 1,
-                );
-                let heads = self.ram.read_u8(SPRITE_Z_SUBPOS + k).wrapping_add(1);
-                self.ram.write_u8(SPRITE_Z_SUBPOS + k, heads);
+            self.ram.set_sprite_hit_timer(k, 0);
+            self.ram.set_sprite_wall_collision(k, 0);
+            if self.ram.sprite(k).aux4_delay() == 0 {
+                self.ram.set_sprite_health(k, 128);
+                self.ram.set_sprite_aux4_delay(k, 48);
+                self.ram
+                    .set_sprite_oam_flags(k, self.ram.sprite(k).oam_flags() & 1);
+                let heads = self.ram.sprite(k).subpixel_z().wrapping_add(1);
+                self.ram.set_sprite_subpixel_z(k, heads);
                 if heads < 3 {
-                    self.ram.write_u8(SPRITE_WALLCOLL + k, 96);
-                    self.ram.write_u8(SPRITE_SUBTYPE + k, 1);
+                    self.ram.set_sprite_wall_collision(k, 96);
+                    self.ram.set_sprite_subtype(k, 1);
                 } else {
-                    self.ram.write_u8(SPRITE_Z_SUBPOS + k, 0);
+                    self.ram.set_sprite_subpixel_z(k, 0);
                     let defeated = self.ram.read_u8(SPRITE_LIMIT_INSTANCE).wrapping_add(1);
                     self.ram.write_u8(SPRITE_LIMIT_INSTANCE, defeated);
                     if defeated == 3 {
                         self.runtime.kill_friends(self.ram);
-                        self.ram.write_u8(SPRITE_STATE + k, 4);
-                        self.ram.write_u8(SPRITE_A + k, 0);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-                        self.ram.write_u8(SPRITE_HIT_TIMER + k, 255);
+                        self.ram.set_sprite_state(k, 4);
+                        self.ram.set_sprite_scratch_a(k, 0);
+                        self.ram.set_sprite_main_delay(k, 255);
+                        self.ram.set_sprite_hit_timer(k, 255);
                         self.ram.write_u8(
                             FLAG_BLOCK_LINK_MENU,
                             self.ram.read_u8(FLAG_BLOCK_LINK_MENU).wrapping_add(1),
@@ -2385,39 +2261,33 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         self.runtime.sfx3_with_pan(self.ram, k, 0x22);
                         return;
                     }
-                    self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_C + k, 6);
-                    self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 255);
-                    self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 255);
+                    self.ram.set_sprite_velocity_y(k, 0);
+                    self.ram.set_sprite_velocity_x(k, 0);
+                    self.ram.set_sprite_scratch_c(k, 6);
+                    self.ram.set_sprite_aux2_delay(k, 255);
+                    self.ram.set_sprite_ignore_projectile(k, 255);
                     self.blind_spawn_head(k);
                 }
             }
         }
-        if self.ram.read_u8(SPRITE_A + k) != 0 {
+        if self.ram.sprite(k).scratch_a() != 0 {
             const G: [u8; 7] = [20, 19, 18, 17, 16, 15, 15];
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+            if self.ram.sprite(k).main_delay() == 0 {
+                self.ram.set_sprite_state(k, 0);
             }
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
-                G[(self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 3) as usize],
-            );
+            self.ram
+                .set_sprite_graphics(k, G[(self.ram.sprite(k).main_delay() >> 3) as usize]);
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1),
-        );
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 1 == 0 {
-            self.ram.write_u8(
-                SPRITE_DELAY_MAIN + k,
-                self.ram.read_u8(SPRITE_DELAY_MAIN + k).wrapping_add(1),
-            );
+        self.ram
+            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
+        if self.ram.sprite(k).subtype2() & 1 == 0 {
+            self.ram
+                .set_sprite_main_delay(k, self.ram.sprite(k).main_delay().wrapping_add(1));
         }
-        if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) != 0 {
-            self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-            if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 8 {
+        if self.ram.sprite(k).aux1_delay() != 0 {
+            self.ram.set_sprite_ai_state(k, 0);
+            if self.ram.sprite(k).aux1_delay() == 8 {
                 self.blind_spawn_laser(k);
             }
             self.blind_check_bump_damage(k);
@@ -2425,31 +2295,29 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
         self.ram
             .write_u8(BYTE_7E0B69, self.ram.read_u8(BYTE_7E0B69).wrapping_add(1));
-        if self.ram.read_u8(SPRITE_STUNNED + k) == 0 {
-            if self.ram.read_u8(SPRITE_AI_STATE + k) != 0 {
-                self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 16);
-                self.ram.write_u8(SPRITE_STUNNED + k, 128);
-                self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+        if self.ram.sprite(k).stunned() == 0 {
+            if self.ram.sprite(k).ai_state() != 0 {
+                self.ram.set_sprite_aux1_delay(k, 16);
+                self.ram.set_sprite_stunned(k, 128);
+                self.ram.set_sprite_ai_state(k, 0);
             }
         } else {
-            self.ram.write_u8(
-                SPRITE_STUNNED + k,
-                self.ram.read_u8(SPRITE_STUNNED + k).wrapping_sub(1),
-            );
-            self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+            self.ram
+                .set_sprite_stunned(k, self.ram.sprite(k).stunned().wrapping_sub(1));
+            self.ram.set_sprite_ai_state(k, 0);
         }
         self.ram
-            .write_u8(SPRITE_X_HI + k, (self.ram.read_u16(LINK_X) >> 8) as u8);
+            .set_sprite_x_high(k, (self.ram.read_u16(LINK_X) >> 8) as u8);
         self.ram
-            .write_u8(SPRITE_Y_HI + k, (self.ram.read_u16(LINK_Y) >> 8) as u8);
-        match self.ram.read_u8(SPRITE_C + k) {
+            .set_sprite_y_high(k, (self.ram.read_u16(LINK_Y) >> 8) as u8);
+        match self.ram.sprite(k).scratch_c() {
             0 => {
                 self.ram.write_u8(DMA_VAR6, 0);
                 self.ram.write_u8(DMA_VAR7, 0xa0);
-                let d = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+                let d = self.ram.sprite(k).aux2_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_C + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 96);
+                    self.ram.set_sprite_scratch_c(k, 1);
+                    self.ram.set_sprite_aux2_delay(k, 96);
                 } else if d == 80 {
                     self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x123);
                     self.runtime.show_message_minimal(self.ram);
@@ -2459,18 +2327,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             1 => {
                 self.blind_check_bump_damage(k);
-                self.ram.write_u8(SPRITE_GRAPHICS + k, 9);
-                let d = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+                self.ram.set_sprite_graphics(k, 9);
+                let d = self.ram.sprite(k).aux2_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_C + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-                    self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 0);
+                    self.ram.set_sprite_scratch_c(k, 2);
+                    self.ram.set_sprite_main_delay(k, 255);
+                    self.ram.set_sprite_ignore_projectile(k, 0);
                 } else if d < 64 {
-                    self.ram.write_u8(SPRITE_Y_VEL + k, (-8i8) as u8);
+                    self.ram.set_sprite_velocity_y(k, (-8i8) as u8);
                     self.runtime.move_y(self.ram, k);
                 }
                 self.blind_animate(k);
-                self.ram.write_u8(SPRITE_HEAD_DIR + k, 4);
+                self.ram.set_sprite_head_direction(k, 4);
             }
             2 => {
                 const YV: [u8; 2] = [18, (-18i8) as u8];
@@ -2478,76 +2346,75 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 const XP: [u8; 2] = [164, 76];
                 self.blind_check_bump_damage(k);
                 self.blind_animate(k);
-                let subtype2 = self.ram.read_u8(SPRITE_SUBTYPE2 + k);
+                let subtype2 = self.ram.sprite(k).subtype2();
                 let change_wall = ((subtype2 & 127 == 0
                     && self.runtime.is_below_link(self.ram, k).wrapping_add(2)
-                        != self.ram.read_u8(SPRITE_D + k))
-                    || self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0)
-                    && self.ram.read_u8(SPRITE_X_LO + k) < 0x78;
+                        != self.ram.sprite(k).scratch_d())
+                    || self.ram.sprite(k).main_delay() == 0)
+                    && self.ram.sprite(k).x_low() < 0x78;
                 if change_wall {
-                    self.ram.write_u8(SPRITE_C + k, 3);
+                    self.ram.set_sprite_scratch_c(k, 3);
                     self.ram
-                        .write_u8(SPRITE_Y_VEL + k, self.ram.read_u8(SPRITE_Y_VEL + k) & !1);
+                        .set_sprite_velocity_y(k, self.ram.sprite(k).velocity_y() & !1);
                     self.ram
-                        .write_u8(SPRITE_X_VEL + k, self.ram.read_u8(SPRITE_X_VEL + k) & !1);
-                    self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 0x30);
+                        .set_sprite_velocity_x(k, self.ram.sprite(k).velocity_x() & !1);
+                    self.ram.set_sprite_aux2_delay(k, 0x30);
                     return;
                 }
-                let j = (self.ram.read_u8(SPRITE_B + k) & 1) as usize;
-                let y =
-                    self.ram
-                        .read_u8(SPRITE_Y_VEL + k)
-                        .wrapping_add(if j != 0 { 255 } else { 1 });
-                self.ram.write_u8(SPRITE_Y_VEL + k, y);
+                let j = (self.ram.sprite(k).scratch_b() & 1) as usize;
+                let y = self
+                    .ram
+                    .sprite(k)
+                    .velocity_y()
+                    .wrapping_add(if j != 0 { 255 } else { 1 });
+                self.ram.set_sprite_velocity_y(k, y);
                 if y == YV[j] {
                     self.ram
-                        .write_u8(SPRITE_B + k, self.ram.read_u8(SPRITE_B + k).wrapping_add(1));
+                        .set_sprite_scratch_b(k, self.ram.sprite(k).scratch_b().wrapping_add(1));
                 }
-                let j = (self.ram.read_u8(SPRITE_G + k) & 1) as usize;
-                let x = self.ram.read_u8(SPRITE_X_VEL + k);
+                let j = (self.ram.sprite(k).scratch_g() & 1) as usize;
+                let x = self.ram.sprite(k).velocity_x();
                 if x != XV[j] {
-                    self.ram.write_u8(
-                        SPRITE_X_VEL + k,
-                        x.wrapping_add(if j != 0 { 255 } else { 1 }),
-                    );
-                }
-                if self.ram.read_u8(SPRITE_X_LO + k) & !1 == XP[j] {
                     self.ram
-                        .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_G + k).wrapping_add(1));
+                        .set_sprite_velocity_x(k, x.wrapping_add(if j != 0 { 255 } else { 1 }));
+                }
+                if self.ram.sprite(k).x_low() & !1 == XP[j] {
+                    self.ram
+                        .set_sprite_scratch_g(k, self.ram.sprite(k).scratch_g().wrapping_add(1));
                 }
                 self.runtime.move_xy(self.ram, k);
-                let wallcoll = self.ram.read_u8(SPRITE_WALLCOLL + k);
+                let wallcoll = self.ram.sprite(k).wall_collision();
                 if wallcoll != 0 {
                     self.blind_fireball_flurry(k, wallcoll);
                 } else if subtype2 & 7 == 0 {
                     self.runtime.spawn_probe_always(
                         self.ram,
                         k,
-                        self.ram.read_u8(SPRITE_HEAD_DIR + k) << 2,
+                        self.ram.sprite(k).head_direction() << 2,
                     );
                 }
             }
             3 => {
                 self.blind_check_bump_damage(k);
-                if self.ram.read_u8(SPRITE_DELAY_AUX2 + k) != 0 {
+                if self.ram.sprite(k).aux2_delay() != 0 {
                     self.blind_decelerate_x(k);
                     self.runtime.move_x(self.ram, k);
                     self.blind_decelerate_y(k);
                 } else {
                     const YV: [u8; 2] = [64, (-64i8) as u8];
                     const YP: [u8; 2] = [0x90, 0x50];
-                    let j = self.ram.read_u8(SPRITE_D + k).wrapping_sub(2) as usize;
-                    let y = self.ram.read_u8(SPRITE_Y_VEL + k);
+                    let j = self.ram.sprite(k).scratch_d().wrapping_sub(2) as usize;
+                    let y = self.ram.sprite(k).velocity_y();
                     if y != YV[j] {
-                        self.ram.write_u8(
-                            SPRITE_Y_VEL + k,
-                            y.wrapping_add(if j != 0 { 254 } else { 2 }),
-                        );
-                    }
-                    if self.ram.read_u8(SPRITE_Y_LO + k) & !3 == YP[j] {
-                        self.ram.write_u8(SPRITE_C + k, 4);
                         self.ram
-                            .write_u8(SPRITE_B + k, self.ram.read_u8(SPRITE_D + k).wrapping_sub(1));
+                            .set_sprite_velocity_y(k, y.wrapping_add(if j != 0 { 254 } else { 2 }));
+                    }
+                    if self.ram.sprite(k).y_low() & !3 == YP[j] {
+                        self.ram.set_sprite_scratch_c(k, 4);
+                        self.ram.set_sprite_scratch_b(
+                            k,
+                            self.ram.sprite(k).scratch_d().wrapping_sub(1),
+                        );
                     }
                     self.runtime.move_xy(self.ram, k);
                     self.blind_decelerate_x(k);
@@ -2555,22 +2422,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             4 => {
                 self.blind_check_bump_damage(k);
-                if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 7 == 0 {
-                    let j = self.ram.read_u8(SPRITE_D + k).wrapping_sub(2) as usize;
+                if self.ram.sprite(k).subtype2() & 7 == 0 {
+                    let j = self.ram.sprite(k).scratch_d().wrapping_sub(2) as usize;
                     let gfx = [0, 9][j];
-                    if self.ram.read_u8(SPRITE_GRAPHICS + k) == gfx {
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 254);
-                        self.ram.write_u8(SPRITE_C + k, 2);
+                    if self.ram.sprite(k).graphics() == gfx {
+                        self.ram.set_sprite_main_delay(k, 254);
+                        self.ram.set_sprite_scratch_c(k, 2);
                         self.ram
-                            .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_D + k) ^ 1);
+                            .set_sprite_scratch_d(k, self.ram.sprite(k).scratch_d() ^ 1);
                         self.ram
-                            .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_X_LO + k) >> 7);
+                            .set_sprite_scratch_g(k, self.ram.sprite(k).x_low() >> 7);
                     } else {
-                        self.ram.write_u8(
-                            SPRITE_GRAPHICS + k,
-                            self.ram
-                                .read_u8(SPRITE_GRAPHICS + k)
-                                .wrapping_add(if j != 0 { 1 } else { 255 }),
+                        self.ram.set_sprite_graphics(
+                            k,
+                            self.ram.sprite(k).graphics().wrapping_add(if j != 0 {
+                                1
+                            } else {
+                                255
+                            }),
                         );
                     }
                 }
@@ -2578,40 +2447,36 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             5 => self.blind_fireball_flurry(k, 0x65),
             6 => {
-                self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
-                self.ram.write_u8(SPRITE_HEAD_DIR + k, 12);
-                let d = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+                self.ram.set_sprite_hit_timer(k, 0);
+                self.ram.set_sprite_head_direction(k, 12);
+                let d = self.ram.sprite(k).aux2_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_C + k, 7);
-                    self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 39);
+                    self.ram.set_sprite_scratch_c(k, 7);
+                    self.ram.set_sprite_aux2_delay(k, 39);
                     self.runtime.sfx1_with_pan(self.ram, k, 0x13);
                 } else if d >= 224 {
-                    self.ram.write_u8(
-                        SPRITE_GRAPHICS + k,
-                        [14, 13, 12, 10][((d - 224) >> 3) as usize],
-                    );
+                    self.ram
+                        .set_sprite_graphics(k, [14, 13, 12, 10][((d - 224) >> 3) as usize]);
                 } else {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 14);
+                    self.ram.set_sprite_graphics(k, 14);
                 }
             }
             7 => {
-                let d = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+                let d = self.ram.sprite(k).aux2_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_C + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
-                    self.ram.write_u8(
-                        SPRITE_D + k,
-                        (self.ram.read_u8(SPRITE_Y_LO + k) >> 7).wrapping_add(2),
-                    );
-                    let x = self.ram.read_u8(SPRITE_X_LO + k);
+                    self.ram.set_sprite_scratch_c(k, 2);
+                    self.ram.set_sprite_main_delay(k, 128);
                     self.ram
-                        .write_u8(SPRITE_G + k, x.wrapping_shl(2) | (x >> 7));
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 0);
+                        .set_sprite_scratch_d(k, (self.ram.sprite(k).y_low() >> 7).wrapping_add(2));
+                    let x = self.ram.sprite(k).x_low();
+                    self.ram
+                        .set_sprite_scratch_g(k, x.wrapping_shl(2) | (x >> 7));
+                    self.ram.set_sprite_velocity_x(k, 0);
+                    self.ram.set_sprite_velocity_y(k, 0);
+                    self.ram.set_sprite_ignore_projectile(k, 0);
                 } else {
                     self.ram
-                        .write_u8(SPRITE_GRAPHICS + k, [10, 11, 12, 13, 14][(d >> 3) as usize]);
+                        .set_sprite_graphics(k, [10, 11, 12, 13, 14][(d >> 3) as usize]);
                 }
             }
             _ => {}
@@ -2774,7 +2639,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         ];
         const HEAD_OAM_INDEX: [usize; 10] = [4, 4, 4, 5, 5, 0, 0, 0, 0, 0];
 
-        let graphics = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
+        let graphics = self.ram.sprite(k).graphics() as usize;
         if graphics >= 15 {
             let frame = graphics - 15;
             let start = POOF_OFFSETS[frame];
@@ -2785,19 +2650,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
 
         self.runtime
             .draw_multiple(self.ram, k, &BODY[graphics * 7..graphics * 7 + 7]);
-        if self.ram.read_u8(SPRITE_WALLCOLL + k) == 0 {
-            if self.ram.read_u8(SPRITE_C + k) == 6 {
+        if self.ram.sprite(k).wall_collision() == 0 {
+            if self.ram.sprite(k).scratch_c() == 6 {
                 self.runtime.set_current_oam_y(self.ram, 6, 0xf0);
                 return;
             }
-            if self.ram.read_u8(SPRITE_C + k) == 4 {
+            if self.ram.sprite(k).scratch_c() == 4 {
                 return;
             }
         }
         if graphics >= 10 {
             return;
         }
-        let head = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
+        let head = self.ram.sprite(k).head_direction() as usize;
         self.runtime.set_oam_char_flags(
             self.ram,
             HEAD_OAM_INDEX[graphics],
@@ -2812,19 +2677,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const Y: [i8; 16] = [
             0, 16, 24, 28, 32, 28, 24, 16, 0, -16, -24, -28, -32, -28, -24, -16,
         ];
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & mask != 0 {
+        if self.ram.sprite(k).subtype2() & mask != 0 {
             return None;
         }
         let j = self.runtime.spawn_fireball(self.ram, k)?;
         self.runtime.sfx3_with_pan(self.ram, k, 0x19);
-        let i = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
-        self.ram.write_u8(SPRITE_X_VEL + j, X[i] as u8);
-        self.ram.write_u8(SPRITE_Y_VEL + j, Y[i] as u8);
-        self.ram.write_u8(
-            SPRITE_DEFL_BITS + j,
-            self.ram.read_u8(SPRITE_DEFL_BITS + j) | 8,
-        );
-        self.ram.write_u8(SPRITE_BUMP_DAMAGE + j, 4);
+        let i = self.ram.sprite(k).head_direction() as usize;
+        self.ram.set_sprite_velocity_x(j, X[i] as u8);
+        self.ram.set_sprite_velocity_y(j, Y[i] as u8);
+        self.ram
+            .set_sprite_deflection_bits(j, self.ram.sprite(j).deflection_bits() | 8);
+        self.ram.set_sprite_bump_damage(j, 4);
         Some(j)
     }
     pub fn spawn_boss_poof(&mut self, k: usize) -> Option<usize> {
@@ -2832,71 +2695,65 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.runtime.set_spawned_coordinates(self.ram, j);
         self.set_sprite_x(j, self.sprite_x(j).wrapping_add(16));
         self.set_sprite_y(j, self.sprite_y(j).wrapping_add(40));
-        self.ram.write_u8(SPRITE_GRAPHICS + j, 15);
-        self.ram.write_u8(SPRITE_A + j, 1);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + j, 47);
-        self.ram.write_u8(SPRITE_FLAGS2 + j, 9);
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 9);
+        self.ram.set_sprite_graphics(j, 15);
+        self.ram.set_sprite_scratch_a(j, 1);
+        self.ram.set_sprite_main_delay(j, 47);
+        self.ram.set_sprite_flags2(j, 9);
+        self.ram.set_sprite_ignore_projectile(j, 9);
         self.ram.write_u8(SOUND_EFFECT_1, 12);
         Some(j)
     }
     pub fn blind_fireball_flurry(&mut self, k: usize, a: u8) {
-        self.ram.write_u8(
-            SPRITE_WALLCOLL + k,
-            self.ram.read_u8(SPRITE_WALLCOLL + k).wrapping_sub(1),
-        );
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, (a & 7) * 2 + 1);
-        let e = self.ram.read_u8(SPRITE_E + k).wrapping_sub(1);
-        self.ram.write_u8(SPRITE_E + k, e);
+        self.ram
+            .set_sprite_wall_collision(k, self.ram.sprite(k).wall_collision().wrapping_sub(1));
+        self.ram.set_sprite_oam_flags(k, (a & 7) * 2 + 1);
+        let e = self.ram.sprite(k).scratch_e().wrapping_sub(1);
+        self.ram.set_sprite_scratch_e(k, e);
         if (e as i8) < 0 {
             self.ram
-                .write_u8(SPRITE_E + k, self.ram.read_u8(SPRITE_SUBTYPE + k));
-            self.ram.write_u8(
-                SPRITE_HEAD_DIR + k,
-                self.ram.read_u8(SPRITE_HEAD_DIR + k).wrapping_add(1) & 15,
+                .set_sprite_scratch_e(k, self.ram.sprite(k).subtype());
+            self.ram.set_sprite_head_direction(
+                k,
+                self.ram.sprite(k).head_direction().wrapping_add(1) & 15,
             );
         }
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 31 == 0
-            && self.ram.read_u8(SPRITE_SUBTYPE + k) != 5
-        {
-            self.ram.write_u8(
-                SPRITE_SUBTYPE + k,
-                self.ram.read_u8(SPRITE_SUBTYPE + k).wrapping_add(1),
-            );
+        if self.ram.sprite(k).subtype2() & 31 == 0 && self.ram.sprite(k).subtype() != 5 {
+            self.ram
+                .set_sprite_subtype(k, self.ram.sprite(k).subtype().wrapping_add(1));
         }
         self.blind_animate_robes(k);
         let _ = self.blind_spit_fireball(k, 15);
     }
     pub fn blind_decelerate_x(&mut self, k: usize) {
-        let v = self.ram.read_u8(SPRITE_X_VEL + k);
+        let v = self.ram.sprite(k).velocity_x();
         if v != 0 {
-            self.ram.write_u8(
-                SPRITE_X_VEL + k,
+            self.ram.set_sprite_velocity_x(
+                k,
                 v.wrapping_add(if (v as i8) < 0 { 2 } else { (-2i8) as u8 }),
             );
         }
         self.blind_animate_robes(k);
-        let w = self.ram.read_u8(SPRITE_WALLCOLL + k);
+        let w = self.ram.sprite(k).wall_collision();
         if w != 0 {
             self.blind_fireball_flurry(k, w);
         }
     }
     pub fn blind_decelerate_y(&mut self, k: usize) {
-        let v = self.ram.read_u8(SPRITE_Y_VEL + k);
+        let v = self.ram.sprite(k).velocity_y();
         if v != 0 {
-            self.ram.write_u8(
-                SPRITE_Y_VEL + k,
+            self.ram.set_sprite_velocity_y(
+                k,
                 v.wrapping_add(if (v as i8) < 0 { 4 } else { (-4i8) as u8 }),
             );
         }
         self.runtime.move_y(self.ram, k);
-        let w = self.ram.read_u8(SPRITE_WALLCOLL + k);
+        let w = self.ram.sprite(k).wall_collision();
         if w != 0 {
             self.blind_fireball_flurry(k, w);
         }
     }
     pub fn blind_check_bump_damage(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) | self.ram.read_u8(SPRITE_F + k) == 0 {
+        if self.ram.sprite(k).aux4_delay() | self.ram.sprite(k).scratch_f() == 0 {
             self.runtime.check_damage_to_and_from_link(self.ram, k);
         }
         if self
@@ -2925,28 +2782,29 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn blind_animate(&mut self, k: usize) {
         const H: [u8; 17] = [0, 1, 2, 3, 4, 3, 2, 1, 0, 15, 14, 13, 12, 13, 14, 15, 0];
         const T: [u8; 8] = [0, 1, 1, 2, 2, 3, 3, 4];
-        if self.ram.read_u8(SPRITE_WALLCOLL + k) == 0 {
+        if self.ram.sprite(k).wall_collision() == 0 {
             let mut t = T[(self.ram.read_u8(LINK_X) >> 5) as usize] as i8;
-            if self.ram.read_u8(SPRITE_D + k) == 3 {
+            if self.ram.sprite(k).scratch_d() == 3 {
                 t = -t;
             }
-            let base = (self.ram.read_u8(SPRITE_D + k).wrapping_sub(2) * 8) as usize;
+            let base = (self.ram.sprite(k).scratch_d().wrapping_sub(2) * 8) as usize;
             let q = self.ram.read_u8(BYTE_7E0B69);
             let idx = (q >> 3 & 7) as usize + (q >> 2 & 1) as usize + base;
             self.ram
-                .write_u8(SPRITE_HEAD_DIR + k, H[idx].wrapping_add_signed(t) & 15);
+                .set_sprite_head_direction(k, H[idx].wrapping_add_signed(t) & 15);
         }
         self.blind_animate_robes(k);
     }
     pub fn blind_animate_robes(&mut self, k: usize) {
         const G: [u8; 8] = [7, 8, 9, 8, 0, 1, 2, 1];
-        let i = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) >> 3 & 3)
+        let i = (self.ram.sprite(k).subtype2() >> 3 & 3)
             + self
                 .ram
-                .read_u8(SPRITE_D + k)
+                .sprite(k)
+                .scratch_d()
                 .wrapping_sub(2)
                 .wrapping_shl(2);
-        self.ram.write_u8(SPRITE_GRAPHICS + k, G[i as usize]);
+        self.ram.set_sprite_graphics(k, G[i as usize]);
     }
     pub fn blind_spawn_laser(&mut self, k: usize) {
         const X: [i8; 16] = [-8, -8, -8, -4, 0, 4, 8, 8, 8, 8, 8, 4, 0, -4, -8, -8];
@@ -2955,18 +2813,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             let sound = self.runtime.calculate_sfx_pan(self.ram, k) | 0x26;
             self.ram.write_u8(SOUND_EFFECT_2, sound);
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(
-                SPRITE_X_LO + j,
-                self.ram.read_u8(SPRITE_X_LO + j).wrapping_add(4),
-            );
-            let i = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
-            self.ram.write_u8(SPRITE_HEAD_DIR + j, i as u8);
-            self.ram.write_u8(SPRITE_X_VEL + j, X[i] as u8);
-            self.ram.write_u8(SPRITE_Y_VEL + j, Y[i] as u8);
-            self.ram.write_u8(SPRITE_A + j, 128);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 128);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0x40);
-            self.ram.write_u8(SPRITE_FLAGS4 + j, 0x14);
+            self.ram
+                .set_sprite_x_low(j, self.ram.sprite(j).x_low().wrapping_add(4));
+            let i = self.ram.sprite(k).head_direction() as usize;
+            self.ram.set_sprite_head_direction(j, i as u8);
+            self.ram.set_sprite_velocity_x(j, X[i] as u8);
+            self.ram.set_sprite_velocity_y(j, Y[i] as u8);
+            self.ram.set_sprite_scratch_a(j, 128);
+            self.ram.set_sprite_ignore_projectile(j, 128);
+            self.ram.set_sprite_flags2(j, 0x40);
+            self.ram.set_sprite_flags4(j, 0x14);
         }
     }
 
@@ -2977,20 +2833,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             } else {
                 1
             };
-            let v = self.ram.read_u8(SPRITE_X_VEL + k);
+            let v = self.ram.sprite(k).velocity_x();
             let target = (m as i16 * 16) as i8 as u8;
             if v != target {
-                self.ram
-                    .write_u8(SPRITE_X_VEL + k, v.wrapping_add_signed(m));
+                self.ram.set_sprite_velocity_x(k, v.wrapping_add_signed(m));
             }
         }
         if self.runtime.check_tile_collision(self.ram, k) {
-            self.ram.write_u8(SPRITE_STATE + k, 0);
+            self.ram.set_sprite_state(k, 0);
         }
     }
     pub fn sprite_cd_spawn_garnish(&mut self, k: usize) {
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+        let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, s);
         if s & 7 != 0 {
             return;
         }
@@ -3008,8 +2863,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.ram.write_u8(GARNISH_COUNTDOWN + j, 127);
     }
     pub fn sprite_trinexx_fire_add_fire_garnish(&mut self, k: usize) {
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+        let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, s);
         if s & 7 == 0 {
             self.runtime.sfx2_with_pan(self.ram, k, 0x2a);
             self.garnish_flame_trail(k, false);
@@ -3041,31 +2896,29 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.runtime.check_damage_to_and_from_link(self.ram, k);
         self.chain_chomp_handle_leash(k);
         if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 == 0
-            && (self.ram.read_u8(SPRITE_X_VEL + k) | self.ram.read_u8(SPRITE_Y_VEL + k)) != 0
+            && (self.ram.sprite(k).velocity_x() | self.ram.sprite(k).velocity_y()) != 0
         {
             let a = self.runtime.convert_velocity_to_angle(
-                self.ram.read_u8(SPRITE_X_VEL + k),
-                self.ram.read_u8(SPRITE_Y_VEL + k),
+                self.ram.sprite(k).velocity_x(),
+                self.ram.sprite(k).velocity_y(),
             ) & 15;
-            self.ram.write_u8(SPRITE_D + k, a);
+            self.ram.set_sprite_scratch_d(k, a);
         }
         self.runtime.move_xyz(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_Z_VEL + k,
-            self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-        );
-        if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-            self.ram.write_u8(SPRITE_Z + k, 0);
-            self.ram.write_u8(SPRITE_Z_VEL + k, 0);
+        self.ram
+            .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+        if (self.ram.sprite(k).z() as i8) < 0 {
+            self.ram.set_sprite_z(k, 0);
+            self.ram.set_sprite_velocity_z(k, 0);
         }
         self.runtime.get_16bit_coords(self.ram, k);
         let x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_A + k),
-            self.ram.read_u8(SPRITE_B + k),
+            self.ram.sprite(k).scratch_a(),
+            self.ram.sprite(k).scratch_b(),
         ]);
         let y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_G + k),
+            self.ram.sprite(k).scratch_c(),
+            self.ram.sprite(k).scratch_g(),
         ]);
         let close = self
             .ram
@@ -3079,86 +2932,86 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 .wrapping_sub(y)
                 .wrapping_add(48)
                 < 96;
-        self.ram.write_u8(SPRITE_ANIM_CLOCK + k, u8::from(close));
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        self.ram.set_sprite_animation_clock(k, u8::from(close));
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     const X: [i8; 16] = [
                         0, 8, 11, 14, 16, 14, 11, 8, 0, -8, -11, -14, -16, -14, -11, -8,
                     ];
                     const Y: [i8; 16] = [
                         -16, -14, -11, -8, 0, 8, 11, 14, 16, 14, 11, 8, 0, -9, -11, -14,
                     ];
-                    let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+                    let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                    self.ram.set_sprite_subtype2(k, s);
                     if s == 4 {
                         let j = (self.runtime.random_number(self.ram) & 15) as usize;
-                        self.ram.write_u8(SPRITE_SUBTYPE2 + k, 0);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                        self.ram.set_sprite_subtype2(k, 0);
+                        self.ram.set_sprite_ai_state(k, 2);
                         self.ram
-                            .write_u8(SPRITE_X_VEL + k, X[j].wrapping_mul(4) as u8);
+                            .set_sprite_velocity_x(k, X[j].wrapping_mul(4) as u8);
                         self.ram
-                            .write_u8(SPRITE_Y_VEL + k, Y[j].wrapping_mul(4) as u8);
+                            .set_sprite_velocity_y(k, Y[j].wrapping_mul(4) as u8);
                         let _ = self.runtime.random_number(self.ram);
                         self.runtime.apply_speed_towards_link(self.ram, k, 64);
                         self.runtime.sfx3_with_pan(self.ram, k, 4);
                     } else {
                         let delay = (self.runtime.random_number(self.ram) & 31) + 16;
                         let j = (self.runtime.random_number(self.ram) & 15) as usize;
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, delay);
-                        self.ram.write_u8(SPRITE_X_VEL + k, X[j] as u8);
-                        self.ram.write_u8(SPRITE_Y_VEL + k, Y[j] as u8);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                        self.ram.set_sprite_main_delay(k, delay);
+                        self.ram.set_sprite_velocity_x(k, X[j] as u8);
+                        self.ram.set_sprite_velocity_y(k, Y[j] as u8);
+                        self.ram.set_sprite_ai_state(k, 1);
                     }
                 } else {
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, 0);
+                    self.ram.set_sprite_velocity_x(k, 0);
+                    self.ram.set_sprite_velocity_y(k, 0);
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_main_delay(k, 32);
+                    self.ram.set_sprite_ai_state(k, 0);
                 }
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 15 == 0 {
+                if self.ram.sprite(k).main_delay() & 15 == 0 {
                     self.chain_chomp_move_chain(k);
                 }
-                if self.ram.read_u8(SPRITE_Z + k) == 0 {
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 16);
+                if self.ram.sprite(k).z() == 0 {
+                    self.ram.set_sprite_velocity_z(k, 16);
                 }
                 if !close {
                     let (xv, yv) = self
                         .runtime
                         .project_speed_towards_location(self.ram, k, x, y, 16);
-                    self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                    self.ram.set_sprite_velocity_x(k, xv);
+                    self.ram.set_sprite_velocity_y(k, yv);
                     self.runtime.move_xy(self.ram, k);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 12);
+                    self.ram.set_sprite_main_delay(k, 12);
                 }
             }
             2 => {
                 if !close {
-                    self.ram.write_u8(
-                        SPRITE_X_VEL + k,
-                        (0u8).wrapping_sub(self.ram.read_u8(SPRITE_X_VEL + k)),
+                    self.ram.set_sprite_velocity_x(
+                        k,
+                        (0u8).wrapping_sub(self.ram.sprite(k).velocity_x()),
                     );
-                    self.ram.write_u8(
-                        SPRITE_Y_VEL + k,
-                        (0u8).wrapping_sub(self.ram.read_u8(SPRITE_Y_VEL + k)),
+                    self.ram.set_sprite_velocity_y(
+                        k,
+                        (0u8).wrapping_sub(self.ram.sprite(k).velocity_y()),
                     );
                     self.runtime.move_xy(self.ram, k);
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
-                    self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 48);
+                    self.ram.set_sprite_velocity_x(k, 0);
+                    self.ram.set_sprite_velocity_y(k, 0);
+                    self.ram.set_sprite_ai_state(k, 3);
+                    self.ram.set_sprite_aux1_delay(k, 48);
                 }
                 self.chain_chomp_move_chain(k);
                 self.chain_chomp_move_chain(k);
             }
             3 => {
-                if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+                if self.ram.sprite(k).aux1_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 48);
                 }
                 self.chain_chomp_move_chain(k);
                 self.chain_chomp_move_chain(k);
@@ -3182,12 +3035,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn chain_chomp_move_chain(&mut self, k: usize) {
         const M: [u8; 6] = [205, 154, 102, 51, 8, 0xbd];
         let x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_A + k),
-            self.ram.read_u8(SPRITE_B + k),
+            self.ram.sprite(k).scratch_a(),
+            self.ram.sprite(k).scratch_b(),
         ]);
         let y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_G + k),
+            self.ram.sprite(k).scratch_c(),
+            self.ram.sprite(k).scratch_g(),
         ]);
         let mut p = k * 8;
         let dx = self.chain_hist_x(p).wrapping_sub(x);
@@ -3241,18 +3094,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const F: [u8; 16] = [
             0x40, 0x40, 0x40, 0x40, 0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0x40, 0x40, 0x40,
         ];
-        let d = self.ram.read_u8(SPRITE_D + k) as usize;
-        self.ram.write_u8(SPRITE_GRAPHICS + k, G[d]);
-        self.ram.write_u8(
-            SPRITE_OAM_FLAGS + k,
-            self.ram.read_u8(SPRITE_OAM_FLAGS + k) & 0x3f | F[d],
-        );
+        let d = self.ram.sprite(k).scratch_d() as usize;
+        self.ram.set_sprite_graphics(k, G[d]);
+        self.ram
+            .set_sprite_oam_flags(k, self.ram.sprite(k).oam_flags() & 0x3f | F[d]);
         self.runtime.draw_single_large(self.ram, k);
         let first = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4 + 1;
         let flags =
-            (self.ram.read_u8(SPRITE_OAM_FLAGS + k) ^ self.ram.read_u8(SPRITE_OBJ_PRIO + k)) & 0xf0
-                | 0x0d;
-        let radius = u16::from((self.ram.read_u8(SPRITE_DELAY_AUX1 + k) & 1) + 4);
+            (self.ram.sprite(k).oam_flags() ^ self.ram.sprite(k).object_priority()) & 0xf0 | 0x0d;
+        let radius = u16::from((self.ram.sprite(k).aux1_delay() & 1) + 4);
         for entry in 0..6usize {
             let history = k * 8 + entry;
             let x = self
@@ -3267,10 +3117,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn sprite_c9_tektite(&mut self, k: usize) {
-        let j = self.ram.read_u8(SPRITE_ANIM_CLOCK + k);
+        let j = self.ram.sprite(k).animation_clock();
         if j != 0 {
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, j);
-            self.ram.write_u8(SPRITE_OBJ_PRIO + k, 0x30);
+            self.ram.set_sprite_ignore_projectile(k, j);
+            self.ram.set_sprite_object_priority(k, 0x30);
         }
         match j {
             0 => self.sprite_tektite(k),
@@ -3291,13 +3141,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-8, 0, 0x00ea, 2),
             (8, 0, 0x40ea, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        let i = self.ram.sprite(k).graphics() as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
         self.runtime.draw_shadow(self.ram, k);
     }
     pub fn sprite_tektite(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) != 0 {
-            self.ram.write_u8(SPRITE_GRAPHICS + k, 0);
+        if self.ram.sprite(k).aux1_delay() != 0 {
+            self.ram.set_sprite_graphics(k, 0);
         }
         self.tektite_draw(k);
         if self.runtime.return_if_inactive(self.ram, k)
@@ -3308,15 +3158,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.runtime.check_damage_to_and_from_link(self.ram, k);
         self.runtime.move_xyz(self.ram, k);
         let _ = self.runtime.bounce_from_tile_collision(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_Z_VEL + k,
-            self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(1),
-        );
-        if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-            self.ram.write_u8(SPRITE_Z + k, 0);
-            self.ram.write_u8(SPRITE_Z_VEL + k, 0);
+        self.ram
+            .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(1));
+        if (self.ram.sprite(k).z() as i8) < 0 {
+            self.ram.set_sprite_z(k, 0);
+            self.ram.set_sprite_velocity_z(k, 0);
         }
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
                 const DIR: [u8; 4] = [3, 2, 1, 0];
                 const XV: [u8; 4] = [16, 240, 16, 240];
@@ -3328,59 +3176,58 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 if dx.wrapping_add(40) < 80
                     && dy.wrapping_add(40) < 80
                     && self.ram.read_u8(0x44) != 0x80
-                    && self.ram.read_u8(SPRITE_Z + k) | self.ram.read_u8(SPRITE_PAUSE + k) == 0
-                    && self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL)
-                        == self.ram.read_u8(SPRITE_FLOOR + k)
+                    && self.ram.sprite(k).z() | self.ram.sprite(k).pause() == 0
+                    && self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL) == self.ram.sprite(k).floor()
                     && direction != DIR[usize::from(self.ram.read_u8(0x2f) >> 1)]
                 {
                     let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 32);
-                    self.ram.write_u8(SPRITE_X_VEL + k, x.wrapping_neg());
-                    self.ram.write_u8(SPRITE_Y_VEL + k, y.wrapping_neg());
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 16);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                    self.ram.set_sprite_velocity_x(k, x.wrapping_neg());
+                    self.ram.set_sprite_velocity_y(k, y.wrapping_neg());
+                    self.ram.set_sprite_velocity_z(k, 16);
+                    self.ram.set_sprite_ai_state(k, 1);
                     return;
                 }
-                let delay = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let delay = self.ram.sprite(k).main_delay();
                 if delay == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    let hops = self.ram.read_u8(SPRITE_B + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_B + k, hops);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    let hops = self.ram.sprite(k).scratch_b().wrapping_add(1);
+                    self.ram.set_sprite_scratch_b(k, hops);
                     let j = if hops == 4 {
-                        self.ram.write_u8(SPRITE_B + k, 0);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                        self.ram.set_sprite_scratch_b(k, 0);
+                        self.ram.set_sprite_ai_state(k, 2);
                         let timer = (self.runtime.random_number(self.ram) & 63) + 48;
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, timer);
-                        self.ram.write_u8(SPRITE_Z_VEL + k, 12);
+                        self.ram.set_sprite_main_delay(k, timer);
+                        self.ram.set_sprite_velocity_z(k, 12);
                         usize::from(self.runtime.is_below_link(self.ram, k)) * 2
                             + usize::from(self.runtime.is_right_of_link(self.ram, k).0)
                     } else {
                         let zv = (self.runtime.random_number(self.ram) & 7) + 24;
-                        self.ram.write_u8(SPRITE_Z_VEL + k, zv);
+                        self.ram.set_sprite_velocity_z(k, zv);
                         usize::from(self.runtime.random_number(self.ram) & 3)
                     };
-                    self.ram.write_u8(SPRITE_X_VEL + k, XV[j]);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, YV[j]);
+                    self.ram.set_sprite_velocity_x(k, XV[j]);
+                    self.ram.set_sprite_velocity_y(k, YV[j]);
                 } else {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, delay >> 4 & 1);
+                    self.ram.set_sprite_graphics(k, delay >> 4 & 1);
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_Z + k) == 0 {
+                if self.ram.sprite(k).z() == 0 {
                     self.tektite_reset_state(k);
                 } else {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 2);
+                    self.ram.set_sprite_graphics(k, 2);
                 }
             }
             2 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     self.tektite_reset_state(k);
                 } else {
-                    if self.ram.read_u8(SPRITE_Z + k) == 0 {
-                        self.ram.write_u8(SPRITE_Z_VEL + k, 12);
-                        self.ram.write_u8(SPRITE_Z + k, 1);
-                        self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 8);
+                    if self.ram.sprite(k).z() == 0 {
+                        self.ram.set_sprite_velocity_z(k, 12);
+                        self.ram.set_sprite_z(k, 1);
+                        self.ram.set_sprite_aux1_delay(k, 8);
                     }
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 2);
+                    self.ram.set_sprite_graphics(k, 2);
                 }
             }
             _ => {}
@@ -3388,11 +3235,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     fn tektite_reset_state(&mut self, k: usize) {
-        self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+        self.ram.set_sprite_ai_state(k, 0);
         let delay = (self.runtime.random_number(self.ram) & 63) + 72;
-        self.ram.write_u8(SPRITE_DELAY_MAIN + k, delay);
-        self.ram.write_u8(SPRITE_X_VEL + k, 0);
-        self.ram.write_u8(SPRITE_Y_VEL + k, 0);
+        self.ram.set_sprite_main_delay(k, delay);
+        self.ram.set_sprite_velocity_x(k, 0);
+        self.ram.set_sprite_velocity_y(k, 0);
     }
 
     pub fn helmasaur_king_initialize(&mut self, k: usize) {
@@ -3410,7 +3257,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7, 6, 5, 4,
             3, 2, 1,
         ];
-        let t = self.ram.read_u8(SPRITE_SUBTYPE2 + k) as usize;
+        let t = self.ram.sprite(k).subtype2() as usize;
         for i in (0..4).rev() {
             self.ram.write_u8(OVERLORD_X_LO + i, T[(t + i * 8) & 31]);
         }
@@ -3418,10 +3265,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn helmasaur_king_handle_movement(&mut self, k: usize) {
         let mut n = 1
             + usize::from(self.ram.read_u8(FRAME_COUNTER) & 3 == 0)
-            + usize::from(self.ram.read_u8(SPRITE_C + k) >= 3);
+            + usize::from(self.ram.sprite(k).scratch_c() >= 3);
         while n != 0 {
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
             if s & 15 == 0 {
                 self.ram.write_u8(SOUND_EFFECT_1, 0x21);
             }
@@ -3449,29 +3296,29 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     pub fn helmasaur_king_maybe_fireball(&mut self, k: usize) -> bool {
-        let s = self.ram.read_u8(SPRITE_SUBTYPE + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE + k, s);
+        let s = self.ram.sprite(k).subtype().wrapping_add(1);
+        self.ram.set_sprite_subtype(k, s);
         if s != 4 {
             return false;
         }
-        self.ram.write_u8(SPRITE_SUBTYPE + k, 0);
+        self.ram.set_sprite_subtype(k, 0);
         if self.runtime.random_number(self.ram) & 1 != 0 {
-            self.ram.write_u8(SPRITE_DELAY_AUX2 + k, 127);
+            self.ram.set_sprite_aux2_delay(k, 127);
             self.runtime.sfx3_with_pan(self.ram, k, 0x2a);
         } else {
-            self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 160);
+            self.ram.set_sprite_aux1_delay(k, 160);
         }
         true
     }
     pub fn helmasaur_king_chip_away_at_mask(&mut self, k: usize) {
         self.ram
-            .write_u8(TMP_COUNTER, self.ram.read_u8(SPRITE_C + k).wrapping_add(7));
+            .write_u8(TMP_COUNTER, self.ram.sprite(k).scratch_c().wrapping_add(7));
         self.helmasaur_king_spawn_mask_debris(k);
         self.runtime.sfx2_with_pan(self.ram, k, 0x1f);
     }
     pub fn helmasaur_king_explode_mask(&mut self, k: usize) {
         for j in 1..16 {
-            self.ram.write_u8(SPRITE_STATE + j, 0);
+            self.ram.set_sprite_state(j, 0);
         }
         self.ram.write_u8(TMP_COUNTER, 7);
         loop {
@@ -3488,8 +3335,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0x70) {
             self.runtime.set_spawned_coordinates(self.ram, j);
             self.set_sprite_y(j, self.sprite_y(j).wrapping_add(28));
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 32);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 32);
+            self.ram.set_sprite_main_delay(j, 32);
+            self.ram.set_sprite_ignore_projectile(j, 32);
         }
     }
 
@@ -3507,45 +3354,41 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             let i = self.ram.read_u8(TMP_COUNTER) as usize;
             self.set_sprite_x(j, self.sprite_x(j).wrapping_add_signed(X[i] as i16));
             self.set_sprite_y(j, self.sprite_y(j).wrapping_add_signed(Y[i] as i16));
-            self.ram.write_u8(SPRITE_Z + j, Z[i] as u8);
-            self.ram.write_u8(SPRITE_X_VEL + j, XV[i] as u8);
-            self.ram.write_u8(SPRITE_Y_VEL + j, YV[i] as u8);
-            self.ram.write_u8(SPRITE_Z_VEL + j, ZV[i] as u8);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, F[i] | 13);
-            self.ram.write_u8(SPRITE_GRAPHICS + j, G[i]);
-            self.ram.write_u8(SPRITE_C + j, 128);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0);
-            self.ram.write_u8(SPRITE_DELAY_AUX1 + j, 12);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 12);
-            self.ram.write_u8(SPRITE_SUBTYPE + j, i as u8);
+            self.ram.set_sprite_z(j, Z[i] as u8);
+            self.ram.set_sprite_velocity_x(j, XV[i] as u8);
+            self.ram.set_sprite_velocity_y(j, YV[i] as u8);
+            self.ram.set_sprite_velocity_z(j, ZV[i] as u8);
+            self.ram.set_sprite_oam_flags(j, F[i] | 13);
+            self.ram.set_sprite_graphics(j, G[i]);
+            self.ram.set_sprite_scratch_c(j, 128);
+            self.ram.set_sprite_flags2(j, 0);
+            self.ram.set_sprite_aux1_delay(j, 12);
+            self.ram.set_sprite_ignore_projectile(j, 12);
+            self.ram.set_sprite_subtype(j, i as u8);
         }
     }
 
     pub fn sprite_initialized_segmented(&mut self, k: usize) {
         for i in 0..128 {
             self.ram
-                .write_u8(CHAINCHOMP_X_HIST + i, self.ram.read_u8(SPRITE_X_LO + k));
-            self.ram.write_u8(
-                CHAINCHOMP_X_HIST + 128 + i,
-                self.ram.read_u8(SPRITE_X_HI + k),
-            );
+                .write_u8(CHAINCHOMP_X_HIST + i, self.ram.sprite(k).x_low());
             self.ram
-                .write_u8(CHAINCHOMP_Y_HIST + i, self.ram.read_u8(SPRITE_Y_LO + k));
-            self.ram.write_u8(
-                CHAINCHOMP_Y_HIST + 128 + i,
-                self.ram.read_u8(SPRITE_Y_HI + k),
-            );
+                .write_u8(CHAINCHOMP_X_HIST + 128 + i, self.ram.sprite(k).x_high());
+            self.ram
+                .write_u8(CHAINCHOMP_Y_HIST + i, self.ram.sprite(k).y_low());
+            self.ram
+                .write_u8(CHAINCHOMP_Y_HIST + 128 + i, self.ram.sprite(k).y_high());
         }
     }
     pub fn giant_moldorm_incremental_segment_explosion(&mut self, k: usize) {
-        let d = self.ram.read_u8(SPRITE_DELAY_AUX4 + k);
-        if self.ram.read_u8(SPRITE_STATE + k) == 9
+        let d = self.ram.sprite(k).aux4_delay();
+        if self.ram.sprite(k).state() == 9
             && d != 0
             && d < 80
             && d & 15 | self.ram.read_u8(SUBMODULE_INDEX) | self.ram.read_u8(FLAG_UNK1) == 0
         {
             self.ram
-                .write_u8(SPRITE_B + k, self.ram.read_u8(SPRITE_B + k).wrapping_add(1));
+                .set_sprite_scratch_b(k, self.ram.sprite(k).scratch_b().wrapping_add(1));
             self.sprite_make_boss_explosion(k);
         }
     }
@@ -3568,23 +3411,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-6, 6, 0x40a2, 2),
             (6, 6, 0x40a0, 2),
         ];
-        let t = ((self.ram.read_u8(SPRITE_SUBTYPE2 + k) >> 1 & 1)
-            + (self.ram.read_u8(SPRITE_DELAY_AUX1 + k) & 2)) as usize
+        let t = ((self.ram.sprite(k).subtype2() >> 1 & 1) + (self.ram.sprite(k).aux1_delay() & 2))
+            as usize
             * 4;
         self.runtime.draw_multiple(self.ram, k, &D[t..t + 4]);
     }
 
     pub fn trinexx_components_initialize(&mut self, k: usize) {
-        match self.ram.read_u8(SPRITE_TYPE + k) {
+        match self.ram.sprite(k).kind() {
             0xcb => {
-                self.ram.write_u8(
-                    SPRITE_X_LO + k,
-                    self.ram.read_u8(SPRITE_X_LO + k).wrapping_add(8),
-                );
-                self.ram.write_u8(
-                    SPRITE_Y_LO + k,
-                    self.ram.read_u8(SPRITE_Y_LO + k).wrapping_add(16),
-                );
+                self.ram
+                    .set_sprite_x_low(k, self.ram.sprite(k).x_low().wrapping_add(8));
+                self.ram
+                    .set_sprite_y_low(k, self.ram.sprite(k).y_low().wrapping_add(16));
                 self.trinexx_cache_position(k);
                 for i in [2usize, 3, 5, 7] {
                     self.ram.write_u8(OVERLORD_X_LO + i, 0);
@@ -3594,66 +3433,62 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 self.trinexx_restore_xy(k);
             }
             0xcc | 0xcd => {
-                if self.ram.read_u8(SPRITE_TYPE + k) == 0xcc {
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 3);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
+                if self.ram.sprite(k).kind() == 0xcc {
+                    self.ram.set_sprite_graphics(k, 3);
+                    self.ram.set_sprite_main_delay(k, 128);
                 } else {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
+                    self.ram.set_sprite_main_delay(k, 255);
                 }
                 for j in (0..=0x1a).rev() {
                     self.ram.write_u8(ALT_SPRITE_TYPE + j, 0x40);
                     self.ram.write_u8(ALT_SPRITE_X_HI + j, 0);
                     self.ram.write_u8(ALT_SPRITE_Y_HI + j, 0);
                 }
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, 1);
+                self.ram.set_sprite_subtype2(k, 1);
                 self.trinexx_cache_position(k);
             }
             _ => {}
         }
     }
     pub fn trinexx_restore_xy(&mut self, k: usize) {
-        self.ram
-            .write_u8(SPRITE_X_LO + k, self.ram.read_u8(SPRITE_A + k));
+        self.ram.set_sprite_x_low(k, self.ram.sprite(k).scratch_a());
         let y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_G + k),
+            self.ram.sprite(k).scratch_c(),
+            self.ram.sprite(k).scratch_g(),
         ])
         .wrapping_add(12);
         self.set_sprite_y(k, y);
     }
     pub fn trinexx_cache_position(&mut self, k: usize) {
+        self.ram.set_sprite_scratch_a(k, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(SPRITE_A + k, self.ram.read_u8(SPRITE_X_LO + k));
+            .set_sprite_scratch_b(k, self.ram.sprite(k).x_high());
+        self.ram.set_sprite_scratch_c(k, self.ram.sprite(k).y_low());
         self.ram
-            .write_u8(SPRITE_B + k, self.ram.read_u8(SPRITE_X_HI + k));
-        self.ram
-            .write_u8(SPRITE_C + k, self.ram.read_u8(SPRITE_Y_LO + k));
-        self.ram
-            .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_Y_HI + k));
+            .set_sprite_scratch_g(k, self.ram.sprite(k).y_high());
     }
 
     pub fn vitreous_animate(&mut self, k: usize, a: u8) {
         if (0x40..=0x42).contains(&a) {
             self.sprite_spawn_lightning(k);
         }
-        self.ram.write_u8(SPRITE_GRAPHICS + k, 0);
+        self.ram.set_sprite_graphics(k, 0);
         let (side, delta) = self.runtime.is_right_of_link(self.ram, k);
         if (delta as u8).wrapping_add(16) >= 32 {
-            self.ram
-                .write_u8(SPRITE_GRAPHICS + k, [2, 1][side as usize]);
+            self.ram.set_sprite_graphics(k, [2, 1][side as usize]);
         }
     }
     pub fn vitreous_set_minions_forth(&mut self, k: usize) {
         const W: [u8; 16] = [5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 6, 7, 8, 9, 10, 11];
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+        let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, s);
         if s & 63 == 0 {
             let j = W[(self.runtime.random_number(self.ram) & 15) as usize] as usize;
-            if self.ram.read_u8(SPRITE_AI_STATE + j) == 0 {
-                self.ram.write_u8(SPRITE_AI_STATE + j, 1);
+            if self.ram.sprite(j).ai_state() == 0 {
+                self.ram.set_sprite_ai_state(j, 1);
                 self.ram.write_u8(SOUND_EFFECT_1, 0x15);
             } else {
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, s.wrapping_sub(1));
+                self.ram.set_sprite_subtype2(k, s.wrapping_sub(1));
             }
         }
     }
@@ -3663,53 +3498,52 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.ram.write_u8(SOUND_EFFECT_2, 0x26);
             self.runtime.set_spawned_coordinates(self.ram, j);
             let i = (self.runtime.random_number(self.ram) & 7) as usize;
-            self.ram.write_u8(SPRITE_A + j, i as u8);
+            self.ram.set_sprite_scratch_a(j, i as u8);
             let old = self.sprite_x(j);
             let x = old.wrapping_add_signed(X[i] as i16);
             self.set_sprite_x(j, x);
             let carry = u8::from(u32::from(old) + u32::from(X[i] as u16) > 0xffff);
-            self.ram.write_u8(
-                SPRITE_Y_LO + j,
+            self.ram.set_sprite_y_low(
+                j,
                 self.ram
-                    .read_u8(SPRITE_Y_LO + j)
+                    .sprite(j)
+                    .y_low()
                     .wrapping_add(12)
                     .wrapping_add(carry),
             );
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 2);
+            self.ram.set_sprite_main_delay(j, 2);
             self.ram.write_u8(INTRO_TIMES_PAL_FLASH, 32);
         }
     }
     pub fn toppo_flustered(&mut self, k: usize) {
-        self.ram.write_u8(SPRITE_FLAGS2 + k, 130);
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 130);
-        self.ram.write_u8(SPRITE_FLAGS3 + k, 73);
-        let s = self.ram.read_u8(SPRITE_SUBTYPE + k);
+        self.ram.set_sprite_flags2(k, 130);
+        self.ram.set_sprite_ignore_projectile(k, 130);
+        self.ram.set_sprite_flags3(k, 73);
+        let s = self.ram.sprite(k).subtype();
         if s == 0 {
             if self.runtime.check_damage_to_link(self.ram, k) {
                 self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x174);
                 self.runtime.show_message_minimal(self.ram);
-                self.ram.write_u8(SPRITE_SUBTYPE + k, 1);
+                self.ram.set_sprite_subtype(k, 1);
             }
         } else if s < 16 {
-            self.ram.write_u8(SPRITE_SUBTYPE + k, s + 1);
+            self.ram.set_sprite_subtype(k, s + 1);
         } else if s == 16 {
-            self.ram.write_u8(SPRITE_FLAGS5 + k, 0);
-            self.ram.write_u8(SPRITE_STATE + k, 6);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 15);
-            self.ram.write_u8(
-                SPRITE_FLAGS2 + k,
-                self.ram.read_u8(SPRITE_FLAGS2 + k).wrapping_add(4),
-            );
+            self.ram.set_sprite_flags5(k, 0);
+            self.ram.set_sprite_state(k, 6);
+            self.ram.set_sprite_main_delay(k, 15);
+            self.ram
+                .set_sprite_flags2(k, self.ram.sprite(k).flags2().wrapping_add(4));
             self.runtime.sfx2_with_pan(self.ram, k, 0x15);
             if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0x4d) {
                 self.runtime.set_spawned_coordinates(self.ram, j);
                 self.runtime.force_prize_drop(self.ram, j, 6, 6);
             }
-            self.ram.write_u8(SPRITE_SUBTYPE + k, 17);
+            self.ram.set_sprite_subtype(k, 17);
         }
-        let a = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, a);
-        self.ram.write_u8(SPRITE_GRAPHICS + k, ((a & 4) >> 2) + 3);
+        let a = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, a);
+        self.ram.set_sprite_graphics(k, ((a & 4) >> 2) + 3);
     }
     pub fn old_mountain_man_draw(&mut self, k: usize) {
         const D0: [DrawPiece; 2] = [(0, 0, 0x00ac, 2), (0, 8, 0x00ae, 2)];
@@ -3735,9 +3569,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             0x20, 0xc0, 0x20, 0xc0, 0, 0xa0, 0, 0xa0, 0x40, 0x80, 0x40, 0x60, 0x40, 0x80, 0x40,
             0x60,
         ];
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) != 2 {
-            let j = (self.ram.read_u8(SPRITE_D + k) * 4 + self.ram.read_u8(SPRITE_GRAPHICS + k) * 2)
-                as usize;
+        if self.ram.sprite(k).subtype2() != 2 {
+            let j =
+                (self.ram.sprite(k).scratch_d() * 4 + self.ram.sprite(k).graphics() * 2) as usize;
             self.ram.write_u8(DMA_VAR6, DMA[j]);
             self.ram.write_u8(DMA_VAR7, DMA[j + 1]);
             self.runtime
@@ -3752,20 +3586,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const Y: [i8; 3] = [-32, 24, 24];
         const D: [u8; 6] = [32, 80, 128, 32, 80, 128];
         self.runtime.sfx3_with_pan(self.ram, k, 0x36);
-        self.ram.write_u8(SPRITE_STATE + k, 0);
+        self.ram.set_sprite_state(k, 0);
         let r = self.runtime.random_number(self.ram);
         self.ram.write_u8(BYTE_7E0FB6, r);
         for i in (0..3).rev() {
             if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0x70) {
                 self.runtime.set_spawned_coordinates(self.ram, j);
-                self.ram.write_u8(SPRITE_X_VEL + j, X[i] as u8);
-                self.ram.write_u8(SPRITE_Y_VEL + j, Y[i] as u8);
-                self.ram.write_u8(SPRITE_AI_STATE + j, 3);
-                self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 3);
-                self.ram
-                    .write_u8(SPRITE_DELAY_MAIN + j, D[((r & 3) as usize) + i]);
-                self.ram.write_u8(SPRITE_HEAD_DIR + j, 0);
-                self.ram.write_u8(SPRITE_GRAPHICS + j, 1);
+                self.ram.set_sprite_velocity_x(j, X[i] as u8);
+                self.ram.set_sprite_velocity_y(j, Y[i] as u8);
+                self.ram.set_sprite_ai_state(j, 3);
+                self.ram.set_sprite_ignore_projectile(j, 3);
+                self.ram.set_sprite_main_delay(j, D[((r & 3) as usize) + i]);
+                self.ram.set_sprite_head_direction(j, 0);
+                self.ram.set_sprite_graphics(j, 1);
             }
         }
         self.ram.write_u8(TMP_COUNTER, 255);
@@ -3774,28 +3607,28 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const X: [i8; 4] = [32, 32, -32, -32];
         const Y: [i8; 4] = [-32, 32, -32, 32];
         self.runtime.sfx3_with_pan(self.ram, k, 0x36);
-        self.ram.write_u8(SPRITE_STATE + k, 0);
+        self.ram.set_sprite_state(k, 0);
         for i in (0..4).rev() {
             if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0x70) {
                 self.runtime.set_spawned_coordinates(self.ram, j);
-                self.ram.write_u8(SPRITE_X_VEL + j, X[i] as u8);
-                self.ram.write_u8(SPRITE_Y_VEL + j, Y[i] as u8);
-                self.ram.write_u8(SPRITE_AI_STATE + j, 4);
-                self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 4);
+                self.ram.set_sprite_velocity_x(j, X[i] as u8);
+                self.ram.set_sprite_velocity_y(j, Y[i] as u8);
+                self.ram.set_sprite_ai_state(j, 4);
+                self.ram.set_sprite_ignore_projectile(j, 4);
             }
         }
         self.ram.write_u8(TMP_COUNTER, 255);
     }
     pub fn thief_scan_for_booty(&mut self, k: usize) -> Option<usize> {
         for j in (0..16).rev() {
-            let t = self.ram.read_u8(SPRITE_TYPE + j);
-            if self.ram.read_u8(SPRITE_STATE + j) != 0 && (t == 0xdc || t == 0xe1 || t == 0xd9) {
+            let t = self.ram.sprite(j).kind();
+            if self.ram.sprite(j).state() != 0 && (t == 0xdc || t == 0xe1 || t == 0xd9) {
                 self.thief_target_booty(k, j);
                 return Some(j);
             }
         }
-        self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 64);
+        self.ram.set_sprite_ai_state(k, 0);
+        self.ram.set_sprite_main_delay(k, 64);
         None
     }
     pub fn thief_target_booty(&mut self, k: usize, target: usize) {
@@ -3807,15 +3640,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 self.sprite_y(target),
                 19,
             );
-            self.ram.write_u8(SPRITE_X_VEL + k, x);
-            self.ram.write_u8(SPRITE_Y_VEL + k, y);
+            self.ram.set_sprite_velocity_x(k, x);
+            self.ram.set_sprite_velocity_y(k, y);
         }
         for j in (0..16).rev() {
-            let t = self.ram.read_u8(SPRITE_TYPE + j);
-            if (((j as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3
-                | self.ram.read_u8(SPRITE_DELAY_AUX4 + j))
+            let t = self.ram.sprite(j).kind();
+            if (((j as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 | self.ram.sprite(j).aux4_delay())
                 == 0
-                && self.ram.read_u8(SPRITE_STATE + j) != 0
+                && self.ram.sprite(j).state() != 0
                 && (t == 0xdc || t == 0xe1 || t == 0xd9)
             {
                 self.thief_grab_booty(k, j);
@@ -3834,24 +3666,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 .wrapping_add(12)
                 < 24
         {
-            self.ram.write_u8(SPRITE_STATE + j, 0);
+            self.ram.set_sprite_state(j, 0);
             const S: [u8; 15] = [
                 0xb, 0xa, 0xa, 0xa, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0x2f, 0x2f, 0xb,
             ];
-            let t = self.ram.read_u8(SPRITE_TYPE + j).wrapping_sub(0xd8) as usize;
+            let t = self.ram.sprite(j).kind().wrapping_sub(0xd8) as usize;
             self.runtime.sfx3_with_pan(self.ram, t, S[t]);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 14);
+            self.ram.set_sprite_main_delay(k, 14);
         }
     }
     pub fn thief_check_collision_with_link(&mut self, k: usize) {
         if self.runtime.check_damage_to_link_same_layer(self.ram, k) {
             let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 32);
             self.ram.write_u8(LINK_ACTUAL_VEL_Y, y);
-            self.ram.write_u8(SPRITE_Y_RECOIL + k, y ^ 255);
+            self.ram.set_sprite_recoil_y(k, y ^ 255);
             self.ram.write_u8(LINK_ACTUAL_VEL_X, x);
-            self.ram.write_u8(SPRITE_X_RECOIL + k, x ^ 255);
+            self.ram.set_sprite_recoil_x(k, x ^ 255);
             self.ram.write_u8(LINK_INCAPACITATED_TIMER, 4);
-            self.ram.write_u8(SPRITE_F + k, 12);
+            self.ram.set_sprite_scratch_f(k, 12);
             self.runtime.sfx2_with_pan(self.ram, k, 0xb);
         }
     }
@@ -3891,12 +3723,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.set_sprite_x(j, self.ram.read_u16(LINK_X));
             self.set_sprite_y(j, self.ram.read_u16(LINK_Y));
             let i = self.ram.read_u8(TMP_COUNTER) as usize;
-            self.ram.write_u8(SPRITE_Z_VEL + j, 24);
-            self.ram.write_u8(SPRITE_X_VEL + j, X[i] as u8);
-            self.ram.write_u8(SPRITE_Y_VEL + j, Y[i] as u8);
-            self.ram.write_u8(SPRITE_DELAY_AUX4 + j, 32);
-            self.ram.write_u8(SPRITE_HEAD_DIR + j, 1);
-            self.ram.write_u8(SPRITE_STUNNED + j, 255);
+            self.ram.set_sprite_velocity_z(j, 24);
+            self.ram.set_sprite_velocity_x(j, X[i] as u8);
+            self.ram.set_sprite_velocity_y(j, Y[i] as u8);
+            self.ram.set_sprite_aux4_delay(j, 32);
+            self.ram.set_sprite_head_direction(j, 1);
+            self.ram.set_sprite_stunned(j, 255);
             let t = (i as u8).wrapping_sub(1);
             self.ram.write_u8(TMP_COUNTER, t);
             if (t as i8) < 0 {
@@ -3938,40 +3770,39 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (9, 3, 0x02e3, 0),
             (3, 7, 0x02e3, 0),
         ];
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+        let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, s);
         if s & 1 | self.ram.read_u8(SUBMODULE_INDEX) | self.ram.read_u8(FLAG_UNK1) == 0 {
-            let g = self.ram.read_u8(SPRITE_GRAPHICS + k).wrapping_add(1);
-            self.ram
-                .write_u8(SPRITE_GRAPHICS + k, if g == 6 { 0 } else { g });
+            let g = self.ram.sprite(k).graphics().wrapping_add(1);
+            self.ram.set_sprite_graphics(k, if g == 6 { 0 } else { g });
         }
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 5;
+        let i = self.ram.sprite(k).graphics() as usize * 5;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 5]);
     }
 
     pub fn sprite_mad_batter_bolt(&mut self, k: usize) {
         const X: [i8; 8] = [0, 4, 8, 12, 12, 4, 8, 0];
         const Y: [i8; 8] = [0, 4, 8, 12, 12, 4, 8, 0];
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 16 != 0 {
+        if self.ram.sprite(k).subtype2() & 16 != 0 {
             self.runtime.oam_allocate_region_b(self.ram, 4);
         }
         self.runtime.draw_single_small(self.ram, k);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
+        if self.ram.sprite(k).ai_state() == 0 {
             self.runtime.move_xy(self.ram, k);
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+            if self.ram.sprite(k).main_delay() == 0 {
+                self.ram.set_sprite_ai_state(k, 1);
             }
         } else {
-            let a = self.ram.read_u8(SPRITE_AI_STATE + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_AI_STATE + k, a);
+            let a = self.ram.sprite(k).ai_state().wrapping_add(1);
+            self.ram.set_sprite_ai_state(k, a);
             if a == 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
             }
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
             if s & 7 == 0 {
                 self.ram.write_u8(SOUND_EFFECT_2, 48);
             }
@@ -4019,7 +3850,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 9,
             8, 7, 6, 5, 4, 3, 2, 1,
         ];
-        let d = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+        let d = self.ram.sprite(k).aux2_delay();
         if d == 0 {
             return;
         }
@@ -4041,56 +3872,56 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         let j = self.runtime.spawn_dynamic(self.ram, k, 0x4a)?;
         self.runtime.set_spawned_coordinates(self.ram, j);
         self.runtime.transmute_to_bomb(self.ram, j);
-        self.ram.write_u8(SPRITE_DELAY_AUX1 + j, 80);
-        self.ram.write_u8(SPRITE_X_VEL + j, 24);
-        self.ram.write_u8(SPRITE_Z_VEL + j, 48);
+        self.ram.set_sprite_aux1_delay(j, 80);
+        self.ram.set_sprite_velocity_x(j, 24);
+        self.ram.set_sprite_velocity_z(j, 48);
         Some(j)
     }
     pub fn catfish_regurgitate_medallion(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc0) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_X_VEL + j, 24);
-            self.ram.write_u8(SPRITE_Z_VEL + j, 48);
-            self.ram.write_u8(SPRITE_A + j, 17);
+            self.ram.set_sprite_velocity_x(j, 24);
+            self.ram.set_sprite_velocity_z(j, 48);
+            self.ram.set_sprite_scratch_a(j, 17);
             self.runtime.sfx2_with_pan(self.ram, j, 0x20);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0x83);
-            self.ram.write_u8(SPRITE_FLAGS3 + j, 0x58);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 8);
+            self.ram.set_sprite_flags2(j, 0x83);
+            self.ram.set_sprite_flags3(j, 0x58);
+            self.ram.set_sprite_oam_flags(j, 8);
             self.runtime.decode_animated_sprite_tile(self.ram, 0x1c);
         }
     }
     pub fn sprite_zora_regurgitate_flippers(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc0) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_Z_VEL + j, 32);
-            self.ram.write_u8(SPRITE_Y_VEL + j, 16);
-            self.ram.write_u8(SPRITE_A + j, 30);
+            self.ram.set_sprite_velocity_z(j, 32);
+            self.ram.set_sprite_velocity_y(j, 16);
+            self.ram.set_sprite_scratch_a(j, 30);
             self.runtime.sfx2_with_pan(self.ram, j, 0x20);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0x83);
-            self.ram.write_u8(SPRITE_FLAGS3 + j, 0x54);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 4);
-            self.ram.write_u8(SPRITE_DELAY_AUX3 + j, 0x30);
+            self.ram.set_sprite_flags2(j, 0x83);
+            self.ram.set_sprite_flags3(j, 0x54);
+            self.ram.set_sprite_oam_flags(j, 4);
+            self.ram.set_sprite_aux3_delay(j, 0x30);
             self.runtime.decode_animated_sprite_tile(self.ram, 0x11);
         }
     }
     pub fn catfish_spawn_plop(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xec) {
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_STATE + j, 3);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 15);
-            self.ram.write_u8(SPRITE_AI_STATE + j, 0);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 3);
+            self.ram.set_sprite_state(j, 3);
+            self.ram.set_sprite_main_delay(j, 15);
+            self.ram.set_sprite_ai_state(j, 0);
+            self.ram.set_sprite_flags2(j, 3);
             self.runtime.sfx2_with_pan(self.ram, k, 0x28);
         }
     }
     pub fn sprite_spawn_water_splash(&mut self, k: usize) -> Option<usize> {
         let j = self.runtime.spawn_dynamic(self.ram, k, 0xc0)?;
         self.runtime.set_spawned_coordinates(self.ram, j);
-        self.ram.write_u8(SPRITE_A + j, 0x80);
-        self.ram.write_u8(SPRITE_FLAGS2 + j, 2);
-        self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 2);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + j, 4);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + j, 31);
+        self.ram.set_sprite_scratch_a(j, 0x80);
+        self.ram.set_sprite_flags2(j, 2);
+        self.ram.set_sprite_ignore_projectile(j, 2);
+        self.ram.set_sprite_oam_flags(j, 4);
+        self.ram.set_sprite_main_delay(j, 31);
         Some(j)
     }
     pub fn sprite_catfish_splash_of_water(&mut self, k: usize) {
@@ -4104,16 +3935,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (0, -4, 0x00c0, 2),
             (0, -4, 0x00c0, 2),
         ];
-        let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+        let d = self.ram.sprite(k).main_delay();
         if d == 0 {
-            self.ram.write_u8(SPRITE_STATE + k, 0);
+            self.ram.set_sprite_state(k, 0);
         }
         let i = (d >> 3) as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
     }
 
     pub fn sprite_c8_big_fairy(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_HEAD_DIR + k) != 0 {
+        if self.ram.sprite(k).head_direction() != 0 {
             self.sprite_fairy_cloud(k);
         } else {
             self.sprite_big_fairy(k);
@@ -4138,14 +3969,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-4, 8, 0x00ac, 2),
             (4, 8, 0x40ac, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 4;
+        let i = self.ram.sprite(k).graphics() as usize * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
         self.runtime.draw_shadow(self.ram, k);
     }
     pub fn faerie_cloud_draw(&mut self, k: usize) {
         const XY: [i8; 8] = [-12, -6, 0, 6, 12, 18, 0, 6];
-        let a = self.ram.read_u8(SPRITE_A + k);
-        if (a as i8) >= 0 && a & self.ram.read_u8(SPRITE_SUBTYPE2 + k) == 0 {
+        let a = self.ram.sprite(k).scratch_a();
+        if (a as i8) >= 0 && a & self.ram.sprite(k).subtype2() == 0 {
             let x = XY[(self.runtime.random_number(self.ram) & 7) as usize];
             let y = XY[(self.runtime.random_number(self.ram) & 7) as usize];
             self.runtime.garnish_spawn_sparkle(self.ram, k, x, y);
@@ -4156,17 +3987,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1),
-        );
+        self.ram
+            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
         self.faerie_cloud_draw(k);
-        if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 31 == 0 {
+        if self.ram.sprite(k).subtype2() & 31 == 0 {
             self.runtime.sfx2_with_pan(self.ram, k, 0x31);
         }
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                self.ram.write_u8(SPRITE_A + k, 0);
+                self.ram.set_sprite_scratch_a(k, 0);
                 self.runtime.apply_speed_towards_link(self.ram, k, 8);
                 self.runtime.move_xy(self.ram, k);
                 self.runtime.get_16bit_coords(self.ram, k);
@@ -4187,24 +4016,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         LINK_HEARTS_FILLER,
                         self.ram.read_u16(LINK_HEARTS_FILLER).wrapping_add(0xa0),
                     );
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                    self.ram.set_sprite_ai_state(k, 1);
                 }
             }
             1 => {
                 if self.ram.read_u8(LINK_HEALTH_CURRENT) == self.ram.read_u8(LINK_HEALTH_CAPACITY) {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_AUX2, 112);
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_aux2_delay(0, 112);
                 }
             }
             2 => {
-                let a = self.ram.read_u8(SPRITE_A + k);
-                if self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 15 == 0 && (a as i8) >= 0 {
+                let a = self.ram.sprite(k).scratch_a();
+                if self.ram.sprite(k).subtype2() & 15 == 0 && (a as i8) >= 0 {
                     let a = a.wrapping_mul(2).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_A + k, a);
+                    self.ram.set_sprite_scratch_a(k, a);
                     if a >= 0x80 {
-                        self.ram.write_u8(SPRITE_A + k, 255);
+                        self.ram.set_sprite_scratch_a(k, 255);
                         self.ram.write_u8(FLAG_IS_LINK_IMMOBILIZED, 0);
-                        self.ram.write_u8(SPRITE_STATE + k, 0);
+                        self.ram.set_sprite_state(k, 0);
                     }
                 }
             }
@@ -4212,55 +4041,52 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn sprite_big_fairy(&mut self, k: usize) {
-        let mut i = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+        let mut i = self.ram.sprite(k).aux2_delay();
         if i != 0 && i < 0x40 {
             i -= 1;
             if i == 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
             }
             if i & 1 != 0 {
                 return;
             }
         }
         self.big_faerie_draw(k);
-        let g = self.ram.read_u8(SPRITE_G + k).wrapping_sub(1);
-        self.ram.write_u8(SPRITE_G + k, g);
+        let g = self.ram.sprite(k).scratch_g().wrapping_sub(1);
+        self.ram.set_sprite_scratch_g(k, g);
         if (g as i8) < 0 {
-            self.ram.write_u8(SPRITE_G + k, 5);
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
-                self.ram.read_u8(SPRITE_GRAPHICS + k).wrapping_add(1) & 3,
-            );
+            self.ram.set_sprite_scratch_g(k, 5);
+            self.ram
+                .set_sprite_graphics(k, self.ram.sprite(k).graphics().wrapping_add(1) & 3);
         }
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1),
-        );
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
+        self.ram
+            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
+        if self.ram.sprite(k).ai_state() == 0 {
             self.faerie_cloud_draw(k);
-            self.ram.write_u8(SPRITE_A + k, 1);
+            self.ram.set_sprite_scratch_a(k, 1);
             let (dx, dy) = self
                 .runtime
                 .direction_to_face_link_with_differences(self.ram, k);
             if dx.wrapping_add(0x30) < 0x60 && dy.wrapping_add(0x30) < 0x60 {
                 self.runtime.link_cancel_dash(self.ram);
-                self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                self.ram.set_sprite_ai_state(k, 1);
                 self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x15a);
                 self.runtime.show_message_minimal(self.ram);
                 self.ram.write_u8(FLAG_IS_LINK_IMMOBILIZED, 1);
                 if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc8) {
                     self.runtime.set_spawned_coordinates(self.ram, j);
-                    self.ram.write_u8(SPRITE_HEAD_DIR + j, 1);
-                    self.ram.write_u8(
-                        SPRITE_Y_LO + j,
+                    self.ram.set_sprite_head_direction(j, 1);
+                    self.ram.set_sprite_y_low(
+                        j,
                         self.ram
-                            .read_u8(SPRITE_Y_LO + j)
-                            .wrapping_sub(self.ram.read_u8(SPRITE_Z + k)),
+                            .sprite(j)
+                            .y_low()
+                            .wrapping_sub(self.ram.sprite(k).z()),
                     );
-                    self.ram.write_u8(SPRITE_Z + j, 0);
+                    self.ram.set_sprite_z(j, 0);
                 }
             }
         }
@@ -4270,9 +4096,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0x4a) {
             self.runtime.transmute_to_bomb(self.ram, j);
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(SPRITE_DELAY_AUX1 + j, 64);
-            self.ram.write_u8(SPRITE_Y_VEL + j, 24);
-            self.ram.write_u8(SPRITE_Z_VEL + j, 18);
+            self.ram.set_sprite_aux1_delay(j, 64);
+            self.ram.set_sprite_velocity_y(j, 24);
+            self.ram.set_sprite_velocity_z(j, 18);
         }
     }
     pub fn talking_tree_draw(&mut self, k: usize) {
@@ -4290,7 +4116,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (8, 0, 0x40e8, 0),
             (8, 7, 0x40f8, 0),
         ];
-        let g = self.ram.read_u8(SPRITE_GRAPHICS + k).wrapping_sub(1);
+        let g = self.ram.sprite(k).graphics().wrapping_sub(1);
         if (g as i8) < 0 {
             return;
         }
@@ -4303,26 +4129,26 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        let j = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
+        let j = self.ram.sprite(k).head_direction() as usize;
         let bx = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_A + k),
-            self.ram.read_u8(SPRITE_B + k),
+            self.ram.sprite(k).scratch_a(),
+            self.ram.sprite(k).scratch_b(),
         ]);
         let by = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_E + k),
+            self.ram.sprite(k).scratch_c(),
+            self.ram.sprite(k).scratch_e(),
         ]);
         self.set_sprite_x(k, bx.wrapping_add_signed([9, -9][j]));
         self.set_sprite_y(k, by);
         let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 2);
         if (y as i8) >= 0 {
-            self.ram.write_u8(SPRITE_D + k, x.wrapping_add(2));
-        } else if self.ram.read_u8(SPRITE_D + k) != 2 {
-            let d = self.ram.read_u8(SPRITE_D + k);
+            self.ram.set_sprite_scratch_d(k, x.wrapping_add(2));
+        } else if self.ram.sprite(k).scratch_d() != 2 {
+            let d = self.ram.sprite(k).scratch_d();
             self.ram
-                .write_u8(SPRITE_D + k, d.wrapping_add(if d >= 2 { 255 } else { 1 }));
+                .set_sprite_scratch_d(k, d.wrapping_add(if d >= 2 { 255 } else { 1 }));
         }
-        let j = self.ram.read_u8(SPRITE_D + k) as usize;
+        let j = self.ram.sprite(k).scratch_d() as usize;
         self.set_sprite_x(k, bx.wrapping_add_signed([-2, -1, 0, 1, 2][j]));
         self.set_sprite_y(k, by.wrapping_add_signed([-1, 0, 0, 0, -1][j]));
     }
@@ -4334,12 +4160,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.set_sprite_y(j, y);
             let [a, b] = x.to_le_bytes();
             let [c, e] = y.to_le_bytes();
-            self.ram.write_u8(SPRITE_HEAD_DIR + j, dir as u8);
-            self.ram.write_u8(SPRITE_A + j, a);
-            self.ram.write_u8(SPRITE_B + j, b);
-            self.ram.write_u8(SPRITE_C + j, c);
-            self.ram.write_u8(SPRITE_E + j, e);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + j, 1);
+            self.ram.set_sprite_head_direction(j, dir as u8);
+            self.ram.set_sprite_scratch_a(j, a);
+            self.ram.set_sprite_scratch_b(j, b);
+            self.ram.set_sprite_scratch_c(j, c);
+            self.ram.set_sprite_scratch_e(j, e);
+            self.ram.set_sprite_subtype2(j, 1);
         }
     }
     pub fn rupee_pull_spawn_prize(&mut self, k: usize) {
@@ -4363,12 +4189,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     break;
                 };
                 self.runtime.set_spawned_coordinates(self.ram, j);
-                self.ram.write_u8(SPRITE_X_VEL + j, X[i] as u8);
-                self.ram.write_u8(SPRITE_Y_VEL + j, Y[i] as u8);
-                self.ram.write_u8(SPRITE_STUNNED + j, 255);
-                self.ram.write_u8(SPRITE_DELAY_AUX4 + j, 32);
-                self.ram.write_u8(SPRITE_DELAY_AUX3 + j, 32);
-                self.ram.write_u8(SPRITE_Z_VEL + j, 32);
+                self.ram.set_sprite_velocity_x(j, X[i] as u8);
+                self.ram.set_sprite_velocity_y(j, Y[i] as u8);
+                self.ram.set_sprite_stunned(j, 255);
+                self.ram.set_sprite_aux4_delay(j, 32);
+                self.ram.set_sprite_aux3_delay(j, 32);
+                self.ram.set_sprite_velocity_z(j, 32);
                 let t = (i as u8).wrapping_sub(1);
                 self.ram.write_u8(TMP_COUNTER, t);
                 if (t as i8) < 0 {
@@ -4391,16 +4217,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-1, 0, 0x0a44, 2),
             (-1, 0, 0x0a44, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 3;
+        let i = self.ram.sprite(k).graphics() as usize * 3;
         self.runtime
             .draw_multiple_player_deferred(self.ram, k, &D[i..i + 3]);
         self.runtime.draw_shadow(self.ram, k);
     }
 
     pub fn sprite_schedule_boss_for_death(&mut self, k: usize) {
-        self.ram.write_u8(SPRITE_STATE + k, 4);
-        self.ram.write_u8(SPRITE_A + k, 0);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 224);
+        self.ram.set_sprite_state(k, 4);
+        self.ram.set_sprite_scratch_a(k, 0);
+        self.ram.set_sprite_main_delay(k, 224);
     }
     pub fn sprite_make_boss_explosion(&mut self, k: usize) {
         self.runtime.sfx2_with_pan(self.ram, k, 0xc);
@@ -4409,14 +4235,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn sprite_make_boss_death_explosion_no_sound(&mut self, k: usize) {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0) {
             self.ram.write_u8(LOAD_CHR_HALFSLOT_EVEN_ODD, 11);
-            self.ram.write_u8(SPRITE_STATE + j, 4);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 3);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 12);
+            self.ram.set_sprite_state(j, 4);
+            self.ram.set_sprite_flags2(j, 3);
+            self.ram.set_sprite_oam_flags(j, 12);
             self.set_sprite_x(j, self.ram.read_u16(CUR_SPRITE_X));
             self.set_sprite_y(j, self.ram.read_u16(CUR_SPRITE_Y));
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 31);
-            self.ram.write_u8(SPRITE_A + j, 31);
-            self.ram.write_u8(SPRITE_FLOOR + j, 2);
+            self.ram.set_sprite_main_delay(j, 31);
+            self.ram.set_sprite_scratch_a(j, 31);
+            self.ram.set_sprite_floor(j, 2);
         }
     }
     pub fn vulture_draw(&mut self, k: usize) {
@@ -4430,7 +4256,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-8, 0, 0x0084, 2),
             (8, 0, 0x4084, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        let i = self.ram.sprite(k).graphics() as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
         self.runtime.draw_shadow(self.ram, k);
     }
@@ -4446,10 +4272,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_OAM_FLAGS + k,
-            self.ram.read_u8(FRAME_COUNTER) << 2 & 0xc0,
-        );
+        self.ram
+            .set_sprite_oam_flags(k, self.ram.read_u8(FRAME_COUNTER) << 2 & 0xc0);
         self.runtime.move_xyz(self.ram, k);
         if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 != 0 {
             return;
@@ -4470,39 +4294,38 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.runtime.attempt_damage_to_link_plus_recoil(self.ram, k);
         }
         if self.runtime.check_tile_collision(self.ram, k) {
-            self.ram.write_u8(SPRITE_STATE + k, 0);
+            self.ram.set_sprite_state(k, 0);
         }
     }
     pub fn boulder_outdoors_main(&mut self, k: usize) {
         const Z: [u8; 2] = [32, 48];
         const Y: [u8; 2] = [8, 32];
         const X: [u8; 4] = [24, 16, (-24i8) as u8, (-16i8) as u8];
-        self.ram.write_u8(SPRITE_OBJ_PRIO + k, 0x30);
+        self.ram.set_sprite_object_priority(k, 0x30);
         self.boulder_draw(k);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
+        self.ram.set_sprite_subtype2(
+            k,
             self.ram
-                .read_u8(SPRITE_SUBTYPE2 + k)
-                .wrapping_sub(self.ram.read_u8(SPRITE_D + k)),
+                .sprite(k)
+                .subtype2()
+                .wrapping_sub(self.ram.sprite(k).scratch_d()),
         );
         self.runtime.check_damage_to_and_from_link(self.ram, k);
         self.runtime.move_xyz(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_Z_VEL + k,
-            self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-        );
-        if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-            self.ram.write_u8(SPRITE_Z + k, 0);
+        self.ram
+            .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+        if (self.ram.sprite(k).z() as i8) < 0 {
+            self.ram.set_sprite_z(k, 0);
             let collision = usize::from(self.runtime.check_tile_collision(self.ram, k));
-            self.ram.write_u8(SPRITE_Z_VEL + k, Z[collision]);
-            self.ram.write_u8(SPRITE_Y_VEL + k, Y[collision]);
+            self.ram.set_sprite_velocity_z(k, Z[collision]);
+            self.ram.set_sprite_velocity_y(k, Y[collision]);
             let j = collision + ((self.runtime.random_number(self.ram) & 1) as usize) * 2;
-            self.ram.write_u8(SPRITE_X_VEL + k, X[j]);
+            self.ram.set_sprite_velocity_x(k, X[j]);
             self.ram
-                .write_u8(SPRITE_D + k, ((j & 2) as u8).wrapping_sub(1));
+                .set_sprite_scratch_d(k, ((j & 2) as u8).wrapping_sub(1));
             self.runtime.sfx2_with_pan(self.ram, k, 0xb);
         }
     }
@@ -4525,7 +4348,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-8, 8, 0x81cc, 2),
             (8, 8, 0x81ce, 2),
         ];
-        let i = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) >> 3 & 3) as usize * 4;
+        let i = (self.ram.sprite(k).subtype2() >> 3 & 3) as usize * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
         self.sprite_draw_large_shadow2(k);
     }
@@ -4534,7 +4357,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             CUR_SPRITE_Y,
             self.ram
                 .read_u16(CUR_SPRITE_Y)
-                .wrapping_add(self.ram.read_u8(SPRITE_Z + k) as u16),
+                .wrapping_add(self.ram.sprite(k).z() as u16),
         );
         self.ram
             .write_u16(OAM_CUR_PTR, self.ram.read_u16(OAM_CUR_PTR).wrapping_add(16));
@@ -4546,27 +4369,21 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.runtime.get_16bit_coords(self.ram, k);
     }
     pub fn sprite_draw_large_shadow2(&mut self, k: usize) {
-        self.sprite_draw_big_shadow(k, (self.ram.read_u8(SPRITE_Z + k) >> 3).min(4));
+        self.sprite_draw_big_shadow(k, (self.ram.sprite(k).z() >> 3).min(4));
     }
     pub fn cutscene_agahnim_spawn_zelda_on_altar(&mut self, k: usize) {
-        self.ram.write_u8(
-            SPRITE_X_LO + k,
-            self.ram.read_u8(SPRITE_X_LO + k).wrapping_add(8),
-        );
-        self.ram.write_u8(
-            SPRITE_Y_LO + k,
-            self.ram.read_u8(SPRITE_Y_LO + k).wrapping_add(6),
-        );
+        self.ram
+            .set_sprite_x_low(k, self.ram.sprite(k).x_low().wrapping_add(8));
+        self.ram
+            .set_sprite_y_low(k, self.ram.sprite(k).y_low().wrapping_add(6));
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc1) {
-            self.ram.write_u8(SPRITE_A + j, 1);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 1);
+            self.ram.set_sprite_scratch_a(j, 1);
+            self.ram.set_sprite_ignore_projectile(j, 1);
             self.runtime.set_spawned_coordinates(self.ram, j);
-            self.ram.write_u8(
-                SPRITE_Y_LO + j,
-                self.ram.read_u8(SPRITE_Y_LO + j).wrapping_add(40),
-            );
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + j, 12);
+            self.ram
+                .set_sprite_y_low(j, self.ram.sprite(j).y_low().wrapping_add(40));
+            self.ram.set_sprite_flags2(j, 0);
+            self.ram.set_sprite_oam_flags(j, 12);
         }
     }
 
@@ -4623,7 +4440,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-4, -24, 0xc864, 0),
             (-4, -24, 0xc864, 0),
         ];
-        let g = self.ram.read_u8(SPRITE_G + k);
+        let g = self.ram.sprite(k).scratch_g();
         if g == 0 {
             return;
         }
@@ -4634,7 +4451,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         } else if g >= 9 {
             4
         } else {
-            self.ram.read_u8(SPRITE_D + k) as usize
+            self.ram.sprite(k).scratch_d() as usize
         };
         self.ram.write_u16(
             CUR_SPRITE_X,
@@ -4648,53 +4465,47 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 .read_u16(CUR_SPRITE_Y)
                 .wrapping_add_signed(Y[j] as i16),
         );
-        let bak = self.ram.read_u8(SPRITE_OBJ_PRIO + k);
-        self.ram.write_u8(SPRITE_OBJ_PRIO + k, bak & !0xf);
+        let bak = self.ram.sprite(k).object_priority();
+        self.ram.set_sprite_object_priority(k, bak & !0xf);
         let i = (g as usize - 1) * 5;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 5]);
-        self.ram.write_u8(SPRITE_OBJ_PRIO + k, bak);
+        self.ram.set_sprite_object_priority(k, bak);
         self.runtime.get_16bit_coords(self.ram, k);
     }
 
     pub fn sprite_c5_medusa(&mut self, k: usize) {
         self.runtime.prep_oam(self.ram, k);
         if self.ram.read_u8(PLAYER_IS_INDOORS) == 0 {
-            self.ram.write_u8(SPRITE_X_VEL + k, 255);
-            self.ram.write_u8(SPRITE_SUBTYPE + k, 255);
+            self.ram.set_sprite_velocity_x(k, 255);
+            self.ram.set_sprite_subtype(k, 255);
             if !self.runtime.check_tile_collision(self.ram, k)
                 || self.runtime.return_if_inactive(self.ram, k)
             {
                 return;
             }
-            self.ram.write_u8(SPRITE_TYPE + k, 0x19);
+            self.ram.set_sprite_kind(k, 0x19);
             self.runtime.load_properties(self.ram, k);
             self.ram
-                .write_u8(SPRITE_E + k, self.ram.read_u8(SPRITE_E + k).wrapping_add(1));
-            self.ram.write_u8(
-                SPRITE_X_LO + k,
-                self.ram.read_u8(SPRITE_X_LO + k).wrapping_add(8),
-            );
-            self.ram.write_u8(
-                SPRITE_Y_LO + k,
-                self.ram.read_u8(SPRITE_Y_LO + k).wrapping_sub(8),
-            );
+                .set_sprite_scratch_e(k, self.ram.sprite(k).scratch_e().wrapping_add(1));
+            self.ram
+                .set_sprite_x_low(k, self.ram.sprite(k).x_low().wrapping_add(8));
+            self.ram
+                .set_sprite_y_low(k, self.ram.sprite(k).y_low().wrapping_sub(8));
             self.runtime.sfx3_with_pan(self.ram, k, 0x19);
-            self.ram.write_u8(SPRITE_DEFL_BITS + k, 0x80);
+            self.ram.set_sprite_deflection_bits(k, 0x80);
         } else {
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
             if s & 0x7f == 0
-                && self.ram.read_u8(SPRITE_FLOOR + k) == self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL)
+                && self.ram.sprite(k).floor() == self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL)
                 && let Some(j) = self.runtime.spawn_fireball(self.ram, k)
             {
-                self.ram.write_u8(
-                    SPRITE_DEFL_BITS + j,
-                    self.ram.read_u8(SPRITE_DEFL_BITS + j) | 8,
-                );
-                self.ram.write_u8(SPRITE_BUMP_DAMAGE + j, 4);
+                self.ram
+                    .set_sprite_deflection_bits(j, self.ram.sprite(j).deflection_bits() | 8);
+                self.ram.set_sprite_bump_damage(j, 4);
             }
         }
     }
@@ -4707,25 +4518,23 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        let delay = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+        let delay = self.ram.sprite(k).main_delay();
         if delay == 24 {
             if let Some(j) = self.runtime.spawn_fireball(self.ram, k) {
-                self.ram.write_u8(
-                    SPRITE_DEFL_BITS + j,
-                    self.ram.read_u8(SPRITE_DEFL_BITS + j) | 8,
-                );
-                self.ram.write_u8(SPRITE_BUMP_DAMAGE + j, 4);
+                self.ram
+                    .set_sprite_deflection_bits(j, self.ram.sprite(j).deflection_bits() | 8);
+                self.ram.set_sprite_bump_damage(j, 4);
                 let i = self.runtime.direction_to_face_link(self.ram, j) as usize;
-                self.ram.write_u8(SPRITE_X_VEL + j, V[i + 2] as u8);
-                self.ram.write_u8(SPRITE_Y_VEL + j, V[i] as u8);
+                self.ram.set_sprite_velocity_x(j, V[i + 2] as u8);
+                self.ram.set_sprite_velocity_y(j, V[i] as u8);
                 self.set_sprite_x(j, self.sprite_x(j).wrapping_add_signed(XO[i] as i16));
                 self.set_sprite_y(j, self.sprite_y(j).wrapping_add_signed(YO[i] as i16));
             }
         } else if delay == 0
             && self.ram.read_u8(BUTTON_B_FRAMES) != 0
-            && self.ram.read_u8(SPRITE_FLOOR + k) == self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL)
+            && self.ram.sprite(k).floor() == self.ram.read_u8(LINK_IS_ON_LOWER_LEVEL)
         {
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+            self.ram.set_sprite_main_delay(k, 32);
         }
     }
 
@@ -4756,10 +4565,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (0, -7, 0x4002, 2),
             (0, 0, 0x400a, 2),
         ];
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        let i = self.ram.sprite(k).graphics() as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
-        if self.ram.read_u8(SPRITE_PAUSE + k) == 0 {
-            let j = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
+        if self.ram.sprite(k).pause() == 0 {
+            let j = self.ram.sprite(k).head_direction() as usize;
             const CH: [u8; 4] = [2, 2, 0, 4];
             const FL: [u8; 4] = [0x40, 0, 0, 0];
             self.runtime
@@ -4799,7 +4608,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (8, 0, 0x4086, 2),
             (8, 0, 0x4086, 2),
         ];
-        let g = self.ram.read_u8(SPRITE_GRAPHICS + k);
+        let g = self.ram.sprite(k).graphics();
         if g != 0 {
             let i = (g as usize - 1) * 4;
             self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
@@ -4811,11 +4620,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.ram.write_u8(GARNISH_TYPE + j, 9);
         self.ram.write_u8(GARNISH_ACTIVE, 9);
         self.ram
-            .write_u8(GARNISH_SPRITE + j, self.ram.read_u8(SPRITE_A + k));
+            .write_u8(GARNISH_SPRITE + j, self.ram.sprite(k).scratch_a());
         self.ram
-            .write_u8(GARNISH_X_LO + j, self.ram.read_u8(SPRITE_X_LO + k));
+            .write_u8(GARNISH_X_LO + j, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(GARNISH_X_HI + j, self.ram.read_u8(SPRITE_X_HI + k));
+            .write_u8(GARNISH_X_HI + j, self.ram.sprite(k).x_high());
         let y = self.sprite_y(k).wrapping_add(16);
         self.ram.write_u8(GARNISH_Y_LO + j, y as u8);
         self.ram.write_u8(GARNISH_Y_HI + j, (y >> 8) as u8);
@@ -4830,31 +4639,30 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             15, 0, 15, 15, 0, 15, 0, 0, 15, 0, 15, 15, 0, 15, 0, 0, 15, 0, 15, 15, 0, 15, 0, 0, 15,
             -15, 0, 0, -15, 0, -15, -15, 0, -15, 0, 0, -15, 0, -15, -15, 0,
         ];
-        let j = self.ram.read_u8(SPRITE_A + k) as usize;
-        let f = (self.ram.read_u8(SPRITE_OAM_FLAGS + k) & 0xb1)
+        let j = self.ram.sprite(k).scratch_a() as usize;
+        let f = (self.ram.sprite(k).oam_flags() & 0xb1)
             | FLAGS[j]
             | (self.ram.read_u8(FRAME_COUNTER) << 1 & 14);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, f);
-        self.ram.write_u8(
-            SPRITE_GRAPHICS + k,
+        self.ram.set_sprite_oam_flags(k, f);
+        self.ram.set_sprite_graphics(
+            k,
             GFX[j] + u8::from(self.ram.read_u8(DUNGEON_ROOM_INDEX2) == 0x20) * 4,
         );
         self.runtime.draw_single_large(self.ram, k);
-        if self.runtime.return_if_inactive(self.ram, k)
-            || self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0
-        {
+        if self.runtime.return_if_inactive(self.ram, k) || self.ram.sprite(k).main_delay() != 0 {
             return;
         }
         self.lightning_spawn_garnish(k);
-        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 2);
+        self.ram.set_sprite_main_delay(k, 2);
         self.set_sprite_y(k, self.sprite_y(k).wrapping_add(16));
         if self
             .ram
-            .read_u8(SPRITE_Y_LO + k)
+            .sprite(k)
+            .y_low()
             .wrapping_sub(self.ram.read_u8(BG2VOFS_COPY2))
             >= 0xd0
         {
-            self.ram.write_u8(SPRITE_STATE + k, 0);
+            self.ram.set_sprite_state(k, 0);
             return;
         }
         let rr = self.runtime.random_number(self.ram) & 7;
@@ -4863,12 +4671,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.sprite_x(k)
                 .wrapping_add_signed(XO[j * 8 + rr as usize] as i16),
         );
-        self.ram.write_u8(SPRITE_A + k, rr);
+        self.ram.set_sprite_scratch_a(k, rr);
     }
 
     pub fn sprite_armos_crusher(&mut self, k: usize) {
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, 7);
-        let shake = self.ram.read_u8(SPRITE_DELAY_AUX4 + k);
+        self.ram.set_sprite_oam_flags(k, 7);
+        let shake = self.ram.sprite(k).aux4_delay();
         self.ram.write_u16(
             BG1_Y_OFFSET,
             if shake == 0 {
@@ -4879,37 +4687,35 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 1
             },
         );
-        match self.ram.read_u8(SPRITE_G + k) {
+        match self.ram.sprite(k).scratch_g() {
             0 => {
                 self.runtime.check_damage_to_and_from_link(self.ram, k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) | self.ram.read_u8(SPRITE_Z + k) == 0 {
+                if self.ram.sprite(k).main_delay() | self.ram.sprite(k).z() == 0 {
                     self.runtime.apply_speed_towards_link(self.ram, k, 32);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 32);
-                    self.ram.write_u8(SPRITE_G + k, 1);
+                    self.ram.set_sprite_velocity_z(k, 32);
+                    self.ram.set_sprite_scratch_g(k, 1);
                     let [xl, xh] = self.ram.read_u16(LINK_X).to_le_bytes();
                     let [yl, yh] = self.ram.read_u16(LINK_Y).to_le_bytes();
-                    self.ram.write_u8(SPRITE_B + k, xl);
-                    self.ram.write_u8(SPRITE_C + k, xh);
-                    self.ram.write_u8(SPRITE_E + k, yl);
-                    self.ram.write_u8(SPRITE_HEAD_DIR + k, yh);
+                    self.ram.set_sprite_scratch_b(k, xl);
+                    self.ram.set_sprite_scratch_c(k, xh);
+                    self.ram.set_sprite_scratch_e(k, yl);
+                    self.ram.set_sprite_head_direction(k, yh);
                     self.runtime.sfx2_with_pan(self.ram, k, 0x20);
                 }
             }
             1 => {
-                self.ram.write_u8(
-                    SPRITE_Z_VEL + k,
-                    self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_add(3),
-                );
+                self.ram
+                    .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_add(3));
                 let mut advance = self.runtime.check_tile_collision(self.ram, k);
                 if !advance {
                     self.runtime.get_16bit_coords(self.ram, k);
                     let x = u16::from_le_bytes([
-                        self.ram.read_u8(SPRITE_B + k),
-                        self.ram.read_u8(SPRITE_C + k),
+                        self.ram.sprite(k).scratch_b(),
+                        self.ram.sprite(k).scratch_c(),
                     ]);
                     let y = u16::from_le_bytes([
-                        self.ram.read_u8(SPRITE_E + k),
-                        self.ram.read_u8(SPRITE_HEAD_DIR + k),
+                        self.ram.sprite(k).scratch_e(),
+                        self.ram.sprite(k).head_direction(),
                     ]);
                     advance = x
                         .wrapping_sub(self.ram.read_u16(CUR_SPRITE_X))
@@ -4920,24 +4726,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                             < 32;
                 }
                 if advance {
-                    self.ram.write_u8(SPRITE_G + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 16);
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, 0);
+                    self.ram.set_sprite_scratch_g(k, 2);
+                    self.ram.set_sprite_main_delay(k, 16);
+                    self.ram.set_sprite_velocity_x(k, 0);
+                    self.ram.set_sprite_velocity_y(k, 0);
                 }
             }
             2 => {
-                self.ram.write_u8(SPRITE_Z_VEL + k, 0);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_G + k, 3);
+                self.ram.set_sprite_velocity_z(k, 0);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_scratch_g(k, 3);
                 }
             }
             3 => {
-                self.ram.write_u8(SPRITE_Z_VEL + k, (-104i8) as u8);
-                if (self.ram.read_u8(SPRITE_Z + k) as i8) >= 0 {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
-                    self.ram.write_u8(SPRITE_DELAY_AUX4 + k, 32);
-                    self.ram.write_u8(SPRITE_G + k, 0);
+                self.ram.set_sprite_velocity_z(k, (-104i8) as u8);
+                if (self.ram.sprite(k).z() as i8) >= 0 {
+                    self.ram.set_sprite_main_delay(k, 32);
+                    self.ram.set_sprite_aux4_delay(k, 32);
+                    self.ram.set_sprite_scratch_g(k, 0);
                     self.runtime.sfx2_with_pan(self.ram, k, 0xc);
                 }
             }
@@ -4951,10 +4757,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(SPRITE_FLAGS4 + k, 0);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        self.ram.set_sprite_flags4(k, 0);
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                self.ram.write_u8(SPRITE_GRAPHICS + k, 0);
+                self.ram.set_sprite_graphics(k, 0);
                 if self.runtime.check_damage_to_link_same_layer(self.ram, k) {
                     self.runtime.link_cancel_dash(self.ram);
                     self.ram.write_u8(LINK_INCAPACITATED_TIMER, 16);
@@ -4962,45 +4768,42 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     self.ram.write_u8(LINK_ACTUAL_VEL_Y, y);
                     self.ram.write_u8(LINK_ACTUAL_VEL_X, x);
                     self.runtime.sfx3_with_pan(self.ram, k, 0x32);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 48);
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 8);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_main_delay(k, 8);
                 }
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 1 & 3,
-                );
+                self.ram
+                    .set_sprite_graphics(k, self.ram.sprite(k).main_delay() >> 1 & 3);
             }
             2 => {
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
-                self.ram
-                    .write_u8(SPRITE_GRAPHICS + k, G2[(d >> 1) as usize]);
+                let d = self.ram.sprite(k).main_delay();
+                self.ram.set_sprite_graphics(k, G2[(d >> 1) as usize]);
                 if d == 7 {
                     self.talking_tree_spawn_bomb(k);
                 }
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
+                    self.ram.set_sprite_ai_state(k, 3);
                 }
             }
             3 => {
-                self.ram.write_u8(SPRITE_FLAGS4 + k, 7);
+                self.ram.set_sprite_flags4(k, 7);
                 let mut j;
-                if self.ram.read_u8(SPRITE_A + k) == 0 {
+                if self.ram.sprite(k).scratch_a() == 0 {
                     const M: [u16; 2] = [0x82, 0x7d];
-                    j = ((self.ram.read_u8(SPRITE_X_LO + k) >> 4) & 1) ^ 1;
-                    self.ram.write_u8(SPRITE_A + k, j);
+                    j = ((self.ram.sprite(k).x_low() >> 4) & 1) ^ 1;
+                    self.ram.set_sprite_scratch_a(k, j);
                     if self
                         .runtime
                         .show_solicited_message(self.ram, k, M[j as usize])
                         & 0x100
                         == 0
                     {
-                        self.ram.write_u8(SPRITE_A + k, 0);
+                        self.ram.set_sprite_scratch_a(k, 0);
                     }
                 } else {
                     const M: [u16; 4] = [0x7e, 0x7f, 0x80, 0x81];
@@ -5013,15 +4816,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         self.runtime
                             .show_message_unconditional(self.ram, M[j as usize]);
                     }
-                    self.ram.write_u8(SPRITE_A + k, 0);
+                    self.ram.set_sprite_scratch_a(k, 0);
                 }
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     const G: [u8; 8] = [1, 2, 3, 1, 3, 1, 2, 3];
                     const D: [u8; 8] = [13, 13, 13, 11, 11, 6, 16, 8];
-                    j = self.ram.read_u8(SPRITE_B + k).wrapping_add(1) & 7;
-                    self.ram.write_u8(SPRITE_B + k, j);
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, G[j as usize]);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, D[j as usize]);
+                    j = self.ram.sprite(k).scratch_b().wrapping_add(1) & 7;
+                    self.ram.set_sprite_scratch_b(k, j);
+                    self.ram.set_sprite_graphics(k, G[j as usize]);
+                    self.ram.set_sprite_main_delay(k, D[j as usize]);
                 }
             }
             _ => {}
@@ -5037,18 +4840,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         let _ = self.runtime.check_damage_from_link(self.ram, k);
-        if self.ram.read_u8(SPRITE_AI_STATE + k) != 3 {
+        if self.ram.sprite(k).ai_state() != 3 {
             let j = self.runtime.direction_to_face_link(self.ram, k);
-            self.ram.write_u8(SPRITE_HEAD_DIR + k, j);
-            if (j ^ self.ram.read_u8(SPRITE_D + k)) == 1 {
-                self.ram.write_u8(SPRITE_D + k, j);
+            self.ram.set_sprite_head_direction(k, j);
+            if (j ^ self.ram.sprite(k).scratch_d()) == 1 {
+                self.ram.set_sprite_scratch_d(k, j);
             }
         }
         let mut common = false;
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
                 self.thief_check_collision_with_link(k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0
+                if self.ram.sprite(k).main_delay() == 0
                     && self
                         .ram
                         .read_u16(LINK_X)
@@ -5062,32 +4865,30 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         .wrapping_add(0x50)
                         < 0xa0
                 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 16);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 16);
                 }
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    GFX[self.ram.read_u8(SPRITE_D + k) as usize],
-                );
+                self.ram
+                    .set_sprite_graphics(k, GFX[self.ram.sprite(k).scratch_d() as usize]);
             }
             1 => {
                 self.thief_check_collision_with_link(k);
                 let d = self.runtime.direction_to_face_link(self.ram, k);
-                self.ram.write_u8(SPRITE_D + k, d);
-                self.ram.write_u8(SPRITE_HEAD_DIR + k, d);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+                self.ram.set_sprite_scratch_d(k, d);
+                self.ram.set_sprite_head_direction(k, d);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_main_delay(k, 32);
                 }
                 common = true;
             }
             2 => {
                 self.runtime.apply_speed_towards_link(self.ram, k, 18);
-                if self.ram.read_u8(SPRITE_WALLCOLL + k) == 0 {
+                if self.ram.sprite(k).wall_collision() == 0 {
                     self.runtime.move_xy(self.ram, k);
                 }
                 let _ = self.runtime.check_tile_collision(self.ram, k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0
+                if self.ram.sprite(k).main_delay() == 0
                     && (self
                         .ram
                         .read_u16(LINK_X)
@@ -5101,12 +4902,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                             .wrapping_add(0x50)
                             >= 0xa0)
                 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 128);
                 }
                 if self.runtime.check_damage_to_link(self.ram, k) {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+                    self.ram.set_sprite_ai_state(k, 3);
+                    self.ram.set_sprite_main_delay(k, 32);
                     self.thief_spill_items(k);
                     self.runtime.sfx2_with_pan(self.ram, k, 0xb);
                 }
@@ -5115,18 +4916,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             3 => {
                 self.thief_check_collision_with_link(k);
                 let target = self.thief_scan_for_booty(k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-                    let d = self.ram.read_u8(SPRITE_D + k);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                    self.ram.set_sprite_subtype2(k, s);
+                    let d = self.ram.sprite(k).scratch_d();
                     self.ram
-                        .write_u8(SPRITE_GRAPHICS + k, GFX[(4 + d + (s & 4)) as usize]);
-                    if self.ram.read_u8(SPRITE_WALLCOLL + k) == 0 {
+                        .set_sprite_graphics(k, GFX[(4 + d + (s & 4)) as usize]);
+                    if self.ram.sprite(k).wall_collision() == 0 {
                         self.runtime.move_xy(self.ram, k);
                     }
                     let _ = self.runtime.check_tile_collision(self.ram, k);
                     self.ram
-                        .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_HEAD_DIR + k));
+                        .set_sprite_scratch_d(k, self.ram.sprite(k).head_direction());
                 }
                 if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 == 0
                     && let Some(j) = target
@@ -5137,7 +4938,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         self.sprite_x(j),
                         self.sprite_y(j),
                     );
-                    self.ram.write_u8(SPRITE_HEAD_DIR + k, d);
+                    self.ram.set_sprite_head_direction(k, d);
                 }
             }
             _ => {}
@@ -5145,21 +4946,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if common {
             if self.ram.read_u8(FRAME_COUNTER) & 31 == 0 {
                 self.ram
-                    .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_HEAD_DIR + k));
+                    .set_sprite_scratch_d(k, self.ram.sprite(k).head_direction());
             }
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-            let d = self.ram.read_u8(SPRITE_D + k);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
+            let d = self.ram.sprite(k).scratch_d();
             self.ram
-                .write_u8(SPRITE_GRAPHICS + k, GFX[(4 + d + (s & 4)) as usize]);
+                .set_sprite_graphics(k, GFX[(4 + d + (s & 4)) as usize]);
         }
     }
 
     pub fn sprite_raven(&mut self, k: usize) {
-        self.ram.write_u8(
-            SPRITE_OBJ_PRIO + k,
-            self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 0x30,
-        );
+        self.ram
+            .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 0x30);
         self.runtime.draw_single_large(self.ram, k);
         if self.runtime.return_if_inactive(self.ram, k)
             || self.runtime.return_if_recoiling(self.ram, k)
@@ -5168,13 +4967,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
         self.runtime.check_damage_to_and_from_link(self.ram, k);
         self.runtime.move_xy(self.ram, k);
-        let state = self.ram.read_u8(SPRITE_AI_STATE + k);
+        let state = self.ram.sprite(k).ai_state();
         if state == 0 {
             let (right, _) = self.runtime.is_right_of_link(self.ram, k);
-            self.ram.write_u8(
-                SPRITE_OAM_FLAGS + k,
-                (self.ram.read_u8(SPRITE_OAM_FLAGS + k) & !0x40) | (right * 0x40),
-            );
+            self.ram
+                .set_sprite_oam_flags(k, (self.ram.sprite(k).oam_flags() & !0x40) | (right * 0x40));
             let x = self
                 .ram
                 .read_u16(LINK_X)
@@ -5186,34 +4983,30 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             if x.wrapping_add(0x50 + u16::from((x as i16) >= 0)) < 0xa0
                 && y.wrapping_add(0x58 + u16::from((y as i16) >= 0)) < 0xa0
             {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 24);
+                self.ram.set_sprite_ai_state(k, 1);
+                self.ram.set_sprite_main_delay(k, 24);
                 self.runtime.sfx3_with_pan(self.ram, k, 0x1e);
             }
             return;
         }
         if state == 1 {
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                self.ram.write_u8(
-                    SPRITE_DELAY_MAIN + k,
-                    [16, 248][self.ram.read_u8(SPRITE_A + k) as usize],
-                );
+            if self.ram.sprite(k).main_delay() == 0 {
+                self.ram.set_sprite_ai_state(k, 2);
+                self.ram
+                    .set_sprite_main_delay(k, [16, 248][self.ram.sprite(k).scratch_a() as usize]);
                 self.runtime.apply_speed_towards_link(self.ram, k, 32);
             }
             self.ram
-                .write_u8(SPRITE_Z + k, self.ram.read_u8(SPRITE_Z + k).wrapping_add(1));
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
-                (self.ram.read_u8(FRAME_COUNTER) >> 1 & 1) + 1,
-            );
+                .set_sprite_z(k, self.ram.sprite(k).z().wrapping_add(1));
+            self.ram
+                .set_sprite_graphics(k, (self.ram.read_u8(FRAME_COUNTER) >> 1 & 1) + 1);
             return;
         }
         if state == 2
-            && self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0
-            && !(self.ram.read_u8(IS_IN_DARK_WORLD) != 0 && self.ram.read_u8(SPRITE_A + k) != 0)
+            && self.ram.sprite(k).main_delay() == 0
+            && !(self.ram.read_u8(IS_IN_DARK_WORLD) != 0 && self.ram.sprite(k).scratch_a() != 0)
         {
-            self.ram.write_u8(SPRITE_AI_STATE + k, 3);
+            self.ram.set_sprite_ai_state(k, 3);
         }
         let fleeing = state == 3;
         if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 1 == 0 {
@@ -5224,10 +5017,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 xv = 0u8.wrapping_sub(xv);
                 yv = 0u8.wrapping_sub(yv);
             }
-            let ox = self.ram.read_u8(SPRITE_X_VEL + k);
+            let ox = self.ram.sprite(k).velocity_x();
             if ox != xv {
-                self.ram.write_u8(
-                    SPRITE_X_VEL + k,
+                self.ram.set_sprite_velocity_x(
+                    k,
                     ox.wrapping_add(if (ox.wrapping_sub(xv) as i8) < 0 {
                         1
                     } else {
@@ -5235,10 +5028,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     }),
                 );
             }
-            let oy = self.ram.read_u8(SPRITE_Y_VEL + k);
+            let oy = self.ram.sprite(k).velocity_y();
             if oy != yv {
-                self.ram.write_u8(
-                    SPRITE_Y_VEL + k,
+                self.ram.set_sprite_velocity_y(
+                    k,
                     oy.wrapping_add(if (oy.wrapping_sub(yv) as i8) < 0 {
                         1
                     } else {
@@ -5247,32 +5040,26 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 );
             }
         }
-        self.ram.write_u8(
-            SPRITE_GRAPHICS + k,
-            (self.ram.read_u8(FRAME_COUNTER) >> 1 & 1) + 1,
-        );
-        let flip = (self.ram.read_u8(SPRITE_X_VEL + k) >> 7) & 1;
-        self.ram.write_u8(
-            SPRITE_OAM_FLAGS + k,
-            (self.ram.read_u8(SPRITE_OAM_FLAGS + k) & !0x40) | (flip * 0x40),
-        );
+        self.ram
+            .set_sprite_graphics(k, (self.ram.read_u8(FRAME_COUNTER) >> 1 & 1) + 1);
+        let flip = (self.ram.sprite(k).velocity_x() >> 7) & 1;
+        self.ram
+            .set_sprite_oam_flags(k, (self.ram.sprite(k).oam_flags() & !0x40) | (flip * 0x40));
     }
 
     pub fn sprite_evil_barrier(&mut self, k: usize) {
         self.evil_barrier_draw(k);
-        if self.ram.read_u8(SPRITE_GRAPHICS + k) == 4 {
+        if self.ram.sprite(k).graphics() == 4 {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_GRAPHICS + k,
-            self.ram.read_u8(FRAME_COUNTER) >> 1 & 3,
-        );
+        self.ram
+            .set_sprite_graphics(k, self.ram.read_u8(FRAME_COUNTER) >> 1 & 3);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
         if self.runtime.check_damage_from_link(self.ram, k) && self.ram.read_u8(LINK_SWORD_TYPE) < 2
         {
-            self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
+            self.ram.set_sprite_hit_timer(k, 0);
             self.runtime.attempt_damage_to_link_plus_recoil(self.ram, k);
             if self.ram.read_u8(COUNTDOWN_FOR_BLINK) == 0 {
                 self.ram.write_u8(LINK_ELECTROCUTE_ON_TOUCH, 64);
@@ -5353,26 +5140,26 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             CUR_SPRITE_Y,
             self.ram.read_u16(CUR_SPRITE_Y).wrapping_add(8),
         );
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 9;
+        let i = self.ram.sprite(k).graphics() as usize * 9;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 9]);
         self.runtime.get_16bit_coords(self.ram, k);
     }
 
     pub fn sprite_c3_gibo(&mut self, k: usize) {
         const OF: [u8; 4] = [0, 0x40, 0xc0, 0x80];
-        if self.ram.read_u8(SPRITE_B + k) != 0 {
+        if self.ram.sprite(k).scratch_b() != 0 {
             self.runtime.draw_single_large(self.ram, k);
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
             self.runtime.check_damage_to_and_from_link(self.ram, k);
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-            self.ram.write_u8(
-                SPRITE_OAM_FLAGS + k,
-                (self.ram.read_u8(SPRITE_OAM_FLAGS + k) & 0x3f) | OF[(s >> 2 & 3) as usize],
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
+            self.ram.set_sprite_oam_flags(
+                k,
+                (self.ram.sprite(k).oam_flags() & 0x3f) | OF[(s >> 2 & 3) as usize],
             );
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
+            if self.ram.sprite(k).main_delay() != 0 {
                 self.runtime.move_xy(self.ram, k);
                 self.runtime.bounce_from_tile_collision(self.ram, k);
             }
@@ -5382,72 +5169,63 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_ANIM_CLOCK + k,
-            self.ram.read_u8(SPRITE_ANIM_CLOCK + k).wrapping_add(1),
-        );
-        let mut j = self.ram.read_u8(SPRITE_HEAD_DIR + k) as usize;
-        if self.ram.read_u8(SPRITE_STATE + j) == 6 {
+        self.ram
+            .set_sprite_animation_clock(k, self.ram.sprite(k).animation_clock().wrapping_add(1));
+        let mut j = self.ram.sprite(k).head_direction() as usize;
+        if self.ram.sprite(j).state() == 6 {
+            self.ram.set_sprite_state(k, self.ram.sprite(j).state());
             self.ram
-                .write_u8(SPRITE_STATE + k, self.ram.read_u8(SPRITE_STATE + j));
-            self.ram.write_u8(
-                SPRITE_DELAY_MAIN + k,
-                self.ram.read_u8(SPRITE_DELAY_MAIN + j),
-            );
-            self.ram.write_u8(
-                SPRITE_FLAGS2 + k,
-                self.ram.read_u8(SPRITE_FLAGS2 + k).wrapping_add(4),
-            );
+                .set_sprite_main_delay(k, self.ram.sprite(j).main_delay());
+            self.ram
+                .set_sprite_flags2(k, self.ram.sprite(k).flags2().wrapping_add(4));
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(FRAME_COUNTER) >> 3 & 3,
-        );
+        self.ram
+            .set_sprite_subtype2(k, self.ram.read_u8(FRAME_COUNTER) >> 3 & 3);
         if self.ram.read_u8(FRAME_COUNTER) & 63 == 0 {
             let (r, _) = self.runtime.is_right_of_link(self.ram, k);
-            self.ram.write_u8(SPRITE_D + k, r << 2);
+            self.ram.set_sprite_scratch_d(k, r << 2);
         }
         let _ = self.runtime.check_damage_to_link(self.ram, k);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                let delay = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let delay = self.ram.sprite(k).main_delay();
                 if delay == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 48);
                     self.ram
-                        .write_u8(SPRITE_A + k, self.ram.read_u8(SPRITE_A + k).wrapping_add(1));
+                        .set_sprite_scratch_a(k, self.ram.sprite(k).scratch_a().wrapping_add(1));
                     if let Some(n) = self.runtime.spawn_dynamic(self.ram, k, 0xc3) {
                         const XV: [i8; 8] = [16, 16, 0, -16, -16, -16, 0, 16];
                         const YV: [i8; 8] = [0, 0, 16, -16, 16, 16, -16, -16];
                         j = n;
                         self.runtime.set_spawned_coordinates(self.ram, j);
-                        self.ram.write_u8(SPRITE_HEAD_DIR + k, j as u8);
-                        self.ram.write_u8(SPRITE_FLAGS2 + j, 1);
-                        self.ram.write_u8(SPRITE_B + j, 1);
-                        self.ram.write_u8(SPRITE_FLAGS3 + j, 16);
+                        self.ram.set_sprite_head_direction(k, j as u8);
+                        self.ram.set_sprite_flags2(j, 1);
+                        self.ram.set_sprite_scratch_b(j, 1);
+                        self.ram.set_sprite_flags3(j, 16);
                         self.ram
-                            .write_u8(SPRITE_HEALTH + j, self.ram.read_u8(SPRITE_G + k));
-                        self.ram.write_u8(SPRITE_OAM_FLAGS + j, 7);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + j, 48);
-                        let c = self.ram.read_u8(SPRITE_C + k).wrapping_add(1);
-                        self.ram.write_u8(SPRITE_C + k, c);
+                            .set_sprite_health(j, self.ram.sprite(k).scratch_g());
+                        self.ram.set_sprite_oam_flags(j, 7);
+                        self.ram.set_sprite_main_delay(j, 48);
+                        let c = self.ram.sprite(k).scratch_c().wrapping_add(1);
+                        self.ram.set_sprite_scratch_c(k, c);
                         let i = if c == 3 {
-                            self.ram.write_u8(SPRITE_C + k, 0);
+                            self.ram.set_sprite_scratch_c(k, 0);
                             self.runtime.direction_to_face_link(self.ram, k) as usize
                         } else {
                             (self.runtime.random_number(self.ram) & 7) as usize
                         };
-                        self.ram.write_u8(SPRITE_X_VEL + j, XV[i] as u8);
-                        self.ram.write_u8(SPRITE_Y_VEL + j, YV[i] as u8);
+                        self.ram.set_sprite_velocity_x(j, XV[i] as u8);
+                        self.ram.set_sprite_velocity_y(j, YV[i] as u8);
                     }
                 } else if delay == 32 {
-                    self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 32);
+                    self.ram.set_sprite_aux1_delay(k, 32);
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 2);
                 }
             }
             2 => {
@@ -5467,20 +5245,20 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                             .wrapping_add(2)
                             < 4
                     {
-                        self.ram.write_u8(SPRITE_STATE + j, 0);
-                        self.ram.write_u8(SPRITE_A + k, 0);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+                        self.ram.set_sprite_state(j, 0);
+                        self.ram.set_sprite_scratch_a(k, 0);
+                        self.ram.set_sprite_ai_state(k, 0);
                         self.ram
-                            .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_HEALTH + j));
+                            .set_sprite_scratch_g(k, self.ram.sprite(j).health());
                         let d = (self.runtime.random_number(self.ram) & 31) + 32;
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, d);
+                        self.ram.set_sprite_main_delay(k, d);
                         return;
                     }
                     let (xv, yv) = self
                         .runtime
                         .project_speed_towards_location(self.ram, k, x, y, 16);
-                    self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                    self.ram.set_sprite_velocity_x(k, xv);
+                    self.ram.set_sprite_velocity_y(k, yv);
                 }
                 self.runtime.move_xy(self.ram, k);
             }
@@ -5525,18 +5303,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-2, 11, 0x008e, 0),
             (4, 3, 0x008c, 2),
         ];
-        if self.ram.read_u8(SPRITE_A + k) == 0 {
-            let b0 = self.ram.read_u8(SPRITE_FLAGS2 + k);
-            let b1 = self.ram.read_u8(SPRITE_OAM_FLAGS + k);
-            self.ram.write_u8(SPRITE_FLAGS2 + k, 1);
-            self.ram.write_u8(
-                SPRITE_OAM_FLAGS + k,
-                OF[(self.ram.read_u8(SPRITE_ANIM_CLOCK + k) >> 2 & 3) as usize]
-                    | OF2[(self.ram.read_u8(SPRITE_DELAY_AUX1 + k) >> 2 & 1) as usize],
+        if self.ram.sprite(k).scratch_a() == 0 {
+            let b0 = self.ram.sprite(k).flags2();
+            let b1 = self.ram.sprite(k).oam_flags();
+            self.ram.set_sprite_flags2(k, 1);
+            self.ram.set_sprite_oam_flags(
+                k,
+                OF[(self.ram.sprite(k).animation_clock() >> 2 & 3) as usize]
+                    | OF2[(self.ram.sprite(k).aux1_delay() >> 2 & 1) as usize],
             );
             self.runtime.draw_single_large(self.ram, k);
-            self.ram.write_u8(SPRITE_OAM_FLAGS + k, b1);
-            self.ram.write_u8(SPRITE_FLAGS2 + k, b0);
+            self.ram.set_sprite_oam_flags(k, b1);
+            self.ram.set_sprite_flags2(k, b0);
         }
         self.ram
             .write_u16(OAM_CUR_PTR, self.ram.read_u16(OAM_CUR_PTR).wrapping_add(8));
@@ -5546,35 +5324,34 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         );
         let i = (self
             .ram
-            .read_u8(SPRITE_SUBTYPE2 + k)
-            .wrapping_add(self.ram.read_u8(SPRITE_D + k))) as usize
+            .sprite(k)
+            .subtype2()
+            .wrapping_add(self.ram.sprite(k).scratch_d())) as usize
             * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
     }
 
     pub fn sprite_c7_pokey(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_C + k) != 0 {
+        if self.ram.sprite(k).scratch_c() != 0 {
             self.runtime.draw_single_large(self.ram, k);
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
             self.runtime.check_damage_to_and_from_link(self.ram, k);
             self.runtime.move_xyz(self.ram, k);
-            self.ram.write_u8(
-                SPRITE_Z_VEL + k,
-                self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-            );
-            if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                self.ram.write_u8(SPRITE_Z_VEL + k, 16);
-                self.ram.write_u8(SPRITE_Z + k, 0);
+            self.ram
+                .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+            if (self.ram.sprite(k).z() as i8) < 0 {
+                self.ram.set_sprite_velocity_z(k, 16);
+                self.ram.set_sprite_z(k, 0);
             }
             if self.runtime.bounce_from_tile_collision(self.ram, k) {
                 self.runtime.sfx2_with_pan(self.ram, k, 0x21);
             }
-            if self.ram.read_u8(SPRITE_G + k) >= 3 {
-                self.ram.write_u8(SPRITE_STATE + k, 6);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 10);
-                self.ram.write_u8(SPRITE_FLAGS5 + k, 0);
+            if self.ram.sprite(k).scratch_g() >= 3 {
+                self.ram.set_sprite_state(k, 6);
+                self.ram.set_sprite_main_delay(k, 10);
+                self.ram.set_sprite_flags5(k, 0);
                 self.runtime.sfx2_with_pan(self.ram, k, 0x1e);
             }
             return;
@@ -5583,67 +5360,62 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if self.ram.read_u8(SPRITE_A + k) != 0 && self.ram.read_u8(SPRITE_F + k) == 15 {
-            self.ram.write_u8(SPRITE_F + k, 6);
-            self.ram.write_u8(
-                SPRITE_Z + k,
+        if self.ram.sprite(k).scratch_a() != 0 && self.ram.sprite(k).scratch_f() == 15 {
+            self.ram.set_sprite_scratch_f(k, 6);
+            self.ram.set_sprite_z(
+                k,
                 self.ram
-                    .read_u8(SPRITE_Z + k)
-                    .wrapping_add(self.ram.read_u8(SPRITE_B + k)),
+                    .sprite(k)
+                    .z()
+                    .wrapping_add(self.ram.sprite(k).scratch_b()),
             );
-            let a = self.ram.read_u8(SPRITE_A + k).wrapping_sub(1);
-            self.ram.write_u8(SPRITE_A + k, a);
+            let a = self.ram.sprite(k).scratch_a().wrapping_sub(1);
+            self.ram.set_sprite_scratch_a(k, a);
             if a == 0 {
-                self.ram.write_u8(SPRITE_HEALTH + k, 17);
+                self.ram.set_sprite_health(k, 17);
             }
-            let xv = self.ram.read_u8(SPRITE_X_VEL + k);
-            let yv = self.ram.read_u8(SPRITE_Y_VEL + k);
-            self.ram.write_u8(
-                SPRITE_X_VEL + k,
-                xv.wrapping_add(if (xv as i8) < 0 { 252 } else { 4 }),
-            );
-            self.ram.write_u8(
-                SPRITE_Y_VEL + k,
-                yv.wrapping_add(if (yv as i8) < 0 { 252 } else { 4 }),
-            );
+            let xv = self.ram.sprite(k).velocity_x();
+            let yv = self.ram.sprite(k).velocity_y();
+            self.ram
+                .set_sprite_velocity_x(k, xv.wrapping_add(if (xv as i8) < 0 { 252 } else { 4 }));
+            self.ram
+                .set_sprite_velocity_y(k, yv.wrapping_add(if (yv as i8) < 0 { 252 } else { 4 }));
             if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc7) {
                 self.runtime.set_spawned_coordinates(self.ram, j);
-                self.ram.write_u8(SPRITE_C + j, 1);
-                self.ram.write_u8(SPRITE_HEALTH + j, 1);
+                self.ram.set_sprite_scratch_c(j, 1);
+                self.ram.set_sprite_health(j, 1);
                 self.ram
-                    .write_u8(SPRITE_X_VEL + j, self.ram.read_u8(SPRITE_X_RECOIL + k));
+                    .set_sprite_velocity_x(j, self.ram.sprite(k).recoil_x());
                 self.ram
-                    .write_u8(SPRITE_Y_VEL + j, self.ram.read_u8(SPRITE_Y_RECOIL + k));
-                self.ram.write_u8(SPRITE_DEFL_BITS + j, 64);
+                    .set_sprite_velocity_y(j, self.ram.sprite(k).recoil_y());
+                self.ram.set_sprite_deflection_bits(j, 64);
             }
         }
         if self.runtime.return_if_recoiling(self.ram, k) {
             return;
         }
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 16);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_velocity_z(k, 16);
                 } else {
                     const B: [u8; 8] = [8, 7, 6, 5, 4, 5, 6, 7];
-                    self.ram.write_u8(
-                        SPRITE_B + k,
-                        B[(self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 1) as usize],
+                    self.ram.set_sprite_scratch_b(
+                        k,
+                        B[(self.ram.sprite(k).main_delay() >> 1) as usize],
                     );
                 }
             }
             1 => {
                 self.runtime.move_xyz(self.ram, k);
-                self.ram.write_u8(
-                    SPRITE_Z_VEL + k,
-                    self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-                );
-                if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                    self.ram.write_u8(SPRITE_Z + k, 0);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 15);
+                self.ram
+                    .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+                if (self.ram.sprite(k).z() as i8) < 0 {
+                    self.ram.set_sprite_z(k, 0);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 15);
                 }
                 self.runtime.bounce_from_tile_collision(self.ram, k);
             }
@@ -5655,8 +5427,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         let Some((x, mut y, flags)) = self.runtime.prep_oam_or_double_ret_wide(self.ram, k) else {
             return;
         };
-        let d = self.ram.read_u8(SPRITE_B + k);
-        let a = self.ram.read_u8(SPRITE_A + k);
+        let d = self.ram.sprite(k).scratch_b();
+        let a = self.ram.sprite(k).scratch_a();
         let oam = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4 + 3;
         for i in (0..=a).rev() {
             let ch =
@@ -5668,7 +5440,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     pub fn sprite_draw_moldorm_segment_c(&mut self, k: usize) {
-        self.ram.write_u8(SPRITE_GRAPHICS + k, 0);
+        self.ram.set_sprite_graphics(k, 0);
         self.ram.write_u16(
             OAM_CUR_PTR,
             self.ram.read_u16(OAM_CUR_PTR).wrapping_add(0x10),
@@ -5682,18 +5454,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
 
     pub fn moldorm_handle_tail(&mut self, k: usize) {
         self.sprite_draw_moldorm_tail(k);
-        if self.ram.read_u8(SPRITE_DELAY_AUX2 + k) == 0 {
-            self.ram.write_u8(SPRITE_A + k, 1);
-            self.ram.write_u8(SPRITE_FLAGS4 + k, 0);
-            self.ram.write_u8(SPRITE_DEFL_BITS + k, 0);
+        if self.ram.sprite(k).aux2_delay() == 0 {
+            self.ram.set_sprite_scratch_a(k, 1);
+            self.ram.set_sprite_flags4(k, 0);
+            self.ram.set_sprite_deflection_bits(k, 0);
             let x = self.sprite_x(k);
             let y = self.sprite_y(k);
             self.set_sprite_x(k, self.ram.read_u16(CUR_SPRITE_X));
             self.set_sprite_y(k, self.ram.read_u16(CUR_SPRITE_Y));
             let _ = self.runtime.check_damage_from_link(self.ram, k);
-            self.ram.write_u8(SPRITE_A + k, 0);
-            self.ram.write_u8(SPRITE_FLAGS4 + k, 9);
-            self.ram.write_u8(SPRITE_DEFL_BITS + k, 4);
+            self.ram.set_sprite_scratch_a(k, 0);
+            self.ram.set_sprite_flags4(k, 9);
+            self.ram.set_sprite_deflection_bits(k, 4);
             self.set_sprite_x(k, x);
             self.set_sprite_y(k, y);
         }
@@ -5706,11 +5478,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             OAM_EXT_CUR_PTR,
             self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(1),
         );
-        self.ram.write_u8(
-            SPRITE_GRAPHICS + k,
-            self.ram.read_u8(SPRITE_GRAPHICS + k).wrapping_add(1),
-        );
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, 13);
+        self.ram
+            .set_sprite_graphics(k, self.ram.sprite(k).graphics().wrapping_add(1));
+        self.ram.set_sprite_oam_flags(k, 13);
         self.runtime.giant_moldorm_draw_segment(self.ram, k, 0x30);
     }
 
@@ -5728,12 +5498,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const FL: [u8; 16] = [
             0, 0, 0, 0, 0x80, 0x80, 0x40, 0x40, 0x40, 0x40, 0xc0, 0xc0, 0, 0, 0x80, 0x80,
         ];
-        let r7 = if self.ram.read_u8(SPRITE_F + k) != 0 {
+        let r7 = if self.ram.sprite(k).scratch_f() != 0 {
             self.ram.read_u8(FRAME_COUNTER)
         } else {
             0
         };
-        let mut r6 = self.ram.read_u8(SPRITE_D + k).wrapping_sub(1);
+        let mut r6 = self.ram.sprite(k).scratch_d().wrapping_sub(1);
         let first = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4;
         for offset in 0..2 {
             let p = (r6 & 15) as usize;
@@ -5757,13 +5527,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.ram.read_u8(OVERLORD_X_LO + 4).wrapping_add(1),
         );
         self.helmasaur_king_reinitialize(k);
-        let mask = if self.ram.read_u8(SPRITE_ANIM_CLOCK + k) != 0 {
+        let mask = if self.ram.sprite(k).animation_clock() != 0 {
             0
         } else {
             1
         };
         if self.ram.read_u8(FRAME_COUNTER) & mask == 0 {
-            let j = self.ram.read_u8(SPRITE_D + k) & 1;
+            let j = self.ram.sprite(k).scratch_d() & 1;
             let v = self
                 .ram
                 .read_u8(OVERLORD_GEN2)
@@ -5771,7 +5541,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.ram.write_u8(OVERLORD_GEN2, v);
             if v == [16u8, 240][j as usize] {
                 self.ram
-                    .write_u8(SPRITE_D + k, self.ram.read_u8(SPRITE_D + k).wrapping_add(1));
+                    .set_sprite_scratch_d(k, self.ram.sprite(k).scratch_d().wrapping_add(1));
             }
             self.ram.write_u16(
                 OVERLORD_GEN1 + 5,
@@ -5780,7 +5550,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     .wrapping_add_signed(v as i8 as i16),
             );
         }
-        let a = self.ram.read_u8(SPRITE_ANIM_CLOCK + k);
+        let a = self.ram.sprite(k).animation_clock();
         if a == 0 {
             return;
         }
@@ -5788,39 +5558,39 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.runtime.sfx3_with_pan(self.ram, k, 6);
         }
         if a == 2 {
-            let j = self.ram.read_u8(SPRITE_HEAD_DIR + k);
+            let j = self.ram.sprite(k).head_direction();
             let v = self
                 .ram
                 .read_u16(OVERLORD_GEN2 + 1)
                 .wrapping_add_signed(if j != 0 { -4 } else { 4 });
             self.ram.write_u16(OVERLORD_GEN2 + 1, v);
             if v as u8 == if j != 0 { 132 } else { 124 } {
-                self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 3);
+                self.ram.set_sprite_animation_clock(k, 3);
             }
             self.ram.write_u8(
                 OVERLORD_GEN1 + 7,
                 self.ram.read_u8(OVERLORD_GEN1 + 7).wrapping_add(3),
             );
         } else if a == 3 {
-            let j = self.ram.read_u8(SPRITE_HEAD_DIR + k) ^ 1;
+            let j = self.ram.sprite(k).head_direction() ^ 1;
             let v = self
                 .ram
                 .read_u16(OVERLORD_GEN2 + 1)
                 .wrapping_add_signed(if j != 0 { -4 } else { 4 });
             self.ram.write_u16(OVERLORD_GEN2 + 1, v);
             if v == 0 {
-                self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 0);
+                self.ram.set_sprite_animation_clock(k, 0);
             }
             self.ram.write_u8(
                 OVERLORD_GEN1 + 7,
                 self.ram.read_u8(OVERLORD_GEN1 + 7).wrapping_sub(3),
             );
-        } else if self.ram.read_u8(OVERLORD_GEN2) | self.ram.read_u8(SPRITE_DELAY_AUX3 + k) == 0 {
+        } else if self.ram.read_u8(OVERLORD_GEN2) | self.ram.sprite(k).aux3_delay() == 0 {
             let hd = self.ram.read_u8(OVERLORD_GEN1 + 6) & 1;
-            self.ram.write_u8(SPRITE_HEAD_DIR + k, hd);
+            self.ram.set_sprite_head_direction(k, hd);
             let (r, _) = self.runtime.is_right_of_link(self.ram, k);
             if (r ^ 1) == hd {
-                self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 2);
+                self.ram.set_sprite_animation_clock(k, 2);
                 let p = self.runtime.calculate_sfx_pan(self.ram, k);
                 self.ram.write_u8(SOUND_EFFECT_2, p | 0x26);
             }
@@ -5910,7 +5680,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             OAM_EXT_CUR_PTR,
             self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(2),
         );
-        let c = self.ram.read_u8(SPRITE_C + k);
+        let c = self.ram.sprite(k).scratch_c();
         if c >= 3 {
             return;
         }
@@ -5958,14 +5728,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     fn helmasaur_correct_oam_entries(&mut self, k: usize, last: usize, size: u8) {
         let oam_ptr = usize::from(self.ram.read_u16(OAM_CUR_PTR));
         let ext_ptr = usize::from(self.ram.read_u16(OAM_EXT_CUR_PTR));
-        let sprite_x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_X_LO + k),
-            self.ram.read_u8(SPRITE_X_HI + k),
-        ]);
-        let sprite_y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_Y_LO + k),
-            self.ram.read_u8(SPRITE_Y_HI + k),
-        ]);
+        let sprite_x =
+            u16::from_le_bytes([self.ram.sprite(k).x_low(), self.ram.sprite(k).x_high()]);
+        let sprite_y =
+            u16::from_le_bytes([self.ram.sprite(k).y_low(), self.ram.sprite(k).y_high()]);
         let scroll_x = sprite_x.wrapping_sub(self.ram.read_u16(BG2HOFS_COPY2)) as u8;
         let scroll_y = sprite_y.wrapping_sub(self.ram.read_u16(BG2VOFS_COPY2)) as u8;
         for offset in 0..=last {
@@ -6001,7 +5767,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             0x20, 0x10,
         ];
         for i in 0..16 {
-            let j = i + if self.ram.read_u8(SPRITE_ANIM_CLOCK + k) != 0 {
+            let j = i + if self.ram.sprite(k).animation_clock() != 0 {
                 16
             } else {
                 0
@@ -6055,14 +5821,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         // The C draw loop writes through a local OAM pointer. It leaves the
         // global cursors at the tail's start for the following correction and
         // the eyes, mask, body and legs that use fixed offsets from it.
-        let sprite_x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_X_LO + k),
-            self.ram.read_u8(SPRITE_X_HI + k),
-        ]);
-        let sprite_y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_Y_LO + k),
-            self.ram.read_u8(SPRITE_Y_HI + k),
-        ]);
+        let sprite_x =
+            u16::from_le_bytes([self.ram.sprite(k).x_low(), self.ram.sprite(k).x_high()]);
+        let sprite_y =
+            u16::from_le_bytes([self.ram.sprite(k).y_low(), self.ram.sprite(k).y_high()]);
         let scroll_x = sprite_x.wrapping_sub(self.ram.read_u16(BG2HOFS_COPY2)) as u8;
         let scroll_y = sprite_y.wrapping_sub(self.ram.read_u16(BG2VOFS_COPY2)) as u8;
         for offset in 0..=16usize {
@@ -6129,8 +5891,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (0, 0, 0x406e, 2),
         ];
         const O: [usize; 11] = [0, 4, 8, 12, 16, 20, 24, 26, 28, 30, 32];
-        let d = self.ram.read_u8(SPRITE_D + k) as usize;
-        if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) != 0 && d != 3 {
+        let d = self.ram.sprite(k).scratch_d() as usize;
+        if self.ram.sprite(k).aux1_delay() != 0 && d != 3 {
             self.runtime.draw_multiple(self.ram, k, &D2[d..d + 1]);
         }
         self.ram
@@ -6139,53 +5901,47 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             OAM_EXT_CUR_PTR,
             self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(1),
         );
-        let g = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize;
+        let g = self.ram.sprite(k).graphics() as usize;
         self.runtime.draw_multiple(self.ram, k, &D[O[g]..O[g + 1]]);
-        self.ram.write_u8(
-            SPRITE_FLAGS2 + k,
-            self.ram.read_u8(SPRITE_FLAGS2 + k).wrapping_sub(1),
-        );
+        self.ram
+            .set_sprite_flags2(k, self.ram.sprite(k).flags2().wrapping_sub(1));
         self.runtime.draw_shadow(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_FLAGS2 + k,
-            self.ram.read_u8(SPRITE_FLAGS2 + k).wrapping_add(1),
-        );
+        self.ram
+            .set_sprite_flags2(k, self.ram.sprite(k).flags2().wrapping_add(1));
     }
 
     pub fn vitreous_spawn_smaller_eyes(&mut self, k: usize) {
         const X: [i8; 13] = [8, 22, -8, -22, 0, 14, 19, 33, 26, -14, -19, -33, -26];
         const Y: [i8; 13] = [-8, -12, -8, -12, 0, -20, -1, -12, -24, -20, -1, -12, -24];
         const G: [u8; 13] = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        self.ram.write_u8(SPRITE_G + k, 9);
-        self.ram.write_u8(SPRITE_GRAPHICS + k, 4);
+        self.ram.set_sprite_scratch_g(k, 9);
+        self.ram.set_sprite_graphics(k, 4);
         let bx = self.sprite_x(k);
         let by = self.sprite_y(k);
         let _ = self.runtime.spawn_dynamic_ex(self.ram, k, 4, 13);
         for j in (1usize..=13).rev() {
-            self.ram.write_u8(SPRITE_STATE + j, 9);
-            self.ram.write_u8(SPRITE_TYPE + j, 0xbe);
+            self.ram.set_sprite_state(j, 9);
+            self.ram.set_sprite_kind(j, 0xbe);
             self.runtime.load_properties(self.ram, j);
-            self.ram.write_u8(SPRITE_FLOOR + j, 0);
+            self.ram.set_sprite_floor(j, 0);
             self.set_sprite_x(j, bx.wrapping_add_signed(X[j - 1] as i16));
             self.set_sprite_y(j, by.wrapping_add_signed(Y[j - 1] as i16 + 32));
+            self.ram.set_sprite_scratch_a(j, self.ram.sprite(j).x_low());
             self.ram
-                .write_u8(SPRITE_A + j, self.ram.read_u8(SPRITE_X_LO + j));
+                .set_sprite_scratch_b(j, self.ram.sprite(j).x_high());
+            self.ram.set_sprite_scratch_c(j, self.ram.sprite(j).y_low());
             self.ram
-                .write_u8(SPRITE_B + j, self.ram.read_u8(SPRITE_X_HI + j));
-            self.ram
-                .write_u8(SPRITE_C + j, self.ram.read_u8(SPRITE_Y_LO + j));
-            self.ram
-                .write_u8(SPRITE_D + j, self.ram.read_u8(SPRITE_Y_HI + j));
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, G[j - 1]);
-            self.ram.write_u8(SPRITE_GRAPHICS + j, G[j - 1]);
+                .set_sprite_scratch_d(j, self.ram.sprite(j).y_high());
+            self.ram.set_sprite_ignore_projectile(j, G[j - 1]);
+            self.ram.set_sprite_graphics(j, G[j - 1]);
             let r = self.runtime.random_number(self.ram);
             self.ram
-                .write_u8(SPRITE_SUBTYPE2 + j, (((j - 1) * 8) as u8).wrapping_add(r));
+                .set_sprite_subtype2(j, (((j - 1) * 8) as u8).wrapping_add(r));
         }
     }
 
     pub fn sprite_c0_catfish(&mut self, k: usize) {
-        let a = self.ram.read_u8(SPRITE_A + k);
+        let a = self.ram.sprite(k).scratch_a();
         if a & 0x80 != 0 {
             self.sprite_catfish_splash_of_water(k)
         } else if a == 0 {
@@ -6196,18 +5952,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     pub fn sprite_catfish_quake_medallion(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_Z + k) == 0 {
+        if self.ram.sprite(k).z() == 0 {
             self.runtime.draw_water_ripple_with_oam_adjust(self.ram, k);
             if self.ram.read_u8(SUBMODULE_INDEX) == 0
                 && self.runtime.check_damage_to_link_same_layer(self.ram, k)
             {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
                 self.ram.write_u8(ITEM_RECEIPT_METHOD, 0);
                 self.runtime
-                    .link_receive_item(self.ram, self.ram.read_u8(SPRITE_A + k), 0);
+                    .link_receive_item(self.ram, self.ram.sprite(k).scratch_a(), 0);
             }
         }
-        if self.ram.read_u8(SPRITE_DELAY_AUX3 + k) != 0 {
+        if self.ram.sprite(k).aux3_delay() != 0 {
             self.runtime.oam_allocate_region_c(self.ram, 8);
         }
         self.runtime.draw_single_large(self.ram, k);
@@ -6215,33 +5971,27 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         self.runtime.move_xyz(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_Z_VEL + k,
-            self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-        );
-        if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-            self.ram.write_u8(SPRITE_Z + k, 0);
-            self.ram.write_u8(
-                SPRITE_X_VEL + k,
-                ((self.ram.read_u8(SPRITE_X_VEL + k) as i8) >> 1) as u8,
-            );
-            self.ram.write_u8(
-                SPRITE_Y_VEL + k,
-                ((self.ram.read_u8(SPRITE_Y_VEL + k) as i8) >> 1) as u8,
-            );
-            let j = self.ram.read_u8(SPRITE_AI_STATE + k);
+        self.ram
+            .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+        if (self.ram.sprite(k).z() as i8) < 0 {
+            self.ram.set_sprite_z(k, 0);
+            self.ram
+                .set_sprite_velocity_x(k, ((self.ram.sprite(k).velocity_x() as i8) >> 1) as u8);
+            self.ram
+                .set_sprite_velocity_y(k, ((self.ram.sprite(k).velocity_y() as i8) >> 1) as u8);
+            let j = self.ram.sprite(k).ai_state();
             if j == 4 {
-                self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                self.ram.write_u8(SPRITE_Z_VEL + k, 0);
+                self.ram.set_sprite_velocity_x(k, 0);
+                self.ram.set_sprite_velocity_y(k, 0);
+                self.ram.set_sprite_velocity_z(k, 0);
             } else {
-                self.ram.write_u8(SPRITE_AI_STATE + k, j + 1);
+                self.ram.set_sprite_ai_state(k, j + 1);
                 self.ram
-                    .write_u8(SPRITE_Z_VEL + k, [0x20, 0x10, 8, 0][j as usize]);
+                    .set_sprite_velocity_z(k, [0x20, 0x10, 8, 0][j as usize]);
                 if j < 2
                     && let Some(n) = self.sprite_spawn_water_splash(k)
                 {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + n, 16);
+                    self.ram.set_sprite_main_delay(n, 16);
                 }
             }
         }
@@ -6252,11 +6002,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
                 for j in (0usize..16).rev() {
                     if j != k
-                        && self.ram.read_u8(SPRITE_STATE + j) == 3
+                        && self.ram.sprite(j).state() == 3
                         && self
                             .ram
                             .read_u16(CUR_SPRITE_X)
@@ -6270,21 +6020,21 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                             .wrapping_add(32)
                             < 64
                     {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
+                        self.ram.set_sprite_ai_state(k, 1);
+                        self.ram.set_sprite_main_delay(k, 255);
                         return;
                     }
                 }
             }
             1 => {
-                let j = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let j = self.ram.sprite(k).main_delay();
                 if j == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_main_delay(k, 255);
                     self.ram.write_u16(BG1_X_OFFSET, 0);
                     self.ram.write_u8(SOUND_EFFECT_AMBIENT, 5);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 48);
-                    self.ram.write_u8(SPRITE_X_VEL + k, 0);
+                    self.ram.set_sprite_velocity_z(k, 48);
+                    self.ram.set_sprite_velocity_x(k, 0);
                     self.catfish_spawn_plop(k);
                 } else if j < 0xc0 {
                     if j == 0xbf {
@@ -6297,26 +6047,26 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             2 => {
                 const G: [u8; 16] = [1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 0, 0, 0, 0];
-                let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+                let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                self.ram.set_sprite_subtype2(k, s);
                 self.runtime.move_xyz(self.ram, k);
-                let z = self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2);
-                self.ram.write_u8(SPRITE_Z_VEL + k, z);
+                let z = self.ram.sprite(k).velocity_z().wrapping_sub(2);
+                self.ram.set_sprite_velocity_z(k, z);
                 if z == (-48i8) as u8 {
                     self.catfish_spawn_plop(k);
                 }
-                if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                    self.ram.write_u8(SPRITE_Z + k, 0);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
+                if (self.ram.sprite(k).z() as i8) < 0 {
+                    self.ram.set_sprite_z(k, 0);
+                    self.ram.set_sprite_ai_state(k, 3);
+                    self.ram.set_sprite_main_delay(k, 255);
                 }
-                self.ram.write_u8(SPRITE_GRAPHICS + k, G[(s >> 2) as usize]);
+                self.ram.set_sprite_graphics(k, G[(s >> 2) as usize]);
             }
             3 => {
                 const G: [u8; 20] = [0, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6];
-                let j = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let j = self.ram.sprite(k).main_delay();
                 if j == 0 {
-                    self.ram.write_u8(SPRITE_STATE + k, 0);
+                    self.ram.set_sprite_state(k, 0);
                 } else {
                     if j == 160 || j == 252 || j == 4 {
                         self.sprite_spawn_water_splash(k);
@@ -6346,7 +6096,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         }
                     }
                     if j < 160 {
-                        self.ram.write_u8(SPRITE_GRAPHICS + k, G[(j >> 3) as usize]);
+                        self.ram.set_sprite_graphics(k, G[(j >> 3) as usize]);
                     }
                 }
             }
@@ -6381,24 +6131,22 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-7, 7, 0x01e4, 2),
             (7, 7, 0x41e4, 2),
         ];
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 2 && self.ram.read_u8(SPRITE_STATE + k) == 9 {
+        if self.ram.sprite(k).ai_state() == 2 && self.ram.sprite(k).state() == 9 {
             self.ram.write_u16(OAM_CUR_PTR, 0x800);
             self.ram.write_u16(OAM_EXT_CUR_PTR, 0xa20);
         }
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 4;
+        let i = self.ram.sprite(k).graphics() as usize * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 2 {
-            self.ram.write_u8(
-                SPRITE_OBJ_PRIO + k,
-                self.ram.read_u8(SPRITE_OBJ_PRIO + k) & !0xe,
-            );
+        if self.ram.sprite(k).ai_state() == 2 {
+            self.ram
+                .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() & !0xe);
             self.sprite_draw_large_shadow2(k);
         }
     }
 
     pub fn sprite_bd_vitreous(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) != 0 {
-            self.ram.write_u8(SPRITE_GRAPHICS + k, 3);
+        if self.ram.sprite(k).aux4_delay() != 0 {
+            self.ram.set_sprite_graphics(k, 3);
         }
         self.vitreous_draw(k);
         if self.runtime.return_if_inactive(self.ram, k) {
@@ -6406,34 +6154,32 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
         self.vitreous_set_minions_forth(k);
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
                 self.ram.write_u8(BYTE_7E0FF8, 0);
-                self.ram.write_u8(SPRITE_F + k, 0);
+                self.ram.set_sprite_scratch_f(k, 0);
                 self.ram
-                    .write_u8(SPRITE_FLAGS3 + k, self.ram.read_u8(SPRITE_FLAGS3 + k) | 64);
+                    .set_sprite_flags3(k, self.ram.sprite(k).flags3() | 64);
                 if self.ram.read_u8(FRAME_COUNTER) & 1 == 0 {
-                    let a = self.ram.read_u8(SPRITE_A + k).wrapping_sub(1);
-                    self.ram.write_u8(SPRITE_A + k, a);
+                    let a = self.ram.sprite(k).scratch_a().wrapping_sub(1);
+                    self.ram.set_sprite_scratch_a(k, a);
                     if a == 0 {
-                        self.ram.write_u8(
-                            SPRITE_FLAGS3 + k,
-                            self.ram.read_u8(SPRITE_FLAGS3 + k) & !0x40,
-                        );
-                        self.ram.write_u8(SPRITE_DELAY_AUX4 + k, 16);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
-                        if self.ram.read_u8(SPRITE_G + k) == 0 {
-                            self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 64);
-                            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + k, 0);
+                        self.ram
+                            .set_sprite_flags3(k, self.ram.sprite(k).flags3() & !0x40);
+                        self.ram.set_sprite_aux4_delay(k, 16);
+                        self.ram.set_sprite_ai_state(k, 1);
+                        self.ram.set_sprite_main_delay(k, 128);
+                        if self.ram.sprite(k).scratch_g() == 0 {
+                            self.ram.set_sprite_ai_state(k, 2);
+                            self.ram.set_sprite_main_delay(k, 64);
+                            self.ram.set_sprite_ignore_projectile(k, 0);
                             self.ram.write_u8(SOUND_EFFECT_1, 0x35);
                             return;
                         }
                     }
                 }
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
+                self.ram.set_sprite_graphics(
+                    k,
                     if self.ram.read_u8(FRAME_COUNTER) & 0x30 != 0 {
                         4
                     } else {
@@ -6442,14 +6188,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 );
             }
             1 => {
-                self.ram.write_u8(SPRITE_F + k, 0);
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                self.ram.set_sprite_scratch_f(k, 0);
+                let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
                     const A: [u8; 10] = [0x20, 0x20, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0, 0];
-                    self.ram.write_u8(SPRITE_DELAY_AUX4 + k, 16);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+                    self.ram.set_sprite_aux4_delay(k, 16);
+                    self.ram.set_sprite_ai_state(k, 0);
                     self.ram
-                        .write_u8(SPRITE_A + k, A[self.ram.read_u8(SPRITE_G + k) as usize]);
+                        .set_sprite_scratch_a(k, A[self.ram.sprite(k).scratch_g() as usize]);
                 } else {
                     self.vitreous_animate(k, d);
                 }
@@ -6459,21 +6205,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 if self.runtime.return_if_recoiling(self.ram, k) {
                     return;
                 }
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) != 0 {
-                    let v =
-                        [8u8, 248][((self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 2) >> 1) as usize];
-                    self.ram.write_u8(SPRITE_X_VEL + k, v);
+                if self.ram.sprite(k).main_delay() != 0 {
+                    let v = [8u8, 248][((self.ram.sprite(k).main_delay() & 2) >> 1) as usize];
+                    self.ram.set_sprite_velocity_x(k, v);
                     self.runtime.move_x(self.ram, k);
                 } else {
                     self.runtime.move_xyz(self.ram, k);
                     self.runtime.check_tile_collision(self.ram, k);
-                    self.ram.write_u8(
-                        SPRITE_Z_VEL + k,
-                        self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-                    );
-                    if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                        self.ram.write_u8(SPRITE_Z + k, 0);
-                        self.ram.write_u8(SPRITE_Z_VEL + k, 32);
+                    self.ram
+                        .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+                    if (self.ram.sprite(k).z() as i8) < 0 {
+                        self.ram.set_sprite_z(k, 0);
+                        self.ram.set_sprite_velocity_z(k, 32);
                         self.runtime.apply_speed_towards_link(self.ram, k, 16);
                         self.runtime.sfx2_with_pan(self.ram, k, 0x21);
                     }
@@ -6486,7 +6229,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn sprite_be_vitreous_eye(&mut self, k: usize) {
         const DX: [i8; 4] = [1, 0, -1, 0];
         const DY: [i8; 4] = [0, 1, 0, -1];
-        let q = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) >> 4 & 3) as usize;
+        let q = (self.ram.sprite(k).subtype2() >> 4 & 3) as usize;
         self.ram.write_u16(
             CUR_SPRITE_X,
             self.ram
@@ -6503,94 +6246,84 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_SUBTYPE2 + k,
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1),
-        );
-        if self.ram.read_u8(SPRITE_GRAPHICS + k) != 0 {
+        self.ram
+            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(1));
+        if self.ram.sprite(k).graphics() != 0 {
             return;
         }
         let _ = self.runtime.check_damage_from_link(self.ram, k);
         let _ = self.runtime.check_damage_to_link(self.ram, k);
-        if self.ram.read_u8(SPRITE_F + k) == 14 {
-            self.ram.write_u8(SPRITE_F + k, 5);
+        if self.ram.sprite(k).scratch_f() == 14 {
+            self.ram.set_sprite_scratch_f(k, 5);
         }
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
                 let [xl, xh] = self.ram.read_u16(LINK_X).to_le_bytes();
                 let [yl, yh] = self.ram.read_u16(LINK_Y).to_le_bytes();
-                self.ram.write_u8(SPRITE_G + k, xl);
-                self.ram.write_u8(SPRITE_HEAD_DIR + k, xh);
-                self.ram.write_u8(SPRITE_ANIM_CLOCK + k, yl);
-                self.ram.write_u8(SPRITE_SUBTYPE + k, yh);
+                self.ram.set_sprite_scratch_g(k, xl);
+                self.ram.set_sprite_head_direction(k, xh);
+                self.ram.set_sprite_animation_clock(k, yl);
+                self.ram.set_sprite_subtype(k, yh);
             }
             1 | 2 => {
                 if self.runtime.return_if_recoiling(self.ram, k) {
                     return;
                 }
-                let returning = self.ram.read_u8(SPRITE_AI_STATE + k) == 2;
+                let returning = self.ram.sprite(k).ai_state() == 2;
                 if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 1 == 0 {
                     let (x, y) = if returning {
                         (
                             u16::from_le_bytes([
-                                self.ram.read_u8(SPRITE_A + k),
-                                self.ram.read_u8(SPRITE_B + k),
+                                self.ram.sprite(k).scratch_a(),
+                                self.ram.sprite(k).scratch_b(),
                             ]),
                             u16::from_le_bytes([
-                                self.ram.read_u8(SPRITE_C + k),
-                                self.ram.read_u8(SPRITE_D + k),
+                                self.ram.sprite(k).scratch_c(),
+                                self.ram.sprite(k).scratch_d(),
                             ]),
                         )
                     } else {
                         (
                             u16::from_le_bytes([
-                                self.ram.read_u8(SPRITE_G + k),
-                                self.ram.read_u8(SPRITE_HEAD_DIR + k),
+                                self.ram.sprite(k).scratch_g(),
+                                self.ram.sprite(k).head_direction(),
                             ]),
                             u16::from_le_bytes([
-                                self.ram.read_u8(SPRITE_ANIM_CLOCK + k),
-                                self.ram.read_u8(SPRITE_SUBTYPE + k),
+                                self.ram.sprite(k).animation_clock(),
+                                self.ram.sprite(k).subtype(),
                             ]),
                         )
                     };
                     let (xv, yv) = self
                         .runtime
                         .project_speed_towards_location(self.ram, k, x, y, 16);
-                    self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, yv);
+                    self.ram.set_sprite_velocity_x(k, xv);
+                    self.ram.set_sprite_velocity_y(k, yv);
                 }
                 self.runtime.move_xy(self.ram, k);
                 let tx = if returning {
-                    self.ram.read_u8(SPRITE_A + k)
+                    self.ram.sprite(k).scratch_a()
                 } else {
-                    self.ram.read_u8(SPRITE_G + k)
+                    self.ram.sprite(k).scratch_g()
                 };
                 let ty = if returning {
-                    self.ram.read_u8(SPRITE_C + k)
+                    self.ram.sprite(k).scratch_c()
                 } else {
-                    self.ram.read_u8(SPRITE_ANIM_CLOCK + k)
+                    self.ram.sprite(k).animation_clock()
                 };
-                if tx
-                    .wrapping_sub(self.ram.read_u8(SPRITE_X_LO + k))
-                    .wrapping_add(4)
-                    < 8
-                    && ty
-                        .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k))
-                        .wrapping_add(4)
-                        < 8
+                if tx.wrapping_sub(self.ram.sprite(k).x_low()).wrapping_add(4) < 8
+                    && ty.wrapping_sub(self.ram.sprite(k).y_low()).wrapping_add(4) < 8
                 {
                     if returning {
+                        self.ram.set_sprite_x_low(k, self.ram.sprite(k).scratch_a());
                         self.ram
-                            .write_u8(SPRITE_X_LO + k, self.ram.read_u8(SPRITE_A + k));
+                            .set_sprite_x_high(k, self.ram.sprite(k).scratch_b());
+                        self.ram.set_sprite_y_low(k, self.ram.sprite(k).scratch_c());
                         self.ram
-                            .write_u8(SPRITE_X_HI + k, self.ram.read_u8(SPRITE_B + k));
-                        self.ram
-                            .write_u8(SPRITE_Y_LO + k, self.ram.read_u8(SPRITE_C + k));
-                        self.ram
-                            .write_u8(SPRITE_Y_HI + k, self.ram.read_u8(SPRITE_D + k));
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+                            .set_sprite_y_high(k, self.ram.sprite(k).scratch_d());
+                        self.ram.set_sprite_ai_state(k, 0);
                     } else {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                        self.ram.set_sprite_ai_state(k, 2);
                     }
                 }
             }
@@ -6605,15 +6338,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
         self.runtime.behave_as_barrier(self.ram, k);
         self.runtime.move_xy(self.ram, k);
-        self.ram.write_u8(SPRITE_X_VEL + k, 0);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        self.ram.set_sprite_velocity_x(k, 0);
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_Y_LO + k).wrapping_add(7) < self.ram.read_u8(LINK_Y)
+                if self.ram.sprite(k).y_low().wrapping_add(7) < self.ram.read_u8(LINK_Y)
                     && self.runtime.direction_to_face_link(self.ram, k) == 2
                 {
                     if self.ram.read_u8(FOLLOWER_INDICATOR) == 0 {
                         if self.runtime.show_solicited_message(self.ram, k, 0x187) & 0x100 != 0 {
-                            self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                            self.ram.set_sprite_ai_state(k, 1);
                         }
                     } else {
                         self.runtime.show_solicited_message(self.ram, k, 0x18c);
@@ -6627,34 +6360,34 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     self.ram
                         .write_u16(LINK_RUPEES_GOAL, self.ram.read_u16(LINK_RUPEES_GOAL) - 80);
                     self.runtime.show_message_unconditional(self.ram, 0x188);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 80);
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_graphics(k, 1);
+                    self.ram.set_sprite_main_delay(k, 80);
                     self.ram.write_u8(BEAMOS_X_HI, 0);
                     self.ram.write_u8(BEAMOS_X_HI + 1, 0);
-                    self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 5);
+                    self.ram.set_sprite_aux1_delay(k, 5);
                     self.runtime.initialize_secondary_item_minigame(self.ram, 1);
                     self.ram.write_u8(MUSIC_CONTROL, 14);
                 } else {
                     self.runtime.show_message_unconditional(self.ram, 0x189);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+                    self.ram.set_sprite_ai_state(k, 0);
                 }
             }
             2 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, 1);
-                } else if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0 {
-                    let g = self.ram.read_u8(SPRITE_GRAPHICS + k) ^ 3;
-                    self.ram.write_u8(SPRITE_GRAPHICS + k, g);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 3);
+                    self.ram.set_sprite_graphics(k, 1);
+                } else if self.ram.sprite(k).aux1_delay() == 0 {
+                    let g = self.ram.sprite(k).graphics() ^ 3;
+                    self.ram.set_sprite_graphics(k, g);
                     if g & 1 != 0 {
-                        self.ram.write_u8(SPRITE_X_VEL + k, (-16i8) as u8);
+                        self.ram.set_sprite_velocity_x(k, (-16i8) as u8);
                     }
-                    self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 5);
+                    self.ram.set_sprite_aux1_delay(k, 5);
                 }
             }
             3 => {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 4);
+                self.ram.set_sprite_ai_state(k, 4);
                 self.ram.write_u8(SUPER_BOMB_INDICATOR_UNK1, 0);
                 self.ram.write_u8(SUPER_BOMB_INDICATOR_UNK2, 30);
             }
@@ -6665,7 +6398,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     return;
                 }
                 self.ram.write_u8(MUSIC_CONTROL, 9);
-                self.ram.write_u8(SPRITE_AI_STATE + k, 5);
+                self.ram.set_sprite_ai_state(k, 5);
                 self.ram.write_u8(IS_ARCHER_OR_SHOVEL_GAME, 0);
                 self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x18a);
                 self.runtime.show_message_minimal(self.ram);
@@ -6696,88 +6429,86 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    let c = self.ram.read_u8(SPRITE_C + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_C + k, c);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 1);
+                    let c = self.ram.sprite(k).scratch_c().wrapping_add(1);
+                    self.ram.set_sprite_scratch_c(k, c);
                     let j = if c == 4 {
-                        self.ram.write_u8(SPRITE_C + k, 0);
+                        self.ram.set_sprite_scratch_c(k, 0);
                         self.runtime.direction_to_face_link(self.ram, k)
                     } else {
                         self.runtime.random_number(self.ram) & 3
                     };
                     self.ram
-                        .write_u8(SPRITE_X_VEL + k, [16u8, 240, 0, 0][j as usize]);
+                        .set_sprite_velocity_x(k, [16u8, 240, 0, 0][j as usize]);
                     self.ram
-                        .write_u8(SPRITE_Y_VEL + k, [0u8, 0, 16, 240][j as usize]);
+                        .set_sprite_velocity_y(k, [0u8, 0, 16, 240][j as usize]);
                     let r = self.runtime.random_number(self.ram);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, (r & 7) + 19);
+                    self.ram.set_sprite_velocity_z(k, (r & 7) + 19);
                 }
-                let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-                self.ram.write_u8(SPRITE_GRAPHICS + k, s >> 3 & 1);
+                let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                self.ram.set_sprite_subtype2(k, s);
+                self.ram.set_sprite_graphics(k, s >> 3 & 1);
             }
             1 => {
                 self.runtime.move_xyz(self.ram, k);
                 self.runtime.check_tile_collision(self.ram, k);
-                self.ram.write_u8(
-                    SPRITE_Z_VEL + k,
-                    self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-                );
-                if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                    self.ram.write_u8(SPRITE_Z + k, 0);
-                    self.ram.write_u8(SPRITE_Z_VEL + k, 0);
+                self.ram
+                    .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+                if (self.ram.sprite(k).z() as i8) < 0 {
+                    self.ram.set_sprite_z(k, 0);
+                    self.ram.set_sprite_velocity_z(k, 0);
                     // Sprite_DirectionToFaceLink supplies the low-byte deltas
                     // used by C's proximity test.  Its Y delta includes the
                     // player's +8 origin adjustment and the sprite Z height.
                     // Calling the route also preserves tmp_counter.
                     let _ = self.runtime.direction_to_face_link(self.ram, k);
-                    let sprite_x = u16::from(self.ram.read_u8(SPRITE_X_LO + k))
-                        | (u16::from(self.ram.read_u8(SPRITE_X_HI + k)) << 8);
+                    let sprite_x = u16::from(self.ram.sprite(k).x_low())
+                        | (u16::from(self.ram.sprite(k).x_high()) << 8);
                     let dx = self.ram.read_u16(LINK_X).wrapping_sub(sprite_x) as u8;
                     let dy = self
                         .ram
                         .read_u8(LINK_Y)
                         .wrapping_add(8)
-                        .wrapping_add(self.ram.read_u8(SPRITE_Z + k))
-                        .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k));
+                        .wrapping_add(self.ram.sprite(k).z())
+                        .wrapping_sub(self.ram.sprite(k).y_low());
                     if dx.wrapping_add(48) < 96 && dy.wrapping_add(48) < 96 {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                        self.ram.set_sprite_ai_state(k, 2);
                         let (xv, yv) = self.runtime.project_speed_towards_link(self.ram, k, 31);
-                        self.ram.write_u8(
-                            SPRITE_D + k,
+                        self.ram.set_sprite_scratch_d(
+                            k,
                             self.runtime.convert_velocity_to_angle(xv, yv) >> 1,
                         );
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 95);
+                        self.ram.set_sprite_main_delay(k, 95);
                         return;
                     }
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 16);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 16);
                 }
-                let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-                self.ram.write_u8(SPRITE_GRAPHICS + k, s >> 3 & 1);
+                let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+                self.ram.set_sprite_subtype2(k, s);
+                self.ram.set_sprite_graphics(k, s >> 3 & 1);
             }
             2 => {
-                let mut j = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let mut j = self.ram.sprite(k).main_delay();
                 if j == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 16);
-                    self.ram.write_u8(SPRITE_A + k, 0);
-                    self.ram.write_u8(SPRITE_B + k, 0);
-                    self.ram.write_u8(SPRITE_G + k, 0);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 16);
+                    self.ram.set_sprite_scratch_a(k, 0);
+                    self.ram.set_sprite_scratch_b(k, 0);
+                    self.ram.set_sprite_scratch_g(k, 0);
                     return;
                 }
                 j >>= 2;
-                self.ram.write_u8(SPRITE_GRAPHICS + k, G[j as usize]);
-                let d = self.ram.read_u8(SPRITE_D + k) as usize;
+                self.ram.set_sprite_graphics(k, G[j as usize]);
+                let d = self.ram.sprite(k).scratch_d() as usize;
                 let xo = O[j as usize + T0[d]];
                 let yo = O[j as usize + T1[d]];
-                self.ram.write_u8(SPRITE_A + k, xo as u8);
-                self.ram.write_u8(SPRITE_B + k, yo as u8);
-                if self.ram.read_u8(SPRITE_G + k) == 0
+                self.ram.set_sprite_scratch_a(k, xo as u8);
+                self.ram.set_sprite_scratch_b(k, yo as u8);
+                if self.ram.sprite(k).scratch_g() == 0
                     && self
                         .ram
                         .read_u16(CUR_SPRITE_X)
@@ -6792,13 +6523,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         .wrapping_sub(self.ram.read_u16(LINK_Y))
                         .wrapping_add(12)
                         < 32
-                    && self.ram.read_u8(SPRITE_DELAY_MAIN + k) < 46
+                    && self.ram.sprite(k).main_delay() < 46
                 {
                     let p = self.runtime.calculate_sfx_pan(self.ram, k);
                     self.ram.write_u8(SOUND_EFFECT_1, p | 0x26);
                     let item = (self.runtime.random_number(self.ram) & 3) + 1;
-                    self.ram.write_u8(SPRITE_E + k, item);
-                    self.ram.write_u8(SPRITE_G + k, item);
+                    self.ram.set_sprite_scratch_e(k, item);
+                    self.ram.set_sprite_scratch_g(k, item);
                     let addr = match item {
                         1 => LINK_ITEM_BOMBS,
                         2 => LINK_NUM_ARROWS,
@@ -6810,17 +6541,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         // draw uses the right palette, then removed wholesale from
                         // Link.  Level 3 is intentionally immune to theft.
                         let shield = self.ram.read_u8(addr);
-                        self.ram.write_u8(SPRITE_SUBTYPE + k, shield);
+                        self.ram.set_sprite_subtype(k, shield);
                         if shield != 0 && shield != 3 {
                             self.ram.write_u8(addr, 0);
                         } else {
-                            self.ram.write_u8(SPRITE_G + k, 0);
+                            self.ram.set_sprite_scratch_g(k, 0);
                         }
                     } else if self.ram.read_u8(addr) != 0 {
                         self.ram
                             .write_u8(addr, self.ram.read_u8(addr).wrapping_sub(1));
                     } else {
-                        self.ram.write_u8(SPRITE_G + k, 0);
+                        self.ram.set_sprite_scratch_g(k, 0);
                     }
                 }
             }
@@ -6830,27 +6561,23 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
 
     pub fn sprite_a8_green_zirro(&mut self, k: usize) {
         const G: [u8; 4] = [9, 10, 8, 7];
-        self.ram.write_u8(SPRITE_OBJ_PRIO + k, 0x30);
-        if self.ram.read_u8(SPRITE_A + k) != 0 {
-            if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
+        self.ram.set_sprite_object_priority(k, 0x30);
+        if self.ram.sprite(k).scratch_a() != 0 {
+            if self.ram.sprite(k).ai_state() == 0 {
                 self.runtime.draw_single_small(self.ram, k);
                 if self.runtime.return_if_inactive(self.ram, k) {
                     return;
                 }
                 self.runtime.move_xy(self.ram, k);
                 self.runtime.move_z(self.ram, k);
-                self.ram.write_u8(
-                    SPRITE_Z_VEL + k,
-                    self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-                );
-                if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                    self.ram.write_u8(SPRITE_Z + k, 0);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 19);
-                    self.ram.write_u8(
-                        SPRITE_FLAGS2 + k,
-                        self.ram.read_u8(SPRITE_FLAGS2 + k).wrapping_add(1),
-                    );
+                self.ram
+                    .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+                if (self.ram.sprite(k).z() as i8) < 0 {
+                    self.ram.set_sprite_z(k, 0);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 19);
+                    self.ram
+                        .set_sprite_flags2(k, self.ram.sprite(k).flags2().wrapping_add(1));
                     self.runtime.sfx2_with_pan(self.ram, k, 0xc);
                 }
             } else {
@@ -6859,45 +6586,40 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     return;
                 }
                 if self.ram.read_u8(FRAME_COUNTER) & 3 == 0 {
-                    self.ram.write_u8(
-                        SPRITE_DELAY_MAIN + k,
-                        self.ram.read_u8(SPRITE_DELAY_MAIN + k).wrapping_add(1),
-                    );
+                    self.ram
+                        .set_sprite_main_delay(k, self.ram.sprite(k).main_delay().wrapping_add(1));
                 }
                 let _ = self.runtime.check_damage_to_link(self.ram, k);
             }
             return;
         }
-        if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) != 0 {
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
-                G[self.ram.read_u8(SPRITE_D + k) as usize],
-            );
+        if self.ram.sprite(k).aux1_delay() != 0 {
+            self.ram
+                .set_sprite_graphics(k, G[self.ram.sprite(k).scratch_d() as usize]);
         }
-        self.ram.write_u8(
-            SPRITE_OBJ_PRIO + k,
-            self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 0x30,
-        );
+        self.ram
+            .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 0x30);
         self.runtime.bomber_draw(self.ram, k);
         if self.runtime.return_if_inactive(self.ram, k)
             || self.runtime.return_if_recoiling(self.ram, k)
         {
             return;
         }
-        if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 8 {
+        if self.ram.sprite(k).aux1_delay() == 8 {
             self.runtime.zirro_drop_bomb(self.ram, k);
         }
         self.runtime.check_damage_to_and_from_link(self.ram, k);
         if self.ram.read_u8(FRAME_COUNTER) & 1 == 0 {
-            let j = self.ram.read_u8(SPRITE_G + k) & 1;
+            let j = self.ram.sprite(k).scratch_g() & 1;
             let z = self
                 .ram
-                .read_u8(SPRITE_Z_VEL + k)
+                .sprite(k)
+                .velocity_z()
                 .wrapping_add(if j != 0 { 255 } else { 1 });
-            self.ram.write_u8(SPRITE_Z_VEL + k, z);
+            self.ram.set_sprite_velocity_z(k, z);
             if z == if j != 0 { 248 } else { 8 } {
                 self.ram
-                    .write_u8(SPRITE_G + k, self.ram.read_u8(SPRITE_G + k).wrapping_add(1));
+                    .set_sprite_scratch_g(k, self.ram.sprite(k).scratch_g().wrapping_add(1));
             }
         }
         self.runtime.move_z(self.ram, k);
@@ -6920,63 +6642,60 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 || (self.ram.read_u8(BUTTON_B_FRAMES).wrapping_sub(9) as i8) < 0)
         {
             let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 0x30);
-            self.ram.write_u8(SPRITE_X_VEL + k, 0u8.wrapping_sub(x));
-            self.ram.write_u8(SPRITE_Y_VEL + k, 0u8.wrapping_sub(y));
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 8);
-            self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+            self.ram.set_sprite_velocity_x(k, 0u8.wrapping_sub(x));
+            self.ram.set_sprite_velocity_y(k, 0u8.wrapping_sub(y));
+            self.ram.set_sprite_main_delay(k, 8);
+            self.ram.set_sprite_ai_state(k, 2);
         }
-        let state = self.ram.read_u8(SPRITE_AI_STATE + k);
+        let state = self.ram.sprite(k).ai_state();
         // The C switch reaches `set_dir` from every state-0/state-2 path and
         // only from the non-expired state-1 path.  In particular, state 1
         // transitioning back to state 0 must not advance `sprite_subtype2`.
         let mut set_dir = state != 1;
-        if state == 0 && self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+        if state == 0 && self.ram.sprite(k).main_delay() == 0 {
             const XV: [i8; 8] = [16, 12, 0, -12, -16, -12, 0, 12];
             const YV: [i8; 8] = [0, 12, 16, 12, 0, -12, -16, -12];
             const T: [u8; 4] = [0, 4, 2, 6];
-            self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-            let b = self.ram.read_u8(SPRITE_B + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_B + k, b);
+            self.ram.set_sprite_ai_state(k, 1);
+            let b = self.ram.sprite(k).scratch_b().wrapping_add(1);
+            self.ram.set_sprite_scratch_b(k, b);
             let i = if b == 3 {
-                self.ram.write_u8(SPRITE_B + k, 0);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+                self.ram.set_sprite_scratch_b(k, 0);
+                self.ram.set_sprite_main_delay(k, 48);
                 T[self.runtime.direction_to_face_link(self.ram, k) as usize]
             } else {
                 let r = self.runtime.random_number(self.ram);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, (r & 0x1f) | 0x20);
+                self.ram.set_sprite_main_delay(k, (r & 0x1f) | 0x20);
                 r & 7
             };
-            self.ram.write_u8(SPRITE_X_VEL + k, XV[i as usize] as u8);
-            self.ram.write_u8(SPRITE_Y_VEL + k, YV[i as usize] as u8);
+            self.ram.set_sprite_velocity_x(k, XV[i as usize] as u8);
+            self.ram.set_sprite_velocity_y(k, YV[i as usize] as u8);
         } else if state == 1 {
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+            if self.ram.sprite(k).main_delay() == 0 {
                 set_dir = false;
-                self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 10);
-                if self.ram.read_u8(SPRITE_TYPE + k) == 0xa8 {
-                    self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 16);
+                self.ram.set_sprite_ai_state(k, 0);
+                self.ram.set_sprite_main_delay(k, 10);
+                if self.ram.sprite(k).kind() == 0xa8 {
+                    self.ram.set_sprite_aux1_delay(k, 16);
                 }
             } else {
                 set_dir = true;
                 self.runtime.move_xy(self.ram, k);
             }
         } else if state == 2 {
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 0);
+            if self.ram.sprite(k).main_delay() == 0 {
+                self.ram.set_sprite_ai_state(k, 0);
             }
-            self.ram.write_u8(
-                SPRITE_SUBTYPE2 + k,
-                self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(2),
-            );
+            self.ram
+                .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(2));
             self.runtime.move_xy(self.ram, k);
         }
         if set_dir {
             let d = self.runtime.direction_to_face_link(self.ram, k);
-            self.ram.write_u8(SPRITE_D + k, d);
-            let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-            self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
-            self.ram
-                .write_u8(SPRITE_GRAPHICS + k, d << 1 | (s >> 3 & 1));
+            self.ram.set_sprite_scratch_d(k, d);
+            let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+            self.ram.set_sprite_subtype2(k, s);
+            self.ram.set_sprite_graphics(k, d << 1 | (s >> 3 & 1));
         }
     }
 
@@ -6992,19 +6711,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         };
         // The compact runtime return loses the high coordinate bits. C's
         // SetOamHelper0 needs them when the head straddles the screen edge.
-        let x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_X_LO + k),
-            self.ram.read_u8(SPRITE_X_HI + k),
-        ])
-        .wrapping_sub(self.ram.read_u16(BG2HOFS_COPY2));
-        let y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_Y_LO + k),
-            self.ram.read_u8(SPRITE_Y_HI + k),
-        ])
-        .wrapping_sub(self.ram.read_u16(BG2VOFS_COPY2))
-        .wrapping_sub(u16::from(self.ram.read_u8(SPRITE_Z + k)));
+        let x = u16::from_le_bytes([self.ram.sprite(k).x_low(), self.ram.sprite(k).x_high()])
+            .wrapping_sub(self.ram.read_u16(BG2HOFS_COPY2));
+        let y = u16::from_le_bytes([self.ram.sprite(k).y_low(), self.ram.sprite(k).y_high()])
+            .wrapping_sub(self.ram.read_u16(BG2VOFS_COPY2))
+            .wrapping_sub(u16::from(self.ram.sprite(k).z()));
         let oam_entry = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4;
-        let mut base = self.ram.read_u8(SPRITE_D + k).wrapping_sub(1);
+        let mut base = self.ram.sprite(k).scratch_d().wrapping_sub(1);
         for piece in 0..2 {
             crate::oam::set_helper0(
                 self.ram,
@@ -7023,18 +6736,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             OAM_EXT_CUR_PTR,
             self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(2),
         );
-        let j = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 0x1f) as usize + k * 32;
+        let j = (self.ram.sprite(k).subtype2() & 0x1f) as usize + k * 32;
         self.ram
-            .write_u8(MOLDORM_X_LO + j, self.ram.read_u8(SPRITE_X_LO + k));
+            .write_u8(MOLDORM_X_LO + j, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(MOLDORM_X_HI + j, self.ram.read_u8(SPRITE_X_HI + k));
+            .write_u8(MOLDORM_X_HI + j, self.ram.sprite(k).x_high());
         self.ram
-            .write_u8(MOLDORM_Y_LO + j, self.ram.read_u8(SPRITE_Y_LO + k));
+            .write_u8(MOLDORM_Y_LO + j, self.ram.sprite(k).y_low());
         self.ram
-            .write_u8(MOLDORM_Y_HI + j, self.ram.read_u8(SPRITE_Y_HI + k));
+            .write_u8(MOLDORM_Y_HI + j, self.ram.sprite(k).y_high());
         for (piece, i) in (0..3).rev().enumerate() {
-            let j = (self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(OFF[i]) & 0x1f) as usize
-                + k * 32;
+            let j = (self.ram.sprite(k).subtype2().wrapping_add(OFF[i]) & 0x1f) as usize + k * 32;
             let xx = u16::from_le_bytes([
                 self.ram.read_u8(MOLDORM_X_LO + j),
                 self.ram.read_u8(MOLDORM_X_HI + j),
@@ -7064,7 +6776,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         };
         let info = PrepOamCoordsRet { x, y, r4: 0, flags };
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, 11);
+        self.ram.set_sprite_oam_flags(k, 11);
         self.sprite_draw_moldorm_eyeballs(k, &info);
         self.ram
             .write_u16(OAM_CUR_PTR, self.ram.read_u16(OAM_CUR_PTR).wrapping_add(8));
@@ -7072,23 +6784,23 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             OAM_EXT_CUR_PTR,
             self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(2),
         );
-        let j = (self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 0x7f) as usize;
+        let j = (self.ram.sprite(k).subtype2() & 0x7f) as usize;
         self.ram
-            .write_u8(MOLDORM_X_LO + j, self.ram.read_u8(SPRITE_X_LO + k));
+            .write_u8(MOLDORM_X_LO + j, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(MOLDORM_X_HI + j, self.ram.read_u8(SPRITE_X_HI + k));
+            .write_u8(MOLDORM_X_HI + j, self.ram.sprite(k).x_high());
         self.ram
-            .write_u8(MOLDORM_Y_LO + j, self.ram.read_u8(SPRITE_Y_LO + k));
+            .write_u8(MOLDORM_Y_LO + j, self.ram.sprite(k).y_low());
         self.ram
-            .write_u8(MOLDORM_Y_HI + j, self.ram.read_u8(SPRITE_Y_HI + k));
+            .write_u8(MOLDORM_Y_HI + j, self.ram.sprite(k).y_high());
         self.sprite_draw_moldorm_head(k);
-        if self.ram.read_u8(SPRITE_B + k) < 4 {
+        if self.ram.sprite(k).scratch_b() < 4 {
             self.runtime.giant_moldorm_draw_segment_ab(self.ram, k, 16);
-            if self.ram.read_u8(SPRITE_B + k) < 3 {
+            if self.ram.sprite(k).scratch_b() < 3 {
                 self.runtime.giant_moldorm_draw_segment_ab(self.ram, k, 28);
-                if self.ram.read_u8(SPRITE_B + k) < 2 {
+                if self.ram.sprite(k).scratch_b() < 2 {
                     self.sprite_draw_moldorm_segment_c(k);
-                    if self.ram.read_u8(SPRITE_B + k) == 0 {
+                    if self.ram.sprite(k).scratch_b() == 0 {
                         self.moldorm_handle_tail(k);
                     }
                 }
@@ -7105,24 +6817,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-4, 0, 0x0100, 2),
             (4, 0, 0x0101, 2),
         ];
-        let j = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+        let j = self.ram.sprite(k).main_delay();
         if j != 0 {
             self.sprite_draw_altar_zelda_warp(k);
             if j == 1 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+                self.ram.set_sprite_state(k, 0);
             }
             if j < 12 {
                 return;
             }
         }
         self.runtime.oam_allocate_region_a(self.ram, 8);
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 2;
+        let i = self.ram.sprite(k).graphics() as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
         let info = PrepOamCoordsRet {
             x: self.ram.read_u16(CUR_SPRITE_X),
             y: self.ram.read_u16(CUR_SPRITE_Y),
             r4: 0,
-            flags: self.ram.read_u8(SPRITE_OAM_FLAGS + k),
+            flags: self.ram.sprite(k).oam_flags(),
         };
         self.altar_zelda_draw_body(k, &info);
     }
@@ -7130,7 +6842,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     pub fn altar_zelda_draw_body(&mut self, k: usize, info: &PrepOamCoordsRet) {
         const XO: [u8; 16] = [4, 4, 3, 3, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
         self.runtime.oam_allocate_region_a(self.ram, 8);
-        let z = self.ram.read_u8(SPRITE_Z + k).min(31);
+        let z = self.ram.sprite(k).z().min(31);
         let x = XO[(z >> 1) as usize];
         let y = self
             .sprite_y(k)
@@ -7170,12 +6882,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (0, 0, 0x05c6, 2),
         ];
         self.runtime.oam_allocate_region_a(self.ram, 8);
-        let i = (self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 2) as usize * 2;
+        let i = (self.ram.sprite(k).main_delay() >> 2) as usize * 2;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 2]);
     }
 
     pub fn helmasaur_king_check_mask_damage_from_hammer(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_C + k) >= 3
+        if self.ram.sprite(k).scratch_c() >= 3
             || self.ram.read_u8(LINK_ITEM_IN_HAND) & 10 == 0
             || self.ram.read_u8(PLAYER_OAM_Y_OFFSET) == 0x80
         {
@@ -7184,10 +6896,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if !self.runtime.helmasaur_hammer_overlap(self.ram, k) {
             return;
         }
-        self.ram.write_u8(
-            SPRITE_HEALTH + k,
-            self.ram.read_u8(SPRITE_HEALTH + k).wrapping_sub(1),
-        );
+        self.ram
+            .set_sprite_health(k, self.ram.sprite(k).health().wrapping_sub(1));
         self.ram.write_u8(SOUND_EFFECT_2, 0x21);
         let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 0x30);
         self.ram.write_u8(LINK_ACTUAL_VEL_Y, y);
@@ -7211,7 +6921,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 ANCILLA_Y_VEL + j,
                 ((0i8.wrapping_sub(self.ram.read_u8(ANCILLA_Y_VEL + j) as i8)) >> 1) as u8,
             );
-            self.ram.write_u8(SPRITE_DELAY_AUX4 + k, 32);
+            self.ram.set_sprite_aux4_delay(k, 32);
             self.ram.write_u8(REPULSESPARK_TIMER, 5);
             self.ram
                 .write_u8(REPULSESPARK_X_LO, self.ram.read_u8(ANCILLA_X_LO + j));
@@ -7231,13 +6941,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const XV: [i8; 4] = [0, -31, 0, 31];
         const YV: [i8; 4] = [31, 0, -31, 0];
         let j = (self.runtime.convert_velocity_to_angle(
-            self.ram.read_u8(SPRITE_X_VEL + k),
-            self.ram.read_u8(SPRITE_Y_VEL + k),
+            self.ram.sprite(k).velocity_x(),
+            self.ram.sprite(k).velocity_y(),
         ) >> 1) as usize;
         let gfx = G3[j];
-        self.ram.write_u8(
-            SPRITE_GRAPHICS + k,
-            if self.ram.read_u8(SPRITE_DELAY_AUX1 + k) != 0 {
+        self.ram.set_sprite_graphics(
+            k,
+            if self.ram.sprite(k).aux1_delay() != 0 {
                 G[gfx as usize]
             } else {
                 gfx
@@ -7247,18 +6957,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if (self.ram.read_u8(SPRITE_AI_STATE + k) as i8) < 0 {
-            let t = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
-            self.ram.write_u8(SPRITE_HIT_TIMER + k, t | 0xe0);
+        if (self.ram.sprite(k).ai_state() as i8) < 0 {
+            let t = self.ram.sprite(k).main_delay();
+            self.ram.set_sprite_hit_timer(k, t | 0xe0);
             if t == 0 {
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 12);
-                if self.ram.read_u8(SPRITE_ANIM_CLOCK + k) == 0 {
-                    self.ram.write_u8(SPRITE_HIT_TIMER + k, 255);
+                self.ram.set_sprite_main_delay(k, 12);
+                if self.ram.sprite(k).animation_clock() == 0 {
+                    self.ram.set_sprite_hit_timer(k, 255);
                     self.sprite_schedule_boss_for_death(k);
                 } else {
-                    self.ram.write_u8(
-                        SPRITE_ANIM_CLOCK + k,
-                        self.ram.read_u8(SPRITE_ANIM_CLOCK + k).wrapping_sub(1),
+                    self.ram.set_sprite_animation_clock(
+                        k,
+                        self.ram.sprite(k).animation_clock().wrapping_sub(1),
                     );
                     self.sprite_make_boss_explosion(k);
                 }
@@ -7268,46 +6978,42 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.ram.read_u8(FRAME_COUNTER) & 7 == 0 {
             self.runtime.sfx3_with_pan(self.ram, k, 0x31);
         }
-        let s = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(1);
-        self.ram.write_u8(SPRITE_SUBTYPE2 + k, s);
+        let s = self.ram.sprite(k).subtype2().wrapping_add(1);
+        self.ram.set_sprite_subtype2(k, s);
         let q = (s & 0x7f) as usize;
         self.ram
-            .write_u8(MOLDORM_X_LO + q, self.ram.read_u8(SPRITE_X_LO + k));
+            .write_u8(MOLDORM_X_LO + q, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(MOLDORM_Y_LO + q, self.ram.read_u8(SPRITE_Y_LO + k));
+            .write_u8(MOLDORM_Y_LO + q, self.ram.sprite(k).y_low());
         self.ram
-            .write_u8(MOLDORM_X_HI + q, self.ram.read_u8(SPRITE_X_HI + k));
+            .write_u8(MOLDORM_X_HI + q, self.ram.sprite(k).x_high());
         self.ram
-            .write_u8(MOLDORM_Y_HI + q, self.ram.read_u8(SPRITE_Y_HI + k));
-        if self.ram.read_u8(SPRITE_F + k) == 14 {
-            self.ram.write_u8(SPRITE_F + k, 8);
-            if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+            .write_u8(MOLDORM_Y_HI + q, self.ram.sprite(k).y_high());
+        if self.ram.sprite(k).scratch_f() == 14 {
+            self.ram.set_sprite_scratch_f(k, 8);
+            if self.ram.sprite(k).ai_state() == 0 {
+                self.ram.set_sprite_ai_state(k, 2);
             }
         }
         self.runtime.move_xy(self.ram, k);
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 0 {
-            let a = self.ram.read_u8(SPRITE_A + k).wrapping_sub(1);
-            self.ram.write_u8(SPRITE_A + k, a);
+        if self.ram.sprite(k).ai_state() == 0 {
+            let a = self.ram.sprite(k).scratch_a().wrapping_sub(1);
+            self.ram.set_sprite_scratch_a(k, a);
             if a == 0 {
-                self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 192);
+                self.ram.set_sprite_ai_state(k, 1);
+                self.ram.set_sprite_main_delay(k, 192);
             }
             self.runtime.get_16bit_coords(self.ram, k);
             if self.runtime.check_tile_collision(self.ram, k) {
-                self.ram.write_u8(
-                    SPRITE_D + k,
-                    self.ram.read_u8(SPRITE_D + k).wrapping_add(1) & 3,
-                );
-                self.ram.write_u8(SPRITE_DELAY_AUX1 + k, 8);
+                self.ram
+                    .set_sprite_scratch_d(k, self.ram.sprite(k).scratch_d().wrapping_add(1) & 3);
+                self.ram.set_sprite_aux1_delay(k, 8);
             }
-            let d = self.ram.read_u8(SPRITE_D + k) as usize;
-            self.ram.write_u8(SPRITE_X_VEL + k, XV[d] as u8);
-            self.ram.write_u8(SPRITE_Y_VEL + k, YV[d] as u8);
-        } else if self.ram.read_u8(SPRITE_AI_STATE + k) == 1
-            && self.ram.read_u8(FRAME_COUNTER) & 1 == 0
-        {
+            let d = self.ram.sprite(k).scratch_d() as usize;
+            self.ram.set_sprite_velocity_x(k, XV[d] as u8);
+            self.ram.set_sprite_velocity_y(k, YV[d] as u8);
+        } else if self.ram.sprite(k).ai_state() == 1 && self.ram.read_u8(FRAME_COUNTER) & 1 == 0 {
             let (x, y) = self.runtime.project_speed_towards_link(self.ram, k, 31);
             self.runtime.approach_target_speed(self.ram, k, x, y);
         }
@@ -7323,19 +7029,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const OO: [u16; 24] = [
             16, 4, 4, 4, 16, 16, 16, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
         ];
-        self.ram.write_u8(
-            SPRITE_OBJ_PRIO + k,
-            self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 0x30,
-        );
+        self.ram
+            .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 0x30);
         let info = PrepOamCoordsRet {
             x: self.ram.read_u16(CUR_SPRITE_X),
             y: self.ram.read_u16(CUR_SPRITE_Y),
             r4: 0,
-            flags: self.ram.read_u8(SPRITE_OAM_FLAGS + k),
+            flags: self.ram.sprite(k).oam_flags(),
         };
         self.sprite_draw_trinexx_rock_head(k, &info);
-        for i in 0..self.ram.read_u8(SPRITE_ANIM_CLOCK + k) as usize {
-            let j = (self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_sub(HP[i]) & 0x7f) as usize;
+        for i in 0..self.ram.sprite(k).animation_clock() as usize {
+            let j = (self.ram.sprite(k).subtype2().wrapping_sub(HP[i]) & 0x7f) as usize;
             self.ram.write_u16(
                 CUR_SPRITE_X,
                 u16::from_le_bytes([
@@ -7362,7 +7066,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     .wrapping_sub(self.ram.read_u16(CUR_SPRITE_Y))
                     .wrapping_add(16)
                     < 16
-                && (self.ram.read_u8(SPRITE_AI_STATE + k) as i8) >= 0
+                && (self.ram.sprite(k).ai_state() as i8) >= 0
                 && (self.ram.read_u8(COUNTDOWN_FOR_BLINK)
                     | self.ram.read_u8(LINK_DISABLE_SPRITE_DAMAGE)
                     | self.ram.read_u8(SUBMODULE_INDEX)
@@ -7385,36 +7089,35 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 OAM_EXT_CUR_PTR,
                 self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(OO[i] >> 2),
             );
-            self.ram.write_u8(SPRITE_OAM_FLAGS + k, 1);
-            if i == 4 && self.ram.read_u8(SPRITE_AI_STATE + k) != 0 {
+            self.ram.set_sprite_oam_flags(k, 1);
+            if i == 4 && self.ram.sprite(k).ai_state() != 0 {
                 self.sprite_trinexx_check_damage_to_flashing_segment(k);
-                self.ram.write_u8(
-                    SPRITE_OAM_FLAGS + k,
-                    (self.ram.read_u8(SPRITE_SUBTYPE2 + k) & 6)
-                        ^ self.ram.read_u8(SPRITE_OAM_FLAGS + k),
+                self.ram.set_sprite_oam_flags(
+                    k,
+                    (self.ram.sprite(k).subtype2() & 6) ^ self.ram.sprite(k).oam_flags(),
                 );
             }
-            self.ram.write_u8(SPRITE_GRAPHICS + k, G[i]);
+            self.ram.set_sprite_graphics(k, G[i]);
             if G[i] != 3 {
                 self.runtime.draw_single_large(self.ram, k);
             } else {
-                self.ram.write_u8(SPRITE_GRAPHICS + k, 8);
+                self.ram.set_sprite_graphics(k, 8);
                 self.sprite_draw_trinexx_rock_head(k, &info);
             }
         }
         self.ram
-            .write_u8(BYTE_7E0FB6, self.ram.read_u8(SPRITE_ANIM_CLOCK + k));
+            .write_u8(BYTE_7E0FB6, self.ram.sprite(k).animation_clock());
     }
     pub fn sprite_trinexx_check_damage_to_flashing_segment(&mut self, k: usize) {
         let x = self.sprite_x(k);
         let y = self.sprite_y(k);
         self.set_sprite_x(k, self.ram.read_u16(CUR_SPRITE_X));
         self.set_sprite_y(k, self.ram.read_u16(CUR_SPRITE_Y));
-        self.ram.write_u8(SPRITE_DEFL_BITS + k, 0x80);
-        self.ram.write_u8(SPRITE_FLAGS3 + k, 0);
+        self.ram.set_sprite_deflection_bits(k, 0x80);
+        self.ram.set_sprite_flags3(k, 0);
         let _ = self.runtime.check_damage_from_link(self.ram, k);
-        self.ram.write_u8(SPRITE_DEFL_BITS + k, 0x84);
-        self.ram.write_u8(SPRITE_FLAGS3 + k, 0x40);
+        self.ram.set_sprite_deflection_bits(k, 0x84);
+        self.ram.set_sprite_flags3(k, 0x40);
         self.set_sprite_x(k, x);
         self.set_sprite_y(k, y);
     }
@@ -7429,26 +7132,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if (self.ram.read_u8(SPRITE_AI_STATE + k) as i8) < 0 {
-            let a = self.ram.read_u8(SPRITE_AI_STATE + k);
+        if (self.ram.sprite(k).ai_state() as i8) < 0 {
+            let a = self.ram.sprite(k).ai_state();
             self.ram.write_u8(FLAG_BLOCK_LINK_MENU, a);
-            let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+            let d = self.ram.sprite(k).main_delay();
             if d == 0 {
                 self.ram.write_u8(OVERLORD_X_HI, 1);
                 self.sprite_initialized_segmented(k);
-                self.ram.write_u8(SPRITE_SUBTYPE2 + k, 0);
-                self.ram.write_u8(SPRITE_HEAD_DIR + k, 0);
-                self.ram.write_u8(
-                    SPRITE_FLAGS3 + k,
-                    self.ram.read_u8(SPRITE_FLAGS3 + k) & !0x40,
-                );
-                self.ram.write_u8(SPRITE_DEFL_BITS + k, 0x80);
-                self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                self.ram.write_u8(SPRITE_D + k, 0);
-                self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 16);
-                self.ram.write_u8(SPRITE_X_VEL + k, 0);
-                self.ram.write_u8(SPRITE_Y_VEL + k, 0);
-                self.ram.write_u8(SPRITE_A + k, 128);
+                self.ram.set_sprite_subtype2(k, 0);
+                self.ram.set_sprite_head_direction(k, 0);
+                self.ram
+                    .set_sprite_flags3(k, self.ram.sprite(k).flags3() & !0x40);
+                self.ram.set_sprite_deflection_bits(k, 0x80);
+                self.ram.set_sprite_ai_state(k, 0);
+                self.ram.set_sprite_scratch_d(k, 0);
+                self.ram.set_sprite_animation_clock(k, 16);
+                self.ram.set_sprite_velocity_x(k, 0);
+                self.ram.set_sprite_velocity_y(k, 0);
+                self.ram.set_sprite_scratch_a(k, 128);
                 self.ram.write_u8(DUNG_FLOOR_Y_VEL + 1, 255);
             } else if d < 0xe0 {
                 if d & 3 == 0 {
@@ -7470,19 +7171,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     );
                     self.sprite_make_boss_death_explosion_no_sound(k);
                 }
-                self.ram.write_u8(SPRITE_HEAD_DIR + k, 255);
+                self.ram.set_sprite_head_direction(k, 255);
             } else if d < 255 {
                 if d & 3 == 0 {
                     self.ram.write_u16(DUNG_FLOOR_Y_VEL, u16::MAX);
                     self.ram.write_u8(DUNG_HDR_COLLISION_2_MIRROR, 1);
                 }
-                self.ram.write_u8(SPRITE_Y_VEL + k, 248);
+                self.ram.set_sprite_velocity_y(k, 248);
                 self.runtime.move_y(self.ram, k);
                 self.trinexx_cache_position(k);
-                self.ram.write_u8(
-                    SPRITE_C + k,
-                    self.ram.read_u8(SPRITE_Y_LO + k).wrapping_sub(12),
-                );
+                self.ram
+                    .set_sprite_scratch_c(k, self.ram.sprite(k).y_low().wrapping_sub(12));
                 self.ram.write_u16(
                     OVERLORD_X_LO + 7,
                     self.ram.read_u16(OVERLORD_X_LO + 7).wrapping_add(2),
@@ -7490,11 +7189,11 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             return;
         }
-        if (self.ram.read_u8(SPRITE_STATE + 1) | self.ram.read_u8(SPRITE_STATE + 2)) == 0
-            && self.ram.read_u8(SPRITE_AI_STATE + k) < 2
+        if (self.ram.sprite(1).state() | self.ram.sprite(2).state()) == 0
+            && self.ram.sprite(k).ai_state() < 2
         {
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-            self.ram.write_u8(SPRITE_AI_STATE + k, 255);
+            self.ram.set_sprite_main_delay(k, 255);
+            self.ram.set_sprite_ai_state(k, 255);
             self.ram.write_u8(SOUND_EFFECT_2, 0x22);
             return;
         }
@@ -7503,8 +7202,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.runtime.check_damage_to_and_from_link(self.ram, k);
         if self.ram.read_u8(FRAME_COUNTER) & 63 == 0 {
             let (a, b) = self.runtime.is_right_of_link(self.ram, k);
-            self.ram.write_u8(
-                SPRITE_GRAPHICS + k,
+            self.ram.set_sprite_graphics(
+                k,
                 if (b as u8).wrapping_add(24) < 48 {
                     0
                 } else if a != 0 {
@@ -7523,25 +7222,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             return;
         }
-        if (self.ram.read_u8(SPRITE_STATE + 1) != 0 && self.ram.read_u8(SPRITE_AI_STATE + 1) == 3)
-            || (self.ram.read_u8(SPRITE_STATE + 2) != 0
-                && self.ram.read_u8(SPRITE_AI_STATE + 2) == 3)
+        if (self.ram.sprite(1).state() != 0 && self.ram.sprite(1).ai_state() == 3)
+            || (self.ram.sprite(2).state() != 0 && self.ram.sprite(2).ai_state() == 3)
         {
             return;
         }
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     let j = self.runtime.random_number(self.ram) & 3;
-                    if self.ram.read_u8(SPRITE_SUBTYPE + k) & 0x7f == j {
+                    if self.ram.sprite(k).subtype() & 0x7f == j {
                         return;
                     }
-                    let a = self.ram.read_u8(SPRITE_ANIM_CLOCK + k).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_ANIM_CLOCK + k, a);
+                    let a = self.ram.sprite(k).animation_clock().wrapping_add(1);
+                    self.ram.set_sprite_animation_clock(k, a);
                     if a == 2 {
-                        self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 0);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 80);
+                        self.ram.set_sprite_animation_clock(k, 0);
+                        self.ram.set_sprite_ai_state(k, 2);
+                        self.ram.set_sprite_main_delay(k, 80);
                         return;
                     }
                     self.ram
@@ -7550,24 +7248,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         .write_u8(OVERLORD_X_LO + 1, [0x80, 0x70, 0x60, 0x80][j as usize]);
                     let r = self.runtime.random_number(self.ram);
                     self.ram
-                        .write_u8(SPRITE_SUBTYPE + k, j + u8::from(r & 3 == 0) * 0x80);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                        .set_sprite_subtype(k, j + u8::from(r & 3 == 0) * 0x80);
+                    self.ram.set_sprite_ai_state(k, 1);
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_SUBTYPE + k) == 0xff
-                    && (self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0
+                if self.ram.sprite(k).subtype() == 0xff
+                    && (self.ram.sprite(k).main_delay() == 0
                         || self.runtime.is_below_link(self.ram, k) == 0)
                 {
-                    self.ram.write_u8(SPRITE_SUBTYPE + k, 0);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+                    self.ram.set_sprite_subtype(k, 0);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 48);
                 } else {
-                    let x = (self.ram.read_u8(SPRITE_X_HI + k) as u16) << 8
+                    let x = (self.ram.sprite(k).x_high() as u16) << 8
                         | self.ram.read_u8(OVERLORD_X_LO) as u16;
-                    let y = (self.ram.read_u8(SPRITE_Y_HI + k) as u16) << 8
+                    let y = (self.ram.sprite(k).y_high() as u16) << 8
                         | self.ram.read_u8(OVERLORD_X_LO + 1) as u16;
-                    let speed = if (self.ram.read_u8(SPRITE_SUBTYPE + k) as i8) < 0 {
+                    let speed = if (self.ram.sprite(k).subtype() as i8) < 0 {
                         16
                     } else {
                         8
@@ -7575,55 +7273,53 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     let (xv, yv) = self
                         .runtime
                         .project_speed_towards_location(self.ram, k, x, y, speed);
-                    self.ram.write_u8(SPRITE_X_VEL + k, xv);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, yv);
-                    let bx = self.ram.read_u8(SPRITE_X_LO + k);
-                    let by = self.ram.read_u8(SPRITE_Y_LO + k);
+                    self.ram.set_sprite_velocity_x(k, xv);
+                    self.ram.set_sprite_velocity_y(k, yv);
+                    let bx = self.ram.sprite(k).x_low();
+                    let by = self.ram.sprite(k).y_low();
                     self.runtime.move_xy(self.ram, k);
                     self.ram.write_u16(
                         DUNG_FLOOR_Y_VEL,
-                        (by.wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k)) as i8 as i16) as u16,
+                        (by.wrapping_sub(self.ram.sprite(k).y_low()) as i8 as i16) as u16,
                     );
                     self.ram.write_u16(
                         DUNG_FLOOR_X_VEL,
-                        (bx.wrapping_sub(self.ram.read_u8(SPRITE_X_LO + k)) as i8 as i16) as u16,
+                        (bx.wrapping_sub(self.ram.sprite(k).x_low()) as i8 as i16) as u16,
                     );
                     self.ram.write_u8(DUNG_HDR_COLLISION_2_MIRROR, 1);
                     self.trinexx_cache_position(k);
-                    self.ram.write_u8(
-                        SPRITE_C + k,
-                        self.ram.read_u8(SPRITE_Y_LO + k).wrapping_sub(12),
-                    );
+                    self.ram
+                        .set_sprite_scratch_c(k, self.ram.sprite(k).y_low().wrapping_sub(12));
                     if self
                         .ram
                         .read_u8(OVERLORD_X_LO)
-                        .wrapping_sub(self.ram.read_u8(SPRITE_X_LO + k))
+                        .wrapping_sub(self.ram.sprite(k).x_low())
                         .wrapping_add(2)
                         < 4
                         && self
                             .ram
                             .read_u8(OVERLORD_X_LO + 1)
-                            .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k))
+                            .wrapping_sub(self.ram.sprite(k).y_low())
                             .wrapping_add(2)
                             < 4
                     {
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
+                        self.ram.set_sprite_ai_state(k, 0);
+                        self.ram.set_sprite_main_delay(k, 48);
                     }
                 }
-                let steps = if (self.ram.read_u8(SPRITE_SUBTYPE + k) as i8) < 0 {
+                let steps = if (self.ram.sprite(k).subtype() as i8) < 0 {
                     2
                 } else {
                     1
                 };
                 for _ in 0..steps {
-                    let delta = if (self.ram.read_u8(SPRITE_X_VEL + k) as i8) < 0 {
+                    let delta = if (self.ram.sprite(k).velocity_x() as i8) < 0 {
                         1
                     } else {
                         255
                     };
-                    let subtype2 = self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(delta);
-                    self.ram.write_u8(SPRITE_SUBTYPE2 + k, subtype2);
+                    let subtype2 = self.ram.sprite(k).subtype2().wrapping_add(delta);
+                    self.ram.set_sprite_subtype2(k, subtype2);
                     if subtype2 & 0xf == 0 {
                         self.runtime.sfx2_with_pan(self.ram, k, 0x21);
                     }
@@ -7632,27 +7328,27 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             2 => {
                 self.trinexx_wag_tail(k);
                 self.trinexx_wag_tail(k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 3);
                     self.runtime.apply_speed_towards_link(self.ram, k, 48);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 64);
+                    self.ram.set_sprite_main_delay(k, 64);
                     self.ram.write_u8(SOUND_EFFECT_2, 0x26);
                 }
             }
             3 => {
                 self.runtime.move_xy(self.ram, k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     self.trinexx_restore_xy(k);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 48);
-                } else if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0x20 {
-                    self.ram.write_u8(
-                        SPRITE_X_VEL + k,
-                        0u8.wrapping_sub(self.ram.read_u8(SPRITE_X_VEL + k)),
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 48);
+                } else if self.ram.sprite(k).main_delay() == 0x20 {
+                    self.ram.set_sprite_velocity_x(
+                        k,
+                        0u8.wrapping_sub(self.ram.sprite(k).velocity_x()),
                     );
-                    self.ram.write_u8(
-                        SPRITE_Y_VEL + k,
-                        0u8.wrapping_sub(self.ram.read_u8(SPRITE_Y_VEL + k)),
+                    self.ram.set_sprite_velocity_y(
+                        k,
+                        0u8.wrapping_sub(self.ram.sprite(k).velocity_y()),
                     );
                 }
             }
@@ -7687,12 +7383,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
     pub fn trinexx_handle_shell_collision(&mut self, k: usize) {
         let x = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_A + k),
-            self.ram.read_u8(SPRITE_B + k),
+            self.ram.sprite(k).scratch_a(),
+            self.ram.sprite(k).scratch_b(),
         ]);
         let y = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_G + k),
+            self.ram.sprite(k).scratch_c(),
+            self.ram.sprite(k).scratch_g(),
         ]);
         if x.wrapping_sub(self.ram.read_u16(LINK_X)).wrapping_add(40) < 80
             && y.wrapping_sub(self.ram.read_u16(LINK_Y)).wrapping_add(16) < 64
@@ -7747,17 +7443,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-8, 8, 0x8026, 2),
             (8, 8, 0xc026, 2),
         ];
-        if (self.ram.read_u8(SPRITE_AI_STATE + k) as i8) >= 0 {
-            self.ram.write_u8(
-                SPRITE_OBJ_PRIO + k,
-                self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 0x30,
-            );
+        if (self.ram.sprite(k).ai_state() as i8) >= 0 {
+            self.ram
+                .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 0x30);
         }
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 4;
+        let i = self.ram.sprite(k).graphics() as usize * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
     }
     pub fn sprite_draw_trinexx_rock_head_and_body(&mut self, k: usize) {
-        if (self.ram.read_u8(SPRITE_HEAD_DIR + k) as i8) < 0 {
+        if (self.ram.sprite(k).head_direction() as i8) < 0 {
             return;
         }
         self.sprite_draw_trinexx_rock_head(k, &PrepOamCoordsRet::default());
@@ -7768,16 +7462,18 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         let iy = info.y as u8;
         let mut flags = info.flags;
         flags &= !0x10;
-        if self.ram.read_u8(SPRITE_AI_STATE + k) == 3 {
+        if self.ram.sprite(k).ai_state() == 3 {
             const M: [u8; 8] = [0xfc, 0xe0, 0xc0, 0xa0, 0x80, 0x60, 0x40, 0x20];
             let xb = self
                 .ram
-                .read_u8(SPRITE_A + k)
-                .wrapping_sub(self.ram.read_u8(SPRITE_X_LO + k));
+                .sprite(k)
+                .scratch_a()
+                .wrapping_sub(self.ram.sprite(k).x_low());
             let yb = self
                 .ram
-                .read_u8(SPRITE_C + k)
-                .wrapping_sub(self.ram.read_u8(SPRITE_Y_LO + k));
+                .sprite(k)
+                .scratch_c()
+                .wrapping_sub(self.ram.sprite(k).y_low());
             let base =
                 (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4 + 4;
             for (entry, i) in (0..8).rev().enumerate() {
@@ -7800,19 +7496,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const YO: [i8; 16] = [-4, -4, -3, -2, 0, 2, 3, 4, 4, 4, 3, 2, 0, -2, -3, -4];
         let xb = self
             .ram
-            .read_u8(SPRITE_A + k)
+            .sprite(k)
+            .scratch_a()
             .wrapping_sub(self.ram.read_u8(BG2HOFS_COPY2));
-        let yb = u16::from_le_bytes([
-            self.ram.read_u8(SPRITE_C + k),
-            self.ram.read_u8(SPRITE_Y_HI + k),
-        ])
-        .wrapping_sub(self.ram.read_u16(BG2VOFS_COPY2));
-        let xi = if self.ram.read_u8(SPRITE_X_VEL + k).wrapping_add(3) < 7 {
+        let yb = u16::from_le_bytes([self.ram.sprite(k).scratch_c(), self.ram.sprite(k).y_high()])
+            .wrapping_sub(self.ram.read_u16(BG2VOFS_COPY2));
+        let xi = if self.ram.sprite(k).velocity_x().wrapping_add(3) < 7 {
             0
         } else {
-            self.ram.read_u8(SPRITE_SUBTYPE2 + k) >> 2
+            self.ram.sprite(k).subtype2() >> 2
         };
-        let yi = self.ram.read_u8(SPRITE_SUBTYPE2 + k) >> 2;
+        let yi = self.ram.sprite(k).subtype2() >> 2;
         for (entry, i) in (0..2).rev().enumerate() {
             let x = xb
                 .wrapping_add(if i != 0 { 228 } else { 28 })
@@ -7875,76 +7569,71 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn sprite_sidenexx(&mut self, k: usize) {
-        let ty = self.ram.read_u8(SPRITE_TYPE + k);
-        let xx = u16::from_le_bytes([self.ram.read_u8(SPRITE_A), self.ram.read_u8(SPRITE_B)])
-            .wrapping_add_signed([-14i8, 13][ty.wrapping_sub(0xcc) as usize] as i16);
-        let yy = u16::from_le_bytes([self.ram.read_u8(SPRITE_C), self.ram.read_u8(SPRITE_G)])
-            .wrapping_sub(0x20);
+        let ty = self.ram.sprite(k).kind();
+        let xx = u16::from_le_bytes([
+            self.ram.sprite(0).scratch_a(),
+            self.ram.sprite(0).scratch_b(),
+        ])
+        .wrapping_add_signed([-14i8, 13][ty.wrapping_sub(0xcc) as usize] as i16);
+        let yy = u16::from_le_bytes([
+            self.ram.sprite(0).scratch_c(),
+            self.ram.sprite(0).scratch_g(),
+        ])
+        .wrapping_sub(0x20);
         let [xl, xh] = xx.to_le_bytes();
         let [yl, yh] = yy.to_le_bytes();
-        self.ram.write_u8(SPRITE_A + k, xl);
-        self.ram.write_u8(SPRITE_B + k, xh);
-        self.ram.write_u8(SPRITE_C + k, yl);
-        self.ram.write_u8(SPRITE_G + k, yh);
-        self.ram.write_u8(
-            SPRITE_OBJ_PRIO + k,
-            self.ram.read_u8(SPRITE_OBJ_PRIO + k) | 0x30,
-        );
+        self.ram.set_sprite_scratch_a(k, xl);
+        self.ram.set_sprite_scratch_b(k, xh);
+        self.ram.set_sprite_scratch_c(k, yl);
+        self.ram.set_sprite_scratch_g(k, yh);
+        self.ram
+            .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() | 0x30);
         self.trinexx_head_draw(k);
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        if (self.ram.read_u8(SPRITE_AI_STATE + k) as i8) < 0 {
-            self.ram.write_u8(
-                SPRITE_IGNORE_PROJECTILE + k,
-                self.ram.read_u8(SPRITE_AI_STATE + k),
-            );
+        if (self.ram.sprite(k).ai_state() as i8) < 0 {
+            self.ram
+                .set_sprite_ignore_projectile(k, self.ram.sprite(k).ai_state());
             self.sidenexx_explode(k);
             return;
         }
-        if self.ram.read_u8(SPRITE_HIT_TIMER + k) != 0 && self.ram.read_u8(SPRITE_AI_STATE + k) != 4
-        {
-            self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 128);
-            self.ram.write_u8(SPRITE_AI_STATE + k, 4);
+        if self.ram.sprite(k).hit_timer() != 0 && self.ram.sprite(k).ai_state() != 4 {
+            self.ram.set_sprite_hit_timer(k, 0);
+            self.ram.set_sprite_main_delay(k, 128);
+            self.ram.set_sprite_ai_state(k, 4);
             self.ram
-                .write_u8(SPRITE_Z_VEL + k, self.ram.read_u8(SPRITE_OAM_FLAGS + k));
-            self.ram.write_u8(SPRITE_OAM_FLAGS + k, 3);
+                .set_sprite_velocity_z(k, self.ram.sprite(k).oam_flags());
+            self.ram.set_sprite_oam_flags(k, 3);
         }
         self.runtime.check_damage_to_and_from_link(self.ram, k);
-        self.ram.write_u8(
-            SPRITE_DEFL_BITS + k,
-            self.ram.read_u8(SPRITE_DEFL_BITS + k) | 4,
-        );
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        self.ram
+            .set_sprite_deflection_bits(k, self.ram.sprite(k).deflection_bits() | 4);
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                self.ram.write_u8(
-                    SPRITE_FLAGS3 + k,
-                    self.ram.read_u8(SPRITE_FLAGS3 + k) | 0x40,
-                );
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                    self.ram.write_u8(SPRITE_SUBTYPE2 + k, 9);
-                    self.ram.write_u8(
-                        SPRITE_FLAGS3 + k,
-                        self.ram.read_u8(SPRITE_FLAGS3 + k) & !0x40,
-                    );
+                self.ram
+                    .set_sprite_flags3(k, self.ram.sprite(k).flags3() | 0x40);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 2);
+                    self.ram.set_sprite_subtype2(k, 9);
+                    self.ram
+                        .set_sprite_flags3(k, self.ram.sprite(k).flags3() & !0x40);
                 }
             }
             1 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     let i = (self.runtime.random_number(self.ram) & 7) + 1;
-                    let old = self.ram.read_u8(SPRITE_D + k);
+                    let old = self.ram.sprite(k).scratch_d();
                     if i < 5 && old != i {
-                        self.ram.write_u8(SPRITE_D + k, i);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                        self.ram.set_sprite_scratch_d(k, i);
+                        self.ram.set_sprite_ai_state(k, 2);
                         if old == 1
                             && self.runtime.random_number(self.ram) & 1 == 0
-                            && self.ram.read_u8(SPRITE_AI_STATE) < 2
+                            && self.ram.sprite(0).ai_state() < 2
                         {
-                            self.ram.write_u8(SPRITE_GRAPHICS + k, 0);
-                            self.ram.write_u8(SPRITE_AI_STATE + k, 3);
-                            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 127);
+                            self.ram.set_sprite_graphics(k, 0);
+                            self.ram.set_sprite_ai_state(k, 3);
+                            self.ram.set_sprite_main_delay(k, 127);
                         }
                     }
                 }
@@ -7962,7 +7651,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     0x22, 0x1d, 0x18, 0x12, 0x0c, 6, 0, 0x48, 0x3a, 0x32, 0x29, 0x22, 0x19, 0x10,
                     7, 0,
                 ];
-                let mut j = self.ram.read_u8(SPRITE_D + k) as usize * 9;
+                let mut j = self.ram.sprite(k).scratch_d() as usize * 9;
                 let mut f = k * 9;
                 let mut n = 0;
                 for _ in (0..9).rev() {
@@ -7996,24 +7685,24 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     f += 1;
                 }
                 if n == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                    self.ram.set_sprite_ai_state(k, 1);
                     let r = self.runtime.random_number(self.ram);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, r & 15);
+                    self.ram.set_sprite_main_delay(k, r & 15);
                 }
             }
             3 => {
                 const M: [u8; 8] = [1, 1, 3, 3, 7, 15, 31, 31];
-                let j = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let j = self.ram.sprite(k).main_delay();
                 if j == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 32);
                     return;
                 }
                 if j == 64 {
                     self.sidenexx_exhale_danger(k);
                 }
-                self.ram.write_u8(
-                    SPRITE_SUBTYPE + k,
+                self.ram.set_sprite_subtype(
+                    k,
                     if j < 8 {
                         j
                     } else if j < 121 {
@@ -8032,18 +7721,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 }
             }
             4 => {
-                self.ram.write_u8(
-                    SPRITE_DEFL_BITS + k,
-                    self.ram.read_u8(SPRITE_DEFL_BITS + k) & !4,
-                );
-                self.ram.write_u8(SPRITE_SUBTYPE + k, 0);
-                let j = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                self.ram
+                    .set_sprite_deflection_bits(k, self.ram.sprite(k).deflection_bits() & !4);
+                self.ram.set_sprite_subtype(k, 0);
+                let j = self.ram.sprite(k).main_delay();
                 if j == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
+                    self.ram.set_sprite_ai_state(k, 1);
+                    self.ram.set_sprite_main_delay(k, 32);
                     self.ram
-                        .write_u8(SPRITE_OAM_FLAGS + k, self.ram.read_u8(SPRITE_Z_VEL + k));
-                    self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
+                        .set_sprite_oam_flags(k, self.ram.sprite(k).velocity_z());
+                    self.ram.set_sprite_hit_timer(k, 0);
                 }
                 if j >= 63 && j < 78 {
                     self.runtime
@@ -8057,42 +7744,40 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn sidenexx_exhale_danger(&mut self, k: usize) {
-        let ty = self.ram.read_u8(SPRITE_TYPE + k);
+        let ty = self.ram.sprite(k).kind();
         if ty == 0xcd {
             for i in 0..2 {
                 if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xcd) {
                     self.runtime.set_spawned_coordinates(self.ram, j);
                     self.ram
-                        .write_u8(SPRITE_C + j, if i != 0 { 1 } else { 254 });
+                        .set_sprite_scratch_c(j, if i != 0 { 1 } else { 254 });
                     self.runtime.sfx3_with_pan(self.ram, k, 0x19);
-                    self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 1);
-                    self.ram.write_u8(SPRITE_E + j, 1);
-                    self.ram.write_u8(SPRITE_Y_VEL + j, 24);
-                    self.ram.write_u8(SPRITE_FLAGS2 + j, 0);
-                    self.ram.write_u8(SPRITE_FLAGS3 + j, 0x40);
+                    self.ram.set_sprite_ignore_projectile(j, 1);
+                    self.ram.set_sprite_scratch_e(j, 1);
+                    self.ram.set_sprite_velocity_y(j, 24);
+                    self.ram.set_sprite_flags2(j, 0);
+                    self.ram.set_sprite_flags3(j, 0x40);
                 }
             }
             self.ram.write_u8(BYTE_7E0FB6, 1);
         } else if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, ty) {
             self.runtime.set_spawned_coordinates(self.ram, j);
             self.runtime.sfx2_with_pan(self.ram, k, 0x2a);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 1);
-            self.ram.write_u8(SPRITE_E + j, 1);
-            self.ram.write_u8(SPRITE_Y_VEL + j, 24);
-            self.ram.write_u8(SPRITE_FLAGS2 + j, 0);
-            self.ram.write_u8(SPRITE_FLAGS3 + j, 0x40);
+            self.ram.set_sprite_ignore_projectile(j, 1);
+            self.ram.set_sprite_scratch_e(j, 1);
+            self.ram.set_sprite_velocity_y(j, 24);
+            self.ram.set_sprite_flags2(j, 0);
+            self.ram.set_sprite_flags3(j, 0x40);
         }
     }
     pub fn sidenexx_explode(&mut self, k: usize) {
-        if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 12);
-            if self.ram.read_u8(SPRITE_SUBTYPE2 + k) == 1 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+        if self.ram.sprite(k).main_delay() == 0 {
+            self.ram.set_sprite_main_delay(k, 12);
+            if self.ram.sprite(k).subtype2() == 1 {
+                self.ram.set_sprite_state(k, 0);
             }
-            self.ram.write_u8(
-                SPRITE_SUBTYPE2 + k,
-                self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_sub(1),
-            );
+            self.ram
+                .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_sub(1));
             self.ram.write_u8(
                 CUR_SPRITE_X,
                 self.ram
@@ -8109,14 +7794,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn trinexx_head_draw(&mut self, k: usize) {
+        self.ram.set_sprite_x_low(k, self.ram.sprite(k).scratch_a());
         self.ram
-            .write_u8(SPRITE_X_LO + k, self.ram.read_u8(SPRITE_A + k));
+            .set_sprite_x_high(k, self.ram.sprite(k).scratch_b());
+        self.ram.set_sprite_y_low(k, self.ram.sprite(k).scratch_c());
         self.ram
-            .write_u8(SPRITE_X_HI + k, self.ram.read_u8(SPRITE_B + k));
-        self.ram
-            .write_u8(SPRITE_Y_LO + k, self.ram.read_u8(SPRITE_C + k));
-        self.ram
-            .write_u8(SPRITE_Y_HI + k, self.ram.read_u8(SPRITE_G + k));
+            .set_sprite_y_high(k, self.ram.sprite(k).scratch_g());
         self.runtime.get_16bit_coords(self.ram, k);
         let Some((ix, iy, flags)) = self.runtime.prep_oam_or_double_ret(self.ram, k) else {
             return;
@@ -8149,7 +7832,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     self.ram.write_u8(CUR_SPRITE_Y, center_y);
                     let x = center_x.wrapping_add_signed(X[m]);
                     let y = center_y.wrapping_add_signed(Y[m]).wrapping_add(if m == 4 {
-                        self.ram.read_u8(SPRITE_SUBTYPE + k)
+                        self.ram.sprite(k).subtype()
                     } else {
                         0
                     });
@@ -8159,16 +7842,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 self.set_sprite_x(
                     k,
                     u16::from_le_bytes([
-                        self.ram.read_u8(SPRITE_A + k),
-                        self.ram.read_u8(SPRITE_B + k),
+                        self.ram.sprite(k).scratch_a(),
+                        self.ram.sprite(k).scratch_b(),
                     ])
                     .wrapping_add_signed(dx as i16),
                 );
                 self.set_sprite_y(
                     k,
                     u16::from_le_bytes([
-                        self.ram.read_u8(SPRITE_C + k),
-                        self.ram.read_u8(SPRITE_G + k),
+                        self.ram.sprite(k).scratch_c(),
+                        self.ram.sprite(k).scratch_g(),
                     ])
                     .wrapping_add_signed(dy as i16),
                 );
@@ -8181,7 +7864,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 oam_entry += 1;
             }
             i = i.wrapping_add(1);
-            if i == self.ram.read_u8(SPRITE_SUBTYPE2 + k) {
+            if i == self.ram.sprite(k).subtype2() {
                 break;
             }
         }
@@ -8193,7 +7876,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn sprite_c1_cutscene_agahnim(&mut self, k: usize) {
-        match self.ram.read_u8(SPRITE_A + k) {
+        match self.ram.sprite(k).scratch_a() {
             0 => self.cutscene_agahnim_agahnim(k),
             1 => self.sprite_cutscene_agahnim_zelda(k),
             _ => {}
@@ -8205,119 +7888,115 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             x: self.ram.read_u16(CUR_SPRITE_X),
             y: self.ram.read_u16(CUR_SPRITE_Y),
             r4: 0,
-            flags: self.ram.read_u8(SPRITE_OAM_FLAGS + k),
+            flags: self.ram.sprite(k).oam_flags(),
         };
-        if self.ram.read_u8(SPRITE_C + k) != 0 {
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+        if self.ram.sprite(k).scratch_c() != 0 {
+            if self.ram.sprite(k).main_delay() == 0 {
+                self.ram.set_sprite_state(k, 0);
             }
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) & 1 == 0 {
+            if self.ram.sprite(k).main_delay() & 1 == 0 {
                 self.chatty_agahnim_draw(k, &mut info);
             }
             return;
         }
         self.chatty_agahnim_draw(k, &mut info);
         self.sprite_draw_cutscene_agahnim_spell(k, &info);
-        if self.ram.read_u8(SPRITE_PAUSE + k) != 0 {
-            self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-            self.ram.write_u8(SPRITE_B + k, 0);
-            self.ram.write_u8(SPRITE_GRAPHICS + k, 0);
-            self.ram.write_u8(SPRITE_DELAY_MAIN + k, 64);
+        if self.ram.sprite(k).pause() != 0 {
+            self.ram.set_sprite_ai_state(k, 0);
+            self.ram.set_sprite_scratch_b(k, 0);
+            self.ram.set_sprite_graphics(k, 0);
+            self.ram.set_sprite_main_delay(k, 64);
         }
         if self.runtime.return_if_inactive(self.ram, k) {
             return;
         }
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     self.ram.write_u8(FLAG_IS_LINK_IMMOBILIZED, 1);
                     self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x13d);
                     self.runtime.show_message_minimal(self.ram);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                    self.ram.set_sprite_ai_state(k, 1);
                 }
             }
             1 => {
-                let j = self.ram.read_u8(SPRITE_B + k).wrapping_add(1);
-                self.ram.write_u8(SPRITE_B + k, j);
-                self.ram.write_u8(
-                    SPRITE_GRAPHICS + k,
-                    if self.ram.read_u8(SPRITE_Z + 15) < 16 {
+                let j = self.ram.sprite(k).scratch_b().wrapping_add(1);
+                self.ram.set_sprite_scratch_b(k, j);
+                self.ram.set_sprite_graphics(
+                    k,
+                    if self.ram.sprite(15).z() < 16 {
                         G[(j >> 5 & 3) as usize]
                     } else {
                         1
                     },
                 );
                 if j & 15 == 0 {
-                    self.ram.write_u8(SPRITE_GRAPHICS + 15, 1);
-                    let z = self.ram.read_u8(SPRITE_Z + 15).wrapping_add(1);
-                    self.ram.write_u8(SPRITE_Z + 15, z);
+                    self.ram.set_sprite_graphics(15, 1);
+                    let z = self.ram.sprite(15).z().wrapping_add(1);
+                    self.ram.set_sprite_z(15, z);
                     if z == 22 {
                         self.ram.write_u8(SOUND_EFFECT_2, 0x27);
-                        self.ram.write_u8(SPRITE_AI_STATE + k, 2);
-                        self.ram.write_u8(SPRITE_DELAY_MAIN + k, 255);
-                        self.ram.write_u8(SPRITE_SUBTYPE2 + k, 2);
-                        self.ram.write_u8(SPRITE_SUBTYPE + k, 255);
+                        self.ram.set_sprite_ai_state(k, 2);
+                        self.ram.set_sprite_main_delay(k, 255);
+                        self.ram.set_sprite_subtype2(k, 2);
+                        self.ram.set_sprite_subtype(k, 255);
                     }
                 }
             }
             2 => {
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 80);
+                    self.ram.set_sprite_ai_state(k, 3);
+                    self.ram.set_sprite_main_delay(k, 80);
                 } else if d == 120 {
                     self.ram.write_u8(INTRO_TIMES_PAL_FLASH, 120);
                 } else if d < 128 && d & 3 == 0 {
                     self.ram.write_u8(SOUND_EFFECT_2, 0x2b);
-                    if self.ram.read_u8(SPRITE_SUBTYPE2 + k) != 14 {
-                        self.ram.write_u8(
-                            SPRITE_SUBTYPE2 + k,
-                            self.ram.read_u8(SPRITE_SUBTYPE2 + k).wrapping_add(4),
-                        );
+                    if self.ram.sprite(k).subtype2() != 14 {
+                        self.ram
+                            .set_sprite_subtype2(k, self.ram.sprite(k).subtype2().wrapping_add(4));
                     }
                 }
             }
             3 => {
-                let d = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+                let d = self.ram.sprite(k).main_delay();
                 if d != 0 {
-                    if d & 3 == 0 && self.ram.read_u8(SPRITE_SUBTYPE + k) != 9 {
-                        self.ram.write_u8(
-                            SPRITE_SUBTYPE + k,
-                            self.ram.read_u8(SPRITE_SUBTYPE + k).wrapping_add(2),
-                        );
+                    if d & 3 == 0 && self.ram.sprite(k).subtype() != 9 {
+                        self.ram
+                            .set_sprite_subtype(k, self.ram.sprite(k).subtype().wrapping_add(2));
                     }
                 } else {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + 15, 19);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 4);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 80);
-                    self.ram.write_u8(SPRITE_SUBTYPE2 + k, 0);
+                    self.ram.set_sprite_main_delay(15, 19);
+                    self.ram.set_sprite_ai_state(k, 4);
+                    self.ram.set_sprite_main_delay(k, 80);
+                    self.ram.set_sprite_subtype2(k, 0);
                     self.ram.write_u8(SOUND_EFFECT_1, 0x33);
                 }
             }
             4 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
+                if self.ram.sprite(k).main_delay() == 0 {
                     self.ram.write_u16(DIALOGUE_MESSAGE_INDEX, 0x13e);
                     self.runtime.show_message_minimal(self.ram);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 5);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 2);
+                    self.ram.set_sprite_ai_state(k, 5);
+                    self.ram.set_sprite_main_delay(k, 2);
                 }
             }
             5 => {
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 1 {
+                if self.ram.sprite(k).main_delay() == 1 {
                     self.ram.write_u8(SOUND_EFFECT_2, 0x28);
                 }
-                self.ram.write_u8(SPRITE_Y_VEL + k, (-32i8) as u8);
+                self.ram.set_sprite_velocity_y(k, (-32i8) as u8);
                 self.runtime.move_y(self.ram, k);
-                if self.ram.read_u8(SPRITE_Y_LO + k) < 48 {
-                    self.ram.write_u8(SPRITE_DELAY_AUX4 + k, 66);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 6);
+                if self.ram.sprite(k).y_low() < 48 {
+                    self.ram.set_sprite_aux4_delay(k, 66);
+                    self.ram.set_sprite_ai_state(k, 6);
                 }
                 self.sprite_agahnim_apply_motion_blur(k);
             }
             6 => {
-                if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) == 0 {
+                if self.ram.sprite(k).aux4_delay() == 0 {
                     self.ram.write_u8(FLAG_IS_LINK_IMMOBILIZED, 0);
-                    self.ram.write_u8(SPRITE_STATE + k, 0);
+                    self.ram.set_sprite_state(k, 0);
                     self.runtime.manually_set_death_flag_uw(self.ram, k);
                     self.ram.write_u16(
                         DUNG_SAVEGAME_STATE_BITS,
@@ -8335,10 +8014,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if let Some(j) = self.runtime.spawn_dynamic(self.ram, k, 0xc1) {
             self.runtime.set_spawned_coordinates(self.ram, j);
             self.ram
-                .write_u8(SPRITE_GRAPHICS + j, self.ram.read_u8(SPRITE_GRAPHICS + k));
-            self.ram.write_u8(SPRITE_DELAY_MAIN + j, 32);
-            self.ram.write_u8(SPRITE_IGNORE_PROJECTILE + j, 32);
-            self.ram.write_u8(SPRITE_C + j, 32);
+                .set_sprite_graphics(j, self.ram.sprite(k).graphics());
+            self.ram.set_sprite_main_delay(j, 32);
+            self.ram.set_sprite_ignore_projectile(j, 32);
+            self.ram.set_sprite_scratch_c(j, 32);
             j as i32
         } else {
             -1
@@ -8363,14 +8042,14 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             (-8, 8, 0x0ba2, 2),
             (8, 8, 0x4ba0, 2),
         ];
-        if self.ram.read_u8(SPRITE_DELAY_AUX4 + k) & 1 != 0 {
+        if self.ram.sprite(k).aux4_delay() & 1 != 0 {
             return;
         }
-        if self.ram.read_u8(SPRITE_C + k) == 0 {
+        if self.ram.sprite(k).scratch_c() == 0 {
             self.ram.write_u16(OAM_CUR_PTR, 0x900);
             self.ram.write_u16(OAM_EXT_CUR_PTR, 0xa60);
         }
-        let i = self.ram.read_u8(SPRITE_GRAPHICS + k) as usize * 4;
+        let i = self.ram.sprite(k).graphics() as usize * 4;
         self.runtime.draw_multiple(self.ram, k, &D[i..i + 4]);
         self.runtime.draw_shadow_custom(self.ram, k, 18);
         *info = self.runtime.last_draw_info();
@@ -8413,12 +8092,12 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         } else {
             0
         };
-        let sub = self.ram.read_u8(SPRITE_SUBTYPE2 + k);
+        let sub = self.ram.sprite(k).subtype2();
         if sub == 0 {
             return;
         }
         let mut kn = sub.wrapping_sub(1);
-        let end = self.ram.read_u8(SPRITE_SUBTYPE + k);
+        let end = self.ram.sprite(k).subtype();
         let mut t = end.wrapping_add(1) as usize;
         let oam_entry = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4;
         loop {
@@ -8440,54 +8119,47 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn sprite_92_helmasaur_king(&mut self, k: usize) {
-        if (self.ram.read_u8(SPRITE_C + k) as i8) < 0 {
-            if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 1 {
-                self.ram.write_u8(SPRITE_STATE + k, 0);
+        if (self.ram.sprite(k).scratch_c() as i8) < 0 {
+            if self.ram.sprite(k).main_delay() == 1 {
+                self.ram.set_sprite_state(k, 0);
             }
             self.runtime.draw_single_large(self.ram, k);
             if self.runtime.return_if_inactive(self.ram, k) {
                 return;
             }
-            if (self.ram.read_u8(FRAME_COUNTER) & 7) | self.ram.read_u8(SPRITE_DELAY_AUX1 + k) == 0
-            {
-                self.ram.write_u8(
-                    SPRITE_OAM_FLAGS + k,
-                    self.ram.read_u8(SPRITE_OAM_FLAGS + k) ^ 0x40,
-                );
+            if (self.ram.read_u8(FRAME_COUNTER) & 7) | self.ram.sprite(k).aux1_delay() == 0 {
+                self.ram
+                    .set_sprite_oam_flags(k, self.ram.sprite(k).oam_flags() ^ 0x40);
             }
             self.runtime.move_xyz(self.ram, k);
-            self.ram.write_u8(
-                SPRITE_Z_VEL + k,
-                self.ram.read_u8(SPRITE_Z_VEL + k).wrapping_sub(2),
-            );
-            if (self.ram.read_u8(SPRITE_Z + k) as i8) < 0 {
-                self.ram.write_u8(SPRITE_Z + k, 0);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 12);
-                self.ram.write_u8(SPRITE_Z_VEL + k, 24);
-                self.ram.write_u8(SPRITE_GRAPHICS + k, 6);
+            self.ram
+                .set_sprite_velocity_z(k, self.ram.sprite(k).velocity_z().wrapping_sub(2));
+            if (self.ram.sprite(k).z() as i8) < 0 {
+                self.ram.set_sprite_z(k, 0);
+                self.ram.set_sprite_main_delay(k, 12);
+                self.ram.set_sprite_velocity_z(k, 24);
+                self.ram.set_sprite_graphics(k, 6);
             }
             return;
         }
-        if self.ram.read_u8(SPRITE_C + k) < 3 {
-            self.ram.write_u8(
-                SPRITE_OBJ_PRIO + k,
-                self.ram.read_u8(SPRITE_OBJ_PRIO + k) & !0xe,
-            );
-            self.ram.write_u8(SPRITE_FLAGS + k, 0xa);
+        if self.ram.sprite(k).scratch_c() < 3 {
+            self.ram
+                .set_sprite_object_priority(k, self.ram.sprite(k).object_priority() & !0xe);
+            self.ram.set_sprite_flags(k, 0xa);
         } else {
-            self.ram.write_u8(SPRITE_FLAGS4 + k, 0x1f);
-            self.ram.write_u8(SPRITE_FLAGS + k, 2);
+            self.ram.set_sprite_flags4(k, 0x1f);
+            self.ram.set_sprite_flags(k, 2);
         }
         self.helmasaur_king_draw(k);
-        if self.ram.read_u8(SPRITE_STATE + k) == 6 {
-            let t = self.ram.read_u8(SPRITE_DELAY_MAIN + k);
+        if self.ram.sprite(k).state() == 6 {
+            let t = self.ram.sprite(k).main_delay();
             if t == 0 {
-                self.ram.write_u8(SPRITE_STATE + k, 4);
-                self.ram.write_u8(SPRITE_A + k, 0);
-                self.ram.write_u8(SPRITE_DELAY_MAIN + k, 224);
+                self.ram.set_sprite_state(k, 4);
+                self.ram.set_sprite_scratch_a(k, 0);
+                self.ram.set_sprite_main_delay(k, 224);
                 return;
             }
-            self.ram.write_u8(SPRITE_HIT_TIMER + k, t | 240);
+            self.ram.set_sprite_hit_timer(k, t | 240);
             let j = self.ram.read_u8(OVERLORD_GEN2 + 3);
             if t < 128 && t & 7 == 0 && j != 16 {
                 self.ram.write_u8(OVERLORD_GEN2 + 3, j + 1);
@@ -8511,100 +8183,96 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         const TAB: [u8; 13] = [3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 1, 1, 0];
-        let t = TAB[(self.ram.read_u8(SPRITE_HEALTH + k) >> 2) as usize];
-        self.ram.write_u8(SPRITE_C + k, t);
-        if t != self.ram.read_u8(SPRITE_E + k) {
+        let t = TAB[(self.ram.sprite(k).health() >> 2) as usize];
+        self.ram.set_sprite_scratch_c(k, t);
+        if t != self.ram.sprite(k).scratch_e() {
             if t == 3 {
-                self.ram.write_u8(SPRITE_HIT_TIMER + k, 0);
+                self.ram.set_sprite_hit_timer(k, 0);
                 self.helmasaur_king_explode_mask(k);
             } else {
                 self.helmasaur_king_chip_away_at_mask(k);
             }
         }
-        self.ram.write_u8(SPRITE_E + k, t);
+        self.ram.set_sprite_scratch_e(k, t);
         let _ = self.runtime.check_damage_from_link(self.ram, k);
         self.helmasaur_king_swing_tail(k);
         self.helmasaur_king_attempt_damage(k);
         self.helmasaur_king_check_mask_damage_from_hammer(k);
-        let a1 = self.ram.read_u8(SPRITE_DELAY_AUX1 + k);
-        let a2 = self.ram.read_u8(SPRITE_DELAY_AUX2 + k);
+        let a1 = self.ram.sprite(k).aux1_delay();
+        let a2 = self.ram.sprite(k).aux2_delay();
         if a1 == 0 && a2 != 0 {
             if a2 == 0x40 {
                 self.helmasaur_king_spit_fireball(k);
-                if t >= 3 && self.ram.read_u8(SPRITE_ANIM_CLOCK + k) == 0 {
-                    self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 1);
-                    self.ram.write_u8(SPRITE_DELAY_AUX3 + k, 32);
+                if t >= 3 && self.ram.sprite(k).animation_clock() == 0 {
+                    self.ram.set_sprite_animation_clock(k, 1);
+                    self.ram.set_sprite_aux3_delay(k, 32);
                 }
             }
             return;
         } else if a1 != 0 {
-            if a1 == 96 && self.ram.read_u8(SPRITE_ANIM_CLOCK + k) == 0 {
-                self.ram.write_u8(SPRITE_ANIM_CLOCK + k, 1);
-                self.ram.write_u8(SPRITE_DELAY_AUX3 + k, 32);
+            if a1 == 96 && self.ram.sprite(k).animation_clock() == 0 {
+                self.ram.set_sprite_animation_clock(k, 1);
+                self.ram.set_sprite_aux3_delay(k, 32);
             }
             return;
         }
         const XV: [i8; 8] = [-12, -12, -4, 0, 4, 12, 12, 0];
         const YV: [i8; 8] = [0, 4, 12, 12, 12, 4, 0, 12];
-        match self.ram.read_u8(SPRITE_AI_STATE + k) {
+        match self.ram.sprite(k).ai_state() {
             0 => {
-                if (self.ram.read_u8(SPRITE_HIT_TIMER + k) != 0
-                    || self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0)
+                if (self.ram.sprite(k).hit_timer() != 0 || self.ram.sprite(k).main_delay() == 0)
                     && !self.helmasaur_king_maybe_fireball(k)
                 {
                     let j = (self.runtime.random_number(self.ram) & 7) as usize;
-                    self.ram.write_u8(SPRITE_X_VEL + k, XV[j] as u8);
-                    self.ram.write_u8(SPRITE_Y_VEL + k, YV[j] as u8);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 64);
+                    self.ram.set_sprite_velocity_x(k, XV[j] as u8);
+                    self.ram.set_sprite_velocity_y(k, YV[j] as u8);
+                    self.ram.set_sprite_main_delay(k, 64);
                     if t >= 3 {
                         self.ram
-                            .write_u8(SPRITE_X_VEL + k, self.ram.read_u8(SPRITE_X_VEL + k) << 1);
+                            .set_sprite_velocity_x(k, self.ram.sprite(k).velocity_x() << 1);
                         self.ram
-                            .write_u8(SPRITE_Y_VEL + k, self.ram.read_u8(SPRITE_Y_VEL + k) << 1);
-                        self.ram.write_u8(
-                            SPRITE_DELAY_MAIN + k,
-                            self.ram.read_u8(SPRITE_DELAY_MAIN + k) >> 1,
-                        );
+                            .set_sprite_velocity_y(k, self.ram.sprite(k).velocity_y() << 1);
+                        self.ram
+                            .set_sprite_main_delay(k, self.ram.sprite(k).main_delay() >> 1);
                     }
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 1);
+                    self.ram.set_sprite_ai_state(k, 1);
                 }
             }
             1 => {
                 self.helmasaur_king_handle_movement(k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 32);
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 2);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_main_delay(k, 32);
+                    self.ram.set_sprite_ai_state(k, 2);
                 }
             }
             2 => {
-                if (self.ram.read_u8(SPRITE_HIT_TIMER + k) != 0
-                    || self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0)
+                if (self.ram.sprite(k).hit_timer() != 0 || self.ram.sprite(k).main_delay() == 0)
                     && !self.helmasaur_king_maybe_fireball(k)
                 {
-                    self.ram.write_u8(
-                        SPRITE_DELAY_MAIN + k,
-                        if self.ram.read_u8(SPRITE_E + k) >= 3 {
+                    self.ram.set_sprite_main_delay(
+                        k,
+                        if self.ram.sprite(k).scratch_e() >= 3 {
                             32
                         } else {
                             64
                         },
                     );
-                    self.ram.write_u8(
-                        SPRITE_X_VEL + k,
-                        0u8.wrapping_sub(self.ram.read_u8(SPRITE_X_VEL + k)),
+                    self.ram.set_sprite_velocity_x(
+                        k,
+                        0u8.wrapping_sub(self.ram.sprite(k).velocity_x()),
                     );
-                    self.ram.write_u8(
-                        SPRITE_Y_VEL + k,
-                        0u8.wrapping_sub(self.ram.read_u8(SPRITE_Y_VEL + k)),
+                    self.ram.set_sprite_velocity_y(
+                        k,
+                        0u8.wrapping_sub(self.ram.sprite(k).velocity_y()),
                     );
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 3);
+                    self.ram.set_sprite_ai_state(k, 3);
                 }
             }
             3 => {
                 self.helmasaur_king_handle_movement(k);
-                if self.ram.read_u8(SPRITE_DELAY_MAIN + k) == 0 {
-                    self.ram.write_u8(SPRITE_AI_STATE + k, 0);
-                    self.ram.write_u8(SPRITE_DELAY_MAIN + k, 64);
+                if self.ram.sprite(k).main_delay() == 0 {
+                    self.ram.set_sprite_ai_state(k, 0);
+                    self.ram.set_sprite_main_delay(k, 64);
                 }
             }
             _ => {}
