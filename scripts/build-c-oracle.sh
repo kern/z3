@@ -35,6 +35,11 @@ clang $common_flags oracle/audio_passive_oracle.c \
   -Wl,-rpath,@loader_path \
   -o build/c-oracle/audio_passive_oracle
 
+clang $common_flags oracle/recorder_file_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/recorder_file_oracle
+
 clang $common_flags oracle/spc_oracle.c snes/spc.o \
   -o build/c-oracle/spc_oracle
 

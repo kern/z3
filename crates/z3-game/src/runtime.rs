@@ -2,8 +2,10 @@
 
 use crate::oam::{OAM_BUFFER, OAM_ENTRY_COUNT};
 use crate::ram::Ram;
+mod recording_file;
 pub use crate::snapshot::{LEGACY_SNAPSHOT_LEN, LegacySnapshotError};
 use crate::snapshot::{Snapshot, SnapshotMut, SnapshotRegion, SnapshotTemplate};
+pub use recording_file::StateFileError;
 use z3_core::{CanonicalState, SRAM_SIZE, WRAM_SIZE};
 use z3_snes::{
     dma::{Dma, DmaChannel},
@@ -810,13 +812,6 @@ pub enum ReplayError {
     InvalidCommand(u8),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StateFileError {
-    Truncated,
-    UnsupportedVersion(u32),
-    SizeOverflow,
-}
-
 impl StateRecorder {
     fn append_variable_length(&mut self, mut value: u32) {
         while value >= 255 {
@@ -997,96 +992,6 @@ impl StateRecorder {
             self.total_frames = 0;
         }
         self.frames_since_last = 0;
-    }
-
-    /// Encodes the exact eight-word state-recorder header followed by the key
-    /// log, optional replay base snapshot, and current machine snapshot.
-    #[must_use]
-    pub fn encode_state_file(&self, current_snapshot: &[u8]) -> Vec<u8> {
-        assert!(
-            self.base_snapshot.is_empty() || self.base_snapshot.len() == current_snapshot.len()
-        );
-        let mut header = [0u32; 8];
-        header[0] = 1;
-        header[1] = self.total_frames;
-        header[2] = self.log.len().try_into().expect("key log fits C u32");
-        header[3] = u32::from(self.last_inputs);
-        header[4] = self.frames_since_last;
-        header[5] = u32::from(!self.base_snapshot.is_empty());
-        header[6] = current_snapshot
-            .len()
-            .try_into()
-            .expect("snapshot fits C u32");
-        if self.replay_mode {
-            header[5] |= (self.replay_position_last_complete as u32) << 1;
-            header[7] = self.replay_frame_counter;
-        }
-        let mut bytes = Vec::with_capacity(
-            32 + self.log.len() + self.base_snapshot.len() + current_snapshot.len(),
-        );
-        for word in header {
-            bytes.extend_from_slice(&word.to_le_bytes());
-        }
-        bytes.extend_from_slice(&self.log);
-        bytes.extend_from_slice(&self.base_snapshot);
-        bytes.extend_from_slice(current_snapshot);
-        bytes
-    }
-
-    /// Decodes a C-compatible recorder file and returns the machine snapshot
-    /// which the caller must install before advancing another frame.
-    pub fn decode_state_file(
-        bytes: &[u8],
-        replay_from_start: bool,
-    ) -> Result<(Self, Vec<u8>), StateFileError> {
-        if bytes.len() < 32 {
-            return Err(StateFileError::Truncated);
-        }
-        let mut header = [0u32; 8];
-        for (word, chunk) in header.iter_mut().zip(bytes[..32].chunks_exact(4)) {
-            *word = u32::from_le_bytes(chunk.try_into().expect("four-byte chunk"));
-        }
-        if header[0] != 1 {
-            return Err(StateFileError::UnsupportedVersion(header[0]));
-        }
-        let log_size = usize::try_from(header[2]).map_err(|_| StateFileError::SizeOverflow)?;
-        let snapshot_size = usize::try_from(header[6]).map_err(|_| StateFileError::SizeOverflow)?;
-        let base_size = if header[5] & 1 != 0 { snapshot_size } else { 0 };
-        let required = 32usize
-            .checked_add(log_size)
-            .and_then(|size| size.checked_add(base_size))
-            .and_then(|size| size.checked_add(snapshot_size))
-            .ok_or(StateFileError::SizeOverflow)?;
-        if bytes.len() < required {
-            return Err(StateFileError::Truncated);
-        }
-        let mut position = 32;
-        let log = bytes[position..position + log_size].to_vec();
-        position += log_size;
-        let base_snapshot = bytes[position..position + base_size].to_vec();
-        position += base_size;
-        let current_snapshot = bytes[position..position + snapshot_size].to_vec();
-
-        let mut recorder = Self {
-            last_inputs: header[3] as u16,
-            frames_since_last: header[4],
-            total_frames: header[1],
-            log,
-            base_snapshot,
-            ..Self::default()
-        };
-        let snapshot_to_load = if replay_from_start {
-            let snapshot = recorder.base_snapshot.clone();
-            recorder.start_replay();
-            snapshot
-        } else {
-            recorder.replay_position = (header[5] >> 1) as usize;
-            recorder.replay_position_last_complete = recorder.replay_position;
-            recorder.replay_frame_counter = header[7];
-            recorder.replay_mode = recorder.replay_frame_counter != 0;
-            current_snapshot
-        };
-        Ok((recorder, snapshot_to_load))
     }
 }
 

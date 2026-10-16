@@ -5,9 +5,12 @@ scripts/test-c-oracle.sh
 cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
 ruby scripts/audit-spc-mapping.rb
+ruby scripts/audit-recording-abi.rb
 ruby scripts/test-replay-ranges.rb
 ruby scripts/test-recording-sweeps.rb
 cargo run -q -p z3-verify --bin check_runtime_snapshots
+cargo run -q -p z3-verify --bin check_recording_file -- \
+  build/c-oracle/recorder_file_oracle zelda3_assets.dat
 cargo test --workspace
 cargo test -q -p z3-verify --lib \
   passive_audio_protocol_preserves_queue_and_matches_legacy_snapshot -- --ignored

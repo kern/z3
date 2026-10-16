@@ -49,7 +49,7 @@ PAIRS = {
     crates/z3-game/src/runtime.rs
     crates/z3-snes/src/cpu.rs
   ],
-  "src/zelda_rtl.c" => %w[crates/z3-game/src/runtime.rs crates/z3-game/src/host.rs crates/z3-game/src/assets.rs crates/z3-snes/src/ppu.rs crates/z3-verify/src/c_oracle.rs],
+  "src/zelda_rtl.c" => %w[crates/z3-game/src/runtime.rs crates/z3-game/src/runtime/recording_file.rs crates/z3-game/src/host.rs crates/z3-game/src/assets.rs crates/z3-snes/src/ppu.rs crates/z3-verify/src/c_oracle.rs],
   "snes/apu.c" => %w[crates/z3-snes/src/apu.rs],
   "snes/cart.c" => %w[crates/z3-snes/src/cart.rs],
   "snes/cpu.c" => %w[crates/z3-snes/src/cpu.rs],
