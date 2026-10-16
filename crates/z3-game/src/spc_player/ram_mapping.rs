@@ -5,7 +5,7 @@
 //! fields are mirrored: DSP state, input ports, channel indices, and the rest
 //! of RAM retain their independent live values.
 
-use super::{Channel, SpcPlayer};
+use super::{Channel, PhraseCursor, SpcPlayer};
 
 type SpcRam = [u8; 65536];
 
@@ -32,6 +32,16 @@ impl MappedValue for u16 {
     }
     fn write(self, ram: &mut SpcRam, address: usize) {
         ram[address..address + Self::WIDTH].copy_from_slice(&self.to_le_bytes());
+    }
+}
+
+impl MappedValue for PhraseCursor {
+    const WIDTH: usize = <u16 as MappedValue>::WIDTH;
+    fn read(ram: &SpcRam, address: usize) -> Self {
+        Self::at(<u16 as MappedValue>::read(ram, address))
+    }
+    fn write(self, ram: &mut SpcRam, address: usize) {
+        self.address().write(ram, address);
     }
 }
 
@@ -190,7 +200,7 @@ player_mapping! {
     fast_forward: u8 => 0x1b;
     sfx_start_arg_pan: u8 => 0x20;
     sfx_sound_ptr_cur: u16 => 0x2c;
-    music_ptr_toplevel: u16 => 0x40;
+    music_ptr_toplevel: PhraseCursor => 0x40;
     block_count: u8 => 0x42;
     sfx_timer_accum: u8 => 0x43;
     chn: u8 => 0x44;
@@ -311,6 +321,20 @@ mod tests {
         assert!(!mapped[0x3c6]);
         assert!(mapped[0x3ff]);
         assert!(mapped[0x400..].iter().all(|&byte| !byte));
+    }
+
+    #[test]
+    fn every_phrase_position_round_trips_as_only_two_little_endian_bytes() {
+        let mut ram = std::array::from_fn(|index| (index.wrapping_mul(37) ^ (index >> 8)) as u8);
+        let before = ram;
+        for address in 0..=u16::MAX {
+            let cursor = PhraseCursor::at(address);
+            cursor.write(&mut ram, 0x40);
+            assert_eq!(&ram[0x40..0x42], &address.to_le_bytes());
+            assert_eq!(PhraseCursor::read(&ram, 0x40), cursor);
+            assert_eq!(&ram[..0x40], &before[..0x40]);
+            assert_eq!(&ram[0x42..], &before[0x42..]);
+        }
     }
 
     #[test]

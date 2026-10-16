@@ -14,6 +14,8 @@ cargo test -q -p z3-verify --lib \
 cargo test -q -p z3-verify --bin check_full_replay \
   passive_pcm_failure_details_preserve_live_state_and_legacy_still_maps -- --ignored
 build/c-oracle/audio_passive_oracle zelda3_assets.dat
+cargo test --release -p z3-game \
+  phrase_cursor_matches_static_c_music_handler -- --ignored --nocapture
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
   build/c-oracle/stream_oracle zelda3_assets.dat

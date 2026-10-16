@@ -44,6 +44,9 @@ clang $common_flags oracle/cpu_oracle.c snes/cpu.o \
 clang $common_flags oracle/spc_player_oracle.c src/spc_player.o snes/dsp.o \
   -o build/c-oracle/spc_player_oracle
 
+clang $common_flags oracle/spc_phrase_oracle.c snes/dsp.o \
+  -o build/c-oracle/spc_phrase_oracle
+
 clang $common_flags oracle/poly_oracle.c src/poly.o \
   -o build/c-oracle/poly_oracle
 

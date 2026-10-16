@@ -1,6 +1,11 @@
 //! Native music player port from `src/spc_player.c`.
 
+mod phrase_cursor;
+#[cfg(test)]
+mod phrase_oracle_tests;
 mod ram_mapping;
+
+pub use phrase_cursor::{PhraseCursor, PhraseEntry};
 
 use z3_snes::dsp::{Dsp, DspRegWriteHistory, SAMPLE_FRAMES};
 
@@ -142,7 +147,7 @@ pub struct SpcPlayer {
     pub fast_forward: u8,
     pub sfx_start_arg_pan: u8,
     pub sfx_sound_ptr_cur: u16,
-    pub music_ptr_toplevel: u16,
+    pub music_ptr_toplevel: PhraseCursor,
     pub block_count: u8,
     pub sfx_timer_accum: u8,
     pub chn: u8,
@@ -224,7 +229,7 @@ impl Default for SpcPlayer {
             fast_forward: 0,
             sfx_start_arg_pan: 0,
             sfx_sound_ptr_cur: 0,
-            music_ptr_toplevel: 0,
+            music_ptr_toplevel: PhraseCursor::default(),
             block_count: 0,
             sfx_timer_accum: 0,
             chn: 0,
@@ -899,10 +904,10 @@ impl SpcPlayer {
             self.pause_music_ctr = 0;
             self.byte_3e1 = 0;
             self.port_to_snes[0] = command;
-            self.music_ptr_toplevel = read16(
+            self.music_ptr_toplevel.jump_to(read16(
                 &self.ram,
                 0xd000u16.wrapping_add(u16::from(command - 1) * 2),
-            );
+            ));
             self.counter_sf0c = 2;
             self.key_off |= self.is_chan_on ^ 0xff;
             return;
@@ -1044,46 +1049,42 @@ impl SpcPlayer {
 
     fn load_next_phrase(&mut self) -> bool {
         loop {
-            let value = read16(&self.ram, self.music_ptr_toplevel);
-            self.music_ptr_toplevel = self.music_ptr_toplevel.wrapping_add(2);
-            if value >> 8 != 0 {
-                let mut address = value;
-                for ci in 0..8 {
-                    self.channels[ci].pattern_order_ptr_for_chan = read16(&self.ram, address);
-                    address = address.wrapping_add(2);
-                }
-                self.cur_chan_bit = 1;
-                for ci in 0..8 {
-                    if self.channels[ci].pattern_order_ptr_for_chan >> 8 != 0
-                        && self.channels[ci].instrument_id == 0
-                    {
-                        self.channel_set_instrument(ci, 0);
+            match self.music_ptr_toplevel.next_entry(&self.ram) {
+                PhraseEntry::PatternTable(mut address) => {
+                    for ci in 0..8 {
+                        self.channels[ci].pattern_order_ptr_for_chan = read16(&self.ram, address);
+                        address = address.wrapping_add(2);
                     }
-                    let c = &mut self.channels[ci];
-                    c.subroutine_num_loops = 0;
-                    c.volume_fade_ticks = 0;
-                    c.pan_num_ticks = 0;
-                    c.note_ticks_left = 1;
-                    self.cur_chan_bit = self.cur_chan_bit.wrapping_shl(1);
+                    self.cur_chan_bit = 1;
+                    for ci in 0..8 {
+                        if self.channels[ci].pattern_order_ptr_for_chan >> 8 != 0
+                            && self.channels[ci].instrument_id == 0
+                        {
+                            self.channel_set_instrument(ci, 0);
+                        }
+                        let c = &mut self.channels[ci];
+                        c.subroutine_num_loops = 0;
+                        c.volume_fade_ticks = 0;
+                        c.pan_num_ticks = 0;
+                        c.note_ticks_left = 1;
+                        self.cur_chan_bit = self.cur_chan_bit.wrapping_shl(1);
+                    }
+                    return true;
                 }
-                return true;
-            }
-            match value {
-                0 => {
+                PhraseEntry::Stop => {
                     self.pause_music();
                     return false;
                 }
-                0x80 => self.fast_forward = 0x80,
-                0x81 => self.fast_forward = 0,
-                _ => {
+                PhraseEntry::FastForwardOn => self.fast_forward = 0x80,
+                PhraseEntry::FastForwardOff => self.fast_forward = 0,
+                PhraseEntry::Repeat(count) => {
                     self.block_count = self.block_count.wrapping_sub(1);
                     if (self.block_count as i8) < 0 {
-                        self.block_count = value as u8;
+                        self.block_count = count;
                     }
-                    let destination = read16(&self.ram, self.music_ptr_toplevel);
-                    self.music_ptr_toplevel = self.music_ptr_toplevel.wrapping_add(2);
+                    let destination = self.music_ptr_toplevel.read_repeat_destination(&self.ram);
                     if self.block_count != 0 {
-                        self.music_ptr_toplevel = destination;
+                        self.music_ptr_toplevel.jump_to(destination);
                     }
                 }
             }

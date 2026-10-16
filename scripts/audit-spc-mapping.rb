@@ -32,11 +32,11 @@ def rust_rows(source, schema)
   abort "missing Rust schema #{schema}" unless body
 
   rows = body.lines.reject { |line| line.strip.empty? }.map do |line|
-    match = /^\s*(\w+):\s*(u8|u16|\[u8;\s*4\])\s*=>\s*(0x[0-9a-f]+);\s*$/.match(line)
+    match = /^\s*(\w+):\s*(u8|u16|PhraseCursor|\[u8;\s*4\])\s*=>\s*(0x[0-9a-f]+);\s*$/.match(line)
     abort "unparsed Rust schema row #{line.inspect}" unless match
 
     field, type, address = match.captures
-    width = { 'u8' => 1, 'u16' => 2, '[u8;4]' => 4 }.fetch(type.delete(' '))
+    width = { 'u8' => 1, 'u16' => 2, 'PhraseCursor' => 2, '[u8;4]' => 4 }.fetch(type.delete(' '))
     [field, address.to_i(16), width]
   end
   rows
