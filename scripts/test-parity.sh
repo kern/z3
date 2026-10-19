@@ -6,6 +6,7 @@ cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
 ruby scripts/audit-spc-mapping.rb
 ruby scripts/audit-recording-abi.rb
+ruby scripts/audit-recorder-reference.rb
 ruby scripts/test-replay-ranges.rb
 ruby scripts/test-recording-sweeps.rb
 cargo run -q -p z3-verify --bin check_runtime_snapshots
@@ -19,6 +20,10 @@ cargo test -q -p z3-verify --bin check_full_replay \
 build/c-oracle/audio_passive_oracle zelda3_assets.dat
 cargo test --release -p z3-game \
   phrase_cursor_matches_static_c_music_handler -- --ignored --nocapture
+cargo test --release -p z3-game \
+  pattern_cursors_match_static_c_handlers -- --ignored --nocapture
+cargo test --release -p z3-game \
+  recorder_scheduler_matches_original_c_whole_state -- --ignored --nocapture
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
   build/c-oracle/stream_oracle zelda3_assets.dat

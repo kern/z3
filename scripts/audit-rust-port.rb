@@ -33,7 +33,7 @@ PAIRS = {
   "src/player_oam.c" => %w[crates/z3-game/src/player_oam.rs],
   "src/poly.c" => %w[crates/z3-game/src/poly.rs],
   "src/select_file.c" => %w[crates/z3-game/src/select_file.rs],
-  "src/spc_player.c" => %w[crates/z3-game/src/spc_player.rs crates/z3-game/src/spc_player/ram_mapping.rs crates/z3-game/src/spc_player/phrase_cursor.rs],
+  "src/spc_player.c" => %w[crates/z3-game/src/spc_player.rs crates/z3-game/src/spc_player/ram_mapping.rs crates/z3-game/src/spc_player/phrase_cursor.rs crates/z3-game/src/spc_player/pattern_cursor.rs],
   "src/sprite.c" => %w[crates/z3-game/src/sprite.rs],
   "src/sprite_main.c" => %w[crates/z3-game/src/sprite_main_bank0.rs crates/z3-game/src/sprite_main_bank1.rs crates/z3-game/src/sprite_main_bank2a.rs crates/z3-game/src/sprite_main_bank2b.rs],
   "src/tagalong.c" => %w[crates/z3-game/src/tagalong.rs],
@@ -49,7 +49,7 @@ PAIRS = {
     crates/z3-game/src/runtime.rs
     crates/z3-snes/src/cpu.rs
   ],
-  "src/zelda_rtl.c" => %w[crates/z3-game/src/runtime.rs crates/z3-game/src/runtime/recording_file.rs crates/z3-game/src/host.rs crates/z3-game/src/assets.rs crates/z3-snes/src/ppu.rs crates/z3-verify/src/c_oracle.rs],
+  "src/zelda_rtl.c" => %w[crates/z3-game/src/runtime.rs crates/z3-game/src/runtime/recorder.rs crates/z3-game/src/runtime/recorder/recording_file.rs crates/z3-game/src/runtime/recorder/replay_log.rs crates/z3-game/src/host.rs crates/z3-game/src/assets.rs crates/z3-snes/src/ppu.rs crates/z3-verify/src/c_oracle.rs],
   "snes/apu.c" => %w[crates/z3-snes/src/apu.rs],
   "snes/cart.c" => %w[crates/z3-snes/src/cart.rs],
   "snes/cpu.c" => %w[crates/z3-snes/src/cpu.rs],
@@ -348,7 +348,8 @@ EQUIVALENT_NAMES = {
   "Port3_StartNewSound" => "port_start_new_sound",
   "RunAudioPlayer" => "generate_samples",
   "SpcPlayer_Create" => "new",
-  "ByteArray_AppendVl" => "append_variable_length",
+  # The recorder's LogWriter owns the original 255-extension append loop.
+  "ByteArray_AppendVl" => "variable_length",
   "EmuSyncMemoryRegion" => "import_canonical_state",
   "EmuSynchronizeWholeState" => "canonical_state",
   "IncrementCrystalCountdown" => "determine_run_what",

@@ -1,9 +1,13 @@
 //! Native music player port from `src/spc_player.c`.
 
+mod pattern_cursor;
 mod phrase_cursor;
 #[cfg(test)]
 mod phrase_oracle_tests;
 mod ram_mapping;
+pub use pattern_cursor::{PatternAddress, PatternCursor};
+#[cfg(test)]
+mod pattern_oracle_tests;
 
 pub use phrase_cursor::{PhraseCursor, PhraseEntry};
 
@@ -72,7 +76,7 @@ fn fade(value: &mut u16, add: u16, target: u8, continue_fade: bool) {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Channel {
-    pub pattern_order_ptr_for_chan: u16,
+    pub pattern_order_ptr_for_chan: PatternCursor,
     pub note_ticks_left: u8,
     pub note_keyoff_ticks_left: u8,
     pub subroutine_num_loops: u8,
@@ -90,8 +94,8 @@ pub struct Channel {
     pub channel_volume_master: u8,
     pub instrument_id: u8,
     pub instrument_pitch_base: u16,
-    pub saved_pattern_ptr: u16,
-    pub pattern_start_ptr: u16,
+    pub saved_pattern_ptr: PatternAddress,
+    pub pattern_start_ptr: PatternAddress,
     pub pitch_envelope_num_ticks: u8,
     pub pitch_envelope_delay: u8,
     pub pitch_envelope_direction: u8,
@@ -463,28 +467,29 @@ impl SpcPlayer {
 
     fn pitch_slide_to_note_check(&mut self, ci: usize) {
         let ptr = self.channels[ci].pattern_order_ptr_for_chan;
-        if self.channels[ci].pitch_slide_length != 0 || self.ram[ptr as usize] != 0xf9 {
+        if self.channels[ci].pitch_slide_length != 0 || ptr.peek(&self.ram) != 0xf9 {
             return;
         }
         if self.cur_chan_bit & self.is_chan_on != 0 {
-            self.channels[ci].pattern_order_ptr_for_chan = ptr.wrapping_add(4);
+            self.channels[ci].pattern_order_ptr_for_chan.advance(4);
             return;
         }
-        let delay = self.ram[ptr.wrapping_add(1) as usize];
-        let length = self.ram[ptr.wrapping_add(2) as usize];
-        let note = self.ram[ptr.wrapping_add(3) as usize]
+        let delay = ptr.peek_offset(&self.ram, 1);
+        let length = ptr.peek_offset(&self.ram, 2);
+        let note = ptr
+            .peek_offset(&self.ram, 3)
             .wrapping_add(self.global_transposition)
             .wrapping_add(self.channels[ci].channel_transposition);
-        self.channels[ci].pattern_order_ptr_for_chan = ptr.wrapping_add(4);
+        self.channels[ci].pattern_order_ptr_for_chan.advance(4);
         self.channels[ci].pitch_slide_delay_left = delay;
         self.channels[ci].pitch_slide_length = length;
         self.compute_pitch_add(ci, note);
     }
 
     fn next_pattern_byte(&mut self, ci: usize) -> u8 {
-        let address = self.channels[ci].pattern_order_ptr_for_chan;
-        self.channels[ci].pattern_order_ptr_for_chan = address.wrapping_add(1);
-        self.ram[address as usize]
+        self.channels[ci]
+            .pattern_order_ptr_for_chan
+            .read_byte(&self.ram)
     }
 
     fn handle_effect(&mut self, ci: usize, effect: u8) {
@@ -569,10 +574,10 @@ impl SpcPlayer {
                 let high = self.next_pattern_byte(ci);
                 let loops = self.next_pattern_byte(ci);
                 let c = &mut self.channels[ci];
-                c.pattern_start_ptr = u16::from_le_bytes([arg, high]);
+                c.pattern_start_ptr = PatternAddress::at(u16::from_le_bytes([arg, high]));
                 c.subroutine_num_loops = loops;
-                c.saved_pattern_ptr = c.pattern_order_ptr_for_chan;
-                c.pattern_order_ptr_for_chan = c.pattern_start_ptr;
+                c.saved_pattern_ptr = c.pattern_order_ptr_for_chan.bookmark();
+                c.pattern_order_ptr_for_chan.jump_to(c.pattern_start_ptr);
             }
             0xf0 => {
                 let c = &mut self.channels[ci];
@@ -639,32 +644,31 @@ impl SpcPlayer {
     fn want_write_kof(&self, ci: usize) -> bool {
         let c = &self.channels[ci];
         let mut loops = c.subroutine_num_loops;
-        let mut ptr = c.pattern_order_ptr_for_chan;
+        let mut probe = c.pattern_order_ptr_for_chan.fork();
         loop {
-            let mut cmd = self.ram[ptr as usize];
-            ptr = ptr.wrapping_add(1);
+            let mut cmd = probe.read_byte(&self.ram);
             if cmd == 0 {
                 if loops == 0 {
                     return true;
                 }
                 loops = loops.wrapping_sub(1);
-                ptr = if loops == 0 {
+                probe.jump_to(if loops == 0 {
                     c.saved_pattern_ptr
                 } else {
                     c.pattern_start_ptr
-                };
+                });
             } else {
                 while cmd & 0x80 == 0 {
-                    cmd = self.ram[ptr as usize];
-                    ptr = ptr.wrapping_add(1);
+                    cmd = probe.read_byte(&self.ram);
                 }
                 if cmd == 0xc8 {
                     return false;
                 }
                 if cmd == 0xef {
-                    ptr = read16(&self.ram, ptr);
+                    let destination = probe.call_destination(&self.ram);
+                    probe.jump_to(destination);
                 } else if cmd >= 0xe0 {
-                    ptr = ptr.wrapping_add(u16::from(EFFECT_BYTE_LENGTH[usize::from(cmd - 0xe0)]));
+                    probe.advance(u16::from(EFFECT_BYTE_LENGTH[usize::from(cmd - 0xe0)]));
                 } else {
                     return true;
                 }
@@ -938,7 +942,7 @@ impl SpcPlayer {
             self.vol_dirty = 0;
             self.cur_chan_bit = 1;
             for ci in 0..8 {
-                if self.channels[ci].pattern_order_ptr_for_chan >> 8 != 0 {
+                if self.channels[ci].pattern_order_ptr_for_chan.music_active() {
                     self.channels[ci].note_ticks_left =
                         self.channels[ci].note_ticks_left.wrapping_sub(1);
                     if self.channels[ci].note_ticks_left == 0 {
@@ -953,11 +957,13 @@ impl SpcPlayer {
                                 }
                                 let c = &mut self.channels[ci];
                                 c.subroutine_num_loops = c.subroutine_num_loops.wrapping_sub(1);
-                                c.pattern_order_ptr_for_chan = if c.subroutine_num_loops == 0 {
-                                    c.saved_pattern_ptr
-                                } else {
-                                    c.pattern_start_ptr
-                                };
+                                c.pattern_order_ptr_for_chan.jump_to(
+                                    if c.subroutine_num_loops == 0 {
+                                        c.saved_pattern_ptr
+                                    } else {
+                                        c.pattern_start_ptr
+                                    },
+                                );
                                 continue;
                             }
                             if cmd & 0x80 == 0 {
@@ -1034,7 +1040,7 @@ impl SpcPlayer {
         }
         self.cur_chan_bit = 1;
         for ci in 0..8 {
-            if self.channels[ci].pattern_order_ptr_for_chan >> 8 != 0 {
+            if self.channels[ci].pattern_order_ptr_for_chan.music_active() {
                 self.chan_handle_tick(ci);
             }
             self.cur_chan_bit = self.cur_chan_bit.wrapping_shl(1);
@@ -1052,12 +1058,13 @@ impl SpcPlayer {
             match self.music_ptr_toplevel.next_entry(&self.ram) {
                 PhraseEntry::PatternTable(mut address) => {
                     for ci in 0..8 {
-                        self.channels[ci].pattern_order_ptr_for_chan = read16(&self.ram, address);
+                        self.channels[ci].pattern_order_ptr_for_chan =
+                            PatternCursor::at(read16(&self.ram, address));
                         address = address.wrapping_add(2);
                     }
                     self.cur_chan_bit = 1;
                     for ci in 0..8 {
-                        if self.channels[ci].pattern_order_ptr_for_chan >> 8 != 0
+                        if self.channels[ci].pattern_order_ptr_for_chan.music_active()
                             && self.channels[ci].instrument_id == 0
                         {
                             self.channel_set_instrument(ci, 0);
@@ -1518,7 +1525,7 @@ impl SpcPlayer {
         } else if self.port_to_snes[0] != 0 {
             self.cur_chan_bit = 1;
             for ci in 0..8 {
-                if self.channels[ci].pattern_order_ptr_for_chan >> 8 != 0 {
+                if self.channels[ci].pattern_order_ptr_for_chan.music_active() {
                     self.handle_pan_and_sweep(ci);
                 }
                 self.cur_chan_bit = self.cur_chan_bit.wrapping_shl(1);

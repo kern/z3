@@ -425,7 +425,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 native.wram[0x4d],
                 u16::from_le_bytes([native.wram[0x24], native.wram[0x25]]),
                 native.wram[0x29],
-                native.recorder.last_inputs,
+                native.recorder.last_inputs(),
                 &reference.wram[0x12c..=0x133],
                 &native.wram[0x12c..=0x133],
                 ancilla_summary(&reference.wram[..]),

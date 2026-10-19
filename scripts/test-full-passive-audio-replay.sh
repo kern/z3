@@ -13,11 +13,20 @@ if [ ! -f "$assets" ]; then
   exit 1
 fi
 
-cargo build -q --release -p z3-verify --bin check_full_replay
+if [ "${Z3_REPLAY_EXECUTABLE+x}" = x ]; then
+  executable=$Z3_REPLAY_EXECUTABLE
+else
+  cargo build -q --release -p z3-verify --bin check_full_replay
+  executable=target/release/check_full_replay
+fi
+if [ ! -x "$executable" ]; then
+  echo "missing replay executable: $executable" >&2
+  exit 1
+fi
 
 chapter=1
 while [ "$chapter" -le 13 ]; do
   Z3_VERIFY_AUDIO_ONLY=1 Z3_VERIFY_PASSIVE_AUDIO_STATE=1 \
-    target/release/check_full_replay "$oracle" "$assets" "$chapter"
+    "$executable" "$oracle" "$assets" "$chapter"
   chapter=$((chapter + 1))
 done

@@ -256,7 +256,7 @@ fn phrase_cursor_matches_static_c_music_handler() {
     for channel in 0..8 {
         let mut player = template.clone();
         player.counter_sf0c = 0;
-        player.channels[channel].pattern_order_ptr_for_chan = 0x4000;
+        player.channels[channel].pattern_order_ptr_for_chan = PatternCursor::at(0x4000);
         player.channels[channel].note_ticks_left = 1;
         player.ram[0x4000] = 0;
         word(&mut player, PHRASE, TABLE);

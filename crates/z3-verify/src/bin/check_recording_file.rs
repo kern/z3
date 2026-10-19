@@ -180,12 +180,13 @@ fn check_reference_files(root: &Path) -> Result<usize, Error> {
             let (recorder, selected) = StateRecorder::decode_state_file(&bytes, replay_from_start)
                 .map_err(|error| format!("{name}: production rejected reference: {error:?}"))?;
             assert_eq!(
-                recorder.total_frames, independent.header.total_frames,
+                recorder.total_frames(),
+                independent.header.total_frames,
                 "{name}"
             );
-            assert_eq!(recorder.log, independent.log, "{name}: log");
+            assert_eq!(recorder.log(), independent.log, "{name}: log");
             assert_eq!(
-                recorder.base_snapshot,
+                recorder.base_snapshot(),
                 base.unwrap_or_default(),
                 "{name}: base"
             );
@@ -196,8 +197,8 @@ fn check_reference_files(root: &Path) -> Result<usize, Error> {
                     base.unwrap_or_default(),
                     "{name}: selected base/reset"
                 );
-                assert_eq!(recorder.last_inputs, 0);
-                assert_eq!(recorder.frames_since_last, 0);
+                assert_eq!(recorder.last_inputs(), 0);
+                assert_eq!(recorder.frames_since_last(), 0);
                 assert!(recorder.is_replaying());
                 expected_header.last_inputs = 0;
                 expected_header.frames_since_last = 0;
@@ -210,11 +211,11 @@ fn check_reference_files(root: &Path) -> Result<usize, Error> {
                     "{name}: selected current"
                 );
                 assert_eq!(
-                    u32::from(recorder.last_inputs),
+                    u32::from(recorder.last_inputs()),
                     independent.header.last_inputs
                 );
                 assert_eq!(
-                    recorder.frames_since_last,
+                    recorder.frames_since_last(),
                     independent.header.frames_since_last
                 );
                 assert_eq!(
@@ -303,8 +304,8 @@ fn main() -> Result<(), Error> {
                         // even though resume derives its mode from hdr[7].
                         if replay && frame == 0 {
                             rust.start_replay();
-                            rust.last_inputs = inputs as u16;
-                            rust.frames_since_last = elapsed;
+                            assert_eq!(rust.last_inputs(), inputs as u16);
+                            assert_eq!(rust.frames_since_last(), elapsed);
                         }
                         let fields = [
                             total,

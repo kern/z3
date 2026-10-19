@@ -40,6 +40,11 @@ clang $common_flags oracle/recorder_file_oracle.c \
   -Wl,-rpath,@loader_path \
   -o build/c-oracle/recorder_file_oracle
 
+clang $common_flags oracle/recorder_replay_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/recorder_replay_oracle
+
 clang $common_flags oracle/spc_oracle.c snes/spc.o \
   -o build/c-oracle/spc_oracle
 
@@ -51,6 +56,9 @@ clang $common_flags oracle/spc_player_oracle.c src/spc_player.o snes/dsp.o \
 
 clang $common_flags oracle/spc_phrase_oracle.c snes/dsp.o \
   -o build/c-oracle/spc_phrase_oracle
+
+clang $common_flags oracle/spc_pattern_oracle.c snes/dsp.o \
+  -o build/c-oracle/spc_pattern_oracle
 
 clang $common_flags oracle/poly_oracle.c src/poly.o \
   -o build/c-oracle/poly_oracle

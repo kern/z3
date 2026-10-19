@@ -27,8 +27,8 @@ state. All converted views still access the single live compatibility image.
 | M12 OAM | Entry-unit local cursor/player drawing; typed live region allocator, independent pointers and effect wrap policies; two Quake loops migrated; hidden bytes, publication order, overflow/fallback order and one-past results retained | Remaining local effect draw loops, ASCII region selection, native/bank pointer mutations and other entity draw paths |
 | M14 ending routing | 58 explicit `EndingCall` variants through immediate/deferred production dispatch; string routes removed | Other broad capability traits, default no-ops and borrow scaffolding |
 | M14/M15 graphics contexts | CPU scripts/callbacks cannot borrow VRAM; hook-free uploads borrow disjoint graphics storage; normal planar source/conversion temporaries removed | Snapshot/diff/flush bridge, remaining mixed service helpers and transient live-VRAM routing |
-| M17 snapshots | Validated legacy region views, explicit opaque template ownership, separate load/write operations and immutable borrowed loading; independent 25-image cross-check; named outer recording header and borrowed section codec | Replay-log codec/scheduler ownership, remaining device-specific layouts and patch API |
-| M18 SPC mapping | One typed ordered schema generates import/export and passive snapshots for 598 bytes; independent C-table audit; distinct passive C/Rust diagnostics retain legacy live-export checks; owned top-level phrase cursor | Channel/subroutine/SFX cursors, remaining voice/command semantics and broader codec/device separation |
+| M17 snapshots | Validated legacy region views, explicit opaque template ownership, separate load/write operations and immutable borrowed loading; independent 25-image cross-check; named outer recording header and borrowed section codec; owned replay tape, typed log codec and scheduler with whole-state C/frozen-reference differentials | Remaining device-specific layouts and patch API |
+| M18 SPC mapping | One typed ordered schema generates import/export and passive snapshots for 598 bytes; independent C-table audit; distinct passive C/Rust diagnostics retain legacy live-export checks; owned phrase and channel pattern cursors, subroutine bookmarks and independent KOF probes | SFX cursors, remaining voice/command semantics, live table/upload codecs and broader device separation |
 | M20 host commands | Lossless `HostCommand` including unknown values, typed dispatch and runtime patch keys | Host scheduling, audio ownership, RAII and application decomposition |
 | M23 renderer | Separate preset/source/plan/texture-mipmap modules; distinct sampling/attachment views; surface configuration/lifetime and frame-history owners; real Metal readback regression | Further draw-policy/pipeline decomposition and broader preset, surface-error and platform coverage |
 
@@ -38,9 +38,29 @@ asset padding/credits lookup, command round trips, and ending call ordering.
 See [batch 1](modernization-verification.md), [batch 2](modernization-batch-2.md),
 [batch 3](modernization-batch-3.md), [batch 4](modernization-batch-4.md)
 [batch 5](modernization-batch-5.md), [batch 6](modernization-batch-6.md)
-and [batch 7](modernization-batch-7.md)
+[batch 7](modernization-batch-7.md) and [batch 8](modernization-batch-8.md)
 for exact commands, completed gates and recording-sweep status. Counts describe
 source accesses, including migrated existing tests, not distinct state fields.
+
+## Remaining-domain census (2026-10-16)
+
+Read-only reconnaissance during batch 8 identified these next complete-domain
+migrations. Counts are lexical lower bounds, not completion proofs: they omit
+some dynamic offsets, aliases and bulk operations, and must be paired with
+reader/writer/reset/liveness maps before changes.
+
+| Domain | Remaining evidence / coherent migration |
+| --- | --- |
+| Player scalar views | 3,323 direct calls at C `link_*` addresses: 1,041 at already-modeled addresses and 2,282 at unmodeled addresses. The census includes phase aliases; at least 120 attract/title calls must not be mechanically rebranded as player state. Expand the schema and migrate real callers, including 1,425 unmodeled player-module calls. |
+| Swimming axes | Six two-axis word families, 76 identified direct/pointer-derived sites plus resets. A live `SwimAxes` domain can remove `varN_addr` arithmetic across player, player-OAM, dungeon, follower and native services. Preserve odd-aligned words, low-byte aliases, scan order and the exact ten-word reset that retains direction words/padding. |
+| Remaining entity pools | At least 189 garnish and 280 overlord indexed accesses across callers. Finish each complete pool, with allocation/countdown/overwrite order and inactive bytes retained. |
+| Existing pool adoption | Sprite accesses remain in ending (206), overlord (76), native gameplay (34) and other modules; ancilla accesses remain in player (95), messaging (19), native gameplay (15) and elsewhere. Existing views alone do not complete caller migration. |
+| Inventory targets | The 76-entry address table and pointer-returning callback still leak layout knowledge. Replace them with typed byte/word/bottle-family targets and live operations, preserving duplicate targets, order, word-OR behavior and invalid-index panics. |
+| OAM drawing | 243 explicit global-pointer accesses across 94 functions remain, plus 61 ancilla current-index starts, 84 helper mentions and 16 ASCII region-allocation calls. Complete bank/native/effect families and fixed-slot UI/ending/follower paths; preserve independent extension words, validation variants, hook liveness, hidden bytes and unmasked packing. |
+| SFX interpreter | Own both current-token and saved positions, distinct from next-unread music patterns. A pre-existing promoted-index discrepancy for zero sound IDs also needs a focused C-grounded correction; it must not be silently preserved or bundled as an unexplained refactor change. |
+
+This census adds concrete work to the existing M01–M24 scope; it does not replace
+that scope with only the domains listed here.
 
 ## Non-negotiable behavior
 

@@ -31,13 +31,22 @@ if [ ! -f "$assets" ]; then
   exit 1
 fi
 
-cargo build -q --release -p z3-verify --bin check_full_replay
+if [ "${Z3_REPLAY_EXECUTABLE+x}" = x ]; then
+  executable=$Z3_REPLAY_EXECUTABLE
+else
+  cargo build -q --release -p z3-verify --bin check_full_replay
+  executable=target/release/check_full_replay
+fi
+if [ ! -x "$executable" ]; then
+  echo "missing replay executable: $executable" >&2
+  exit 1
+fi
 
 run_range() (
   current=$1
   last=$2
   while [ "$current" -le "$last" ]; do
-    target/release/check_full_replay "$oracle" "$assets" "$current"
+    "$executable" "$oracle" "$assets" "$current"
     current=$((current + 1))
   done
 )

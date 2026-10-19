@@ -3,7 +3,7 @@
 //! Snapshot payloads are deliberately opaque here. In particular, this codec
 //! accepts zero-sized and non-machine-sized snapshots and ignores file tails.
 
-use super::StateRecorder;
+use super::{RecordedInputs, StateRecorder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StateFileError {
@@ -157,10 +157,15 @@ impl StateRecorder {
         );
         let mut header = Header {
             version: 1,
-            total_frames: self.total_frames,
-            log_size: self.log.len().try_into().expect("key log fits C u32"),
-            last_inputs: u32::from(self.last_inputs),
-            frames_since_last: self.frames_since_last,
+            total_frames: self.tape.total_frames,
+            log_size: self
+                .tape
+                .bytes
+                .len()
+                .try_into()
+                .expect("key log fits C u32"),
+            last_inputs: u32::from(self.tape.last_inputs),
+            frames_since_last: self.tape.frames_since_last,
             base_and_position: u32::from(!self.base_snapshot.is_empty()),
             snapshot_size: current_snapshot
                 .len()
@@ -168,11 +173,16 @@ impl StateRecorder {
                 .expect("snapshot fits C u32"),
             replay_frame_counter: 0,
         };
-        if self.replay_mode {
-            header.base_and_position |= (self.replay_position_last_complete as u32) << 1;
-            header.replay_frame_counter = self.replay_frame_counter;
+        if self.tape.replay.active {
+            header.base_and_position |= (self.tape.replay.last_complete.0 as u32) << 1;
+            header.replay_frame_counter = self.tape.replay.frame_counter;
         }
-        encode_sections(header, &self.log, &self.base_snapshot, current_snapshot)
+        encode_sections(
+            header,
+            &self.tape.bytes,
+            &self.base_snapshot,
+            current_snapshot,
+        )
     }
 
     /// Decodes a C-compatible recorder file and returns the machine snapshot
@@ -192,12 +202,14 @@ impl StateRecorder {
         let current_snapshot = file.current_snapshot.to_vec();
         let _ignored_trailing_bytes = file.tail;
         let mut recorder = Self {
-            last_inputs: header.last_inputs as u16,
-            frames_since_last: header.frames_since_last,
-            total_frames: header.total_frames,
-            log,
             base_snapshot,
-            ..Self::default()
+            tape: RecordedInputs {
+                last_inputs: header.last_inputs as u16,
+                frames_since_last: header.frames_since_last,
+                total_frames: header.total_frames,
+                bytes: log,
+                ..RecordedInputs::default()
+            },
         };
         let snapshot_to_load = match mode {
             LoadMode::ReplayFromStart => {
@@ -206,10 +218,10 @@ impl StateRecorder {
                 snapshot
             }
             LoadMode::Resume => {
-                recorder.replay_position = header.resume_position();
-                recorder.replay_position_last_complete = recorder.replay_position;
-                recorder.replay_frame_counter = header.replay_frame_counter;
-                recorder.replay_mode = recorder.replay_frame_counter != 0;
+                recorder.tape.replay.position.0 = header.resume_position();
+                recorder.tape.replay.last_complete.0 = recorder.tape.replay.position.0;
+                recorder.tape.replay.frame_counter = header.replay_frame_counter;
+                recorder.tape.replay.active = recorder.tape.replay.frame_counter != 0;
                 current_snapshot
             }
         };
@@ -249,12 +261,12 @@ mod tests {
         assert_eq!(encoded_header, bytes[..32]);
         let (recorder, snapshot) = StateRecorder::decode_state_file(&bytes, false).unwrap();
         assert_eq!(snapshot, [9, 8, 7]);
-        assert_eq!(recorder.last_inputs, 0x1234);
-        assert_eq!(recorder.replay_position, (words[5] >> 1) as usize);
-        assert_eq!(recorder.replay_frame_counter, words[7]);
-        assert!(recorder.replay_mode);
-        assert_eq!(recorder.replay_next_command_at, 0);
-        assert_eq!(recorder.replay_command, 0);
+        assert_eq!(recorder.tape.last_inputs, 0x1234);
+        assert_eq!(recorder.tape.replay.position.0, (words[5] >> 1) as usize);
+        assert_eq!(recorder.tape.replay.frame_counter, words[7]);
+        assert!(recorder.tape.replay.active);
+        assert_eq!(recorder.tape.replay.next_command_at, 0);
+        assert_eq!(recorder.tape.replay.command.0, 0);
         let mut canonical_words = words;
         canonical_words[3] = 0x1234;
         assert_eq!(
@@ -332,8 +344,8 @@ mod tests {
                 );
                 let (resume, snapshot) = StateRecorder::decode_state_file(&bytes, false).unwrap();
                 assert_eq!(snapshot, current);
-                assert_eq!(resume.replay_position, 0x7fffffff);
-                assert_eq!(resume.last_inputs, u16::MAX);
+                assert_eq!(resume.tape.replay.position.0, 0x7fffffff);
+                assert_eq!(resume.tape.last_inputs, u16::MAX);
                 assert_eq!(
                     resume.encode_state_file(&snapshot),
                     fixture(
@@ -353,11 +365,11 @@ mod tests {
                 );
                 let (start, snapshot) = StateRecorder::decode_state_file(&bytes, true).unwrap();
                 assert_eq!(snapshot, if base { current.clone() } else { Vec::new() });
-                assert_eq!(start.last_inputs, 0);
-                assert_eq!(start.frames_since_last, 0);
-                assert_eq!(start.replay_position, 0);
-                assert_eq!(start.replay_frame_counter, 0);
-                assert!(start.replay_mode);
+                assert_eq!(start.tape.last_inputs, 0);
+                assert_eq!(start.tape.frames_since_last, 0);
+                assert_eq!(start.tape.replay.position.0, 0);
+                assert_eq!(start.tape.replay.frame_counter, 0);
+                assert!(start.tape.replay.active);
             }
         }
     }
@@ -365,18 +377,19 @@ mod tests {
     #[test]
     fn resume_mode_depends_only_on_saved_frame_and_encoding_uses_last_complete() {
         let mut recorder = StateRecorder {
-            last_inputs: 0x1234,
-            total_frames: 90,
-            frames_since_last: 7,
-            log: vec![0x81, 0xff],
             base_snapshot: vec![1, 2, 3],
-            replay_position: 30,
-            replay_position_last_complete: 4,
-            replay_frame_counter: 8,
-            replay_next_command_at: 50,
-            replay_command: 0xc1,
-            replay_mode: true,
+            ..StateRecorder::default()
         };
+        recorder.tape.last_inputs = 0x1234;
+        recorder.tape.total_frames = 90;
+        recorder.tape.frames_since_last = 7;
+        recorder.tape.bytes = vec![0x81, 0xff];
+        recorder.tape.replay.position.0 = 30;
+        recorder.tape.replay.last_complete.0 = 4;
+        recorder.tape.replay.frame_counter = 8;
+        recorder.tape.replay.next_command_at = 50;
+        recorder.tape.replay.command.0 = 0xc1;
+        recorder.tape.replay.active = true;
         let bytes = recorder.encode_state_file(&[4, 5, 6]);
         assert_eq!(
             bytes,
@@ -385,10 +398,10 @@ mod tests {
                 &[0x81, 0xff, 1, 2, 3, 4, 5, 6]
             )
         );
-        recorder.replay_position_last_complete = usize::MAX;
+        recorder.tape.replay.last_complete.0 = usize::MAX;
         let header = Header::decode(&recorder.encode_state_file(&[4, 5, 6])).unwrap();
         assert_eq!(header.base_and_position, u32::MAX);
-        recorder.replay_mode = false;
+        recorder.tape.replay.active = false;
         assert_eq!(
             recorder.encode_state_file(&[4, 5, 6]),
             fixture(
@@ -398,8 +411,8 @@ mod tests {
         );
         let bytes = fixture([1, 0, 0, 0, 0, 0xfffffffe, 0, 0], &[]);
         let (resume, _) = StateRecorder::decode_state_file(&bytes, false).unwrap();
-        assert!(!resume.replay_mode);
-        assert_eq!(resume.replay_position, 0x7fffffff);
+        assert!(!resume.tape.replay.active);
+        assert_eq!(resume.tape.replay.position.0, 0x7fffffff);
     }
 
     #[test]

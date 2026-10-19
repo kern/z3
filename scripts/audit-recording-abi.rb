@@ -13,8 +13,10 @@ end
 root = File.expand_path('..', __dir__)
 reference = File.read(File.join(root, 'src/zelda_rtl.c'))
 expected = recorder_declaration(reference)
-mirror = File.read(File.join(root, 'oracle/recorder_file_oracle.c'))
-abort 'C recorder harness ABI declaration differs from original' unless recorder_declaration(mirror) == expected
+%w[recorder_file_oracle.c recorder_replay_oracle.c].each do |name|
+  mirror = File.read(File.join(root, 'oracle', name))
+  abort "C recorder harness ABI declaration differs from original: #{name}" unless recorder_declaration(mirror) == expected
+end
 
 # Exercise the actual normalizer against changes that must not be overlooked.
 probe = 'typedef struct StateRecorder { uint16 last_inputs; uint32 total_frames; } StateRecorder;'

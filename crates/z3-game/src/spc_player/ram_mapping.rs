@@ -5,7 +5,7 @@
 //! fields are mirrored: DSP state, input ports, channel indices, and the rest
 //! of RAM retain their independent live values.
 
-use super::{Channel, PhraseCursor, SpcPlayer};
+use super::{Channel, PatternAddress, PatternCursor, PhraseCursor, SpcPlayer};
 
 type SpcRam = [u8; 65536];
 
@@ -36,6 +36,26 @@ impl MappedValue for u16 {
 }
 
 impl MappedValue for PhraseCursor {
+    const WIDTH: usize = <u16 as MappedValue>::WIDTH;
+    fn read(ram: &SpcRam, address: usize) -> Self {
+        Self::at(<u16 as MappedValue>::read(ram, address))
+    }
+    fn write(self, ram: &mut SpcRam, address: usize) {
+        self.address().write(ram, address);
+    }
+}
+
+impl MappedValue for PatternCursor {
+    const WIDTH: usize = <u16 as MappedValue>::WIDTH;
+    fn read(ram: &SpcRam, address: usize) -> Self {
+        Self::at(<u16 as MappedValue>::read(ram, address))
+    }
+    fn write(self, ram: &mut SpcRam, address: usize) {
+        self.address().write(ram, address);
+    }
+}
+
+impl MappedValue for PatternAddress {
     const WIDTH: usize = <u16 as MappedValue>::WIDTH;
     fn read(ram: &SpcRam, address: usize) -> Self {
         Self::at(<u16 as MappedValue>::read(ram, address))
@@ -130,7 +150,7 @@ macro_rules! player_mapping {
 }
 
 channel_mapping! {
-    pattern_order_ptr_for_chan: u16 => 0x30;
+    pattern_order_ptr_for_chan: PatternCursor => 0x30;
     note_ticks_left: u8 => 0x70;
     note_keyoff_ticks_left: u8 => 0x71;
     subroutine_num_loops: u8 => 0x80;
@@ -148,8 +168,8 @@ channel_mapping! {
     channel_volume_master: u8 => 0x210;
     instrument_id: u8 => 0x211;
     instrument_pitch_base: u16 => 0x220;
-    saved_pattern_ptr: u16 => 0x230;
-    pattern_start_ptr: u16 => 0x240;
+    saved_pattern_ptr: PatternAddress => 0x230;
+    pattern_start_ptr: PatternAddress => 0x240;
     pitch_envelope_num_ticks: u8 => 0x280;
     pitch_envelope_delay: u8 => 0x281;
     pitch_envelope_direction: u8 => 0x290;
@@ -301,7 +321,7 @@ mod tests {
         player.last_written_edl = 13;
         player.history = Some(DspRegWriteHistory::default());
         for (index, channel) in player.channels.iter_mut().enumerate() {
-            channel.pattern_order_ptr_for_chan = 0xbe00 | index as u16;
+            channel.pattern_order_ptr_for_chan = PatternCursor::at(0xbe00 | index as u16);
             channel.note_ticks_left = 0x10 + index as u8;
             channel.note_keyoff_ticks_left = 0x90 + index as u8;
             channel.pitch = 0xa000 | index as u16;
@@ -321,6 +341,30 @@ mod tests {
         assert!(!mapped[0x3c6]);
         assert!(mapped[0x3ff]);
         assert!(mapped[0x400..].iter().all(|&byte| !byte));
+    }
+
+    #[test]
+    fn pattern_cursor_and_bookmark_codecs_preserve_every_raw_u16() {
+        let mut ram = [0xa5; 65536];
+        assert_eq!(<PatternCursor as MappedValue>::WIDTH, 2);
+        assert_eq!(<PatternAddress as MappedValue>::WIDTH, 2);
+        for value in 0..=u16::MAX {
+            PatternCursor::at(value).write(&mut ram, 0x30);
+            assert_eq!(&ram[0x30..0x32], &value.to_le_bytes());
+            assert_eq!(
+                <PatternCursor as MappedValue>::read(&ram, 0x30).address(),
+                value
+            );
+            PatternAddress::at(value).write(&mut ram, 0x230);
+            assert_eq!(&ram[0x230..0x232], &value.to_le_bytes());
+            assert_eq!(
+                <PatternAddress as MappedValue>::read(&ram, 0x230).address(),
+                value
+            );
+        }
+        for address in [0x2f, 0x32, 0x22f, 0x232] {
+            assert_eq!(ram[address], 0xa5);
+        }
     }
 
     #[test]
