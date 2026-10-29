@@ -6,6 +6,7 @@
 
 use crate::ram::Ram;
 use crate::sound::{SoundPort, SoundRequest};
+use crate::swim_state::SwimAxis;
 use crate::tile_map::{DUNGEON_BG1, DUNGEON_BG2, DungeonAttributes, TileWordIndex};
 use z3_core::WRAM_SIZE;
 
@@ -7193,7 +7194,7 @@ impl<'a, 'h, H: DungeonHooks> Dungeon<'a, 'h, H> {
             self.w8(0xc7, 0xff);
             self.w8(0x3d, 0);
             self.w8(0x5e, 0);
-            self.w8(0x32b, 0);
+            self.ram.set_swim_mode_low(SwimAxis::Vertical, 0);
             self.w8(0x372, 0);
             self.w8(0x5d, 0);
         }

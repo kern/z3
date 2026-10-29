@@ -16,7 +16,7 @@ state. All converted views still access the single live compatibility image.
 
 | Area | Implemented scope | Remaining scope |
 | --- | --- | --- |
-| M01 player views | `PlayerRef`/`PlayerMut`, explicit overlapping byte/word fields, position/velocity/action/equipment/inventory; 411 reads and 373 writes migrated in `player.rs` | Other player fields/callers, complete region reader/writer and reset maps |
+| M01 player views | `PlayerRef`/`PlayerMut`, explicit overlapping byte/word fields, position/velocity/action/equipment/inventory; 411 reads and 373 writes migrated in `player.rs`; complete six-family swimming-axis views across five caller files, including byte aliases and ordered resets | Other player fields/callers, complete region reader/writer and reset maps |
 | M02/M09 sprite/effect pools | 59 sprite fields and 41 effect fields behind live views; 8,782 sprite byte accesses plus 5 word aliases and over 1,000 effect expressions migrated; typed physical slots, reverse search, ordered countdown/reset/property operations and a live partial transition cache | Boss history storage, extended effect workspaces, cross-system callers and other pools |
 | M03 movement | Shared wrapping 16.8 world position and 8.8 height types; ancilla/sprite XYZ helpers; integer split-coordinate views for controllers/follower history | Player-specific movement and remaining coordinate consumers; no invented fractional controller/follower fields |
 | M04 byte velocity | Explicit wrapping negation, arithmetic halving and wrapped-difference approach; sprite helper and selected bank callers migrated; exhaustive byte/pair tests and C vectors | Remaining gameplay arithmetic, promoted intermediates and carry/borrow operations |
@@ -28,7 +28,7 @@ state. All converted views still access the single live compatibility image.
 | M14 ending routing | 58 explicit `EndingCall` variants through immediate/deferred production dispatch; string routes removed | Other broad capability traits, default no-ops and borrow scaffolding |
 | M14/M15 graphics contexts | CPU scripts/callbacks cannot borrow VRAM; hook-free uploads borrow disjoint graphics storage; normal planar source/conversion temporaries removed | Snapshot/diff/flush bridge, remaining mixed service helpers and transient live-VRAM routing |
 | M17 snapshots | Validated legacy region views, explicit opaque template ownership, separate load/write operations and immutable borrowed loading; independent 25-image cross-check; named outer recording header and borrowed section codec; owned replay tape, typed log codec and scheduler with whole-state C/frozen-reference differentials | Remaining device-specific layouts and patch API |
-| M18 SPC mapping | One typed ordered schema generates import/export and passive snapshots for 598 bytes; independent C-table audit; distinct passive C/Rust diagnostics retain legacy live-export checks; owned phrase and channel pattern cursors, subroutine bookmarks and independent KOF probes | SFX cursors, remaining voice/command semantics, live table/upload codecs and broader device separation |
+| M18 SPC mapping | One typed ordered schema generates import/export and passive snapshots for 598 bytes; independent C-table audit; distinct passive C/Rust diagnostics retain legacy live-export checks; owned phrase/pattern/SFX cursors and bookmarks, independent KOF probes and extracted SFX interpreter; explicit C-grounded zero-ID indexing repair | Remaining voice/command semantics, live table/upload codecs and broader device separation |
 | M20 host commands | Lossless `HostCommand` including unknown values, typed dispatch and runtime patch keys | Host scheduling, audio ownership, RAII and application decomposition |
 | M23 renderer | Separate preset/source/plan/texture-mipmap modules; distinct sampling/attachment views; surface configuration/lifetime and frame-history owners; real Metal readback regression | Further draw-policy/pipeline decomposition and broader preset, surface-error and platform coverage |
 
@@ -38,7 +38,8 @@ asset padding/credits lookup, command round trips, and ending call ordering.
 See [batch 1](modernization-verification.md), [batch 2](modernization-batch-2.md),
 [batch 3](modernization-batch-3.md), [batch 4](modernization-batch-4.md)
 [batch 5](modernization-batch-5.md), [batch 6](modernization-batch-6.md)
-[batch 7](modernization-batch-7.md) and [batch 8](modernization-batch-8.md)
+[batch 7](modernization-batch-7.md), [batch 8](modernization-batch-8.md)
+and [batch 9](modernization-batch-9.md)
 for exact commands, completed gates and recording-sweep status. Counts describe
 source accesses, including migrated existing tests, not distinct state fields.
 
@@ -61,6 +62,53 @@ reader/writer/reset/liveness maps before changes.
 
 This census adds concrete work to the existing M01–M24 scope; it does not replace
 that scope with only the domains listed here.
+
+### Pool boundaries identified during the next-batch review
+
+Garnish has thirty physical slots and fourteen independent byte-array fields,
+including stale/unused animation bytes. Its `0xfb4` activity latch is not a
+count or boolean, and its `0xff8` overwrite cursor aliases other systems.
+Allocation searches type bytes without reserving or clearing a slot. Preserve
+the legacy signed-byte fallback even for unusual saved cursor values; a new
+thirty-slot type must not silently reject previously accepted raw indices.
+Upper and lower passes have distinct gates, reverse ranges and hook timing;
+paused kind 5 and countdown-expiration branches require separate vectors.
+
+Overlord's eight controllers have nine byte arrays, stride-two source-position
+words and spawned-area bytes. They do not exclusively own that storage: Ganon,
+Helmasaur, Trinexx, Arrghus and Armos reuse portions as word/split-coordinate
+workspaces, including odd word aliases and indices crossing nominal array
+boundaries. Model those overlays explicitly instead of imposing controller-slot
+bounds on every access. Preserve dispatch of a captured controller kind after
+the active check clears its live kind in the same frame. Room-clear logic
+recognizes particular controller kinds, not generic pool emptiness.
+
+Completing either domain includes sprite banks and native service bridges,
+not just `sprite.rs` or `overlord.rs`. Existing six-case Overlord coverage is
+insufficient for this migration. Add whole-WRAM original-C allocation/reset,
+load, activation and bounded handler vectors, plus independent alias tests;
+exclude null C dispatch entries and distinguish pinned-target behavior from
+portable definedness. No pool migration is claimed by this inventory.
+
+### Explicit follow-up C/Rust discrepancies (2026-10-28)
+
+Next-domain reconnaissance found two additional pre-existing differences. Keep
+them separate from mechanical ownership refactors and reproduce them with
+unchanged C before choosing and documenting a correction; do not weaken gates.
+
+- `GarnishAllocLimit` returns a supplied negative limit unchanged in C, while
+  Rust's empty reverse range returns `-1`. The byte lookup is within backing
+  WRAM for limits `-0x1f800..=-1`; `-4` is a concrete helper-only discrepancy.
+  Ordinary in-repo callers supply only 14/29, and no game-input/save-derived
+  limit was identified. Raw external helper calls remain a distinct contract
+  to resolve, not a reason to claim unqualified C equality for a pool refactor.
+- Item receipt's `0x8000u16 >> (palace_low >> 1)` narrows before shifting,
+  unlike C's promoted 32-bit expression. Palace bytes 32–63 produce defined
+  zero in C but differ in existing Rust debug/release behavior. Ordinary-game
+  reachability is not proven; raw snapshots, patches and hooks can supply such
+  bytes. Counts 32 or greater in C are not portable defined cases. Preserve
+  failure/write order and explicitly distinguish any correction from the
+  planned typed receipt-target migration.
 
 ## Non-negotiable behavior
 

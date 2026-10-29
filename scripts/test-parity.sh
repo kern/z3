@@ -5,6 +5,7 @@ scripts/test-c-oracle.sh
 cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
 ruby scripts/audit-spc-mapping.rb
+ruby scripts/audit-swim-state.rb
 ruby scripts/audit-recording-abi.rb
 ruby scripts/audit-recorder-reference.rb
 ruby scripts/test-replay-ranges.rb
@@ -24,6 +25,12 @@ cargo test --release -p z3-game \
   pattern_cursors_match_static_c_handlers -- --ignored --nocapture
 cargo test --release -p z3-game \
   recorder_scheduler_matches_original_c_whole_state -- --ignored --nocapture
+cargo test --release -p z3-game \
+  sfx_cursors_match_static_c_handlers -- --ignored --nocapture
+cargo test --release -p z3-game \
+  sfx_public_samples_match_c_for_zero_id_commands -- --ignored --nocapture
+cargo test --release -p z3-game \
+  swim_axes_match_original_c_whole_wram -- --ignored --nocapture
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
   build/c-oracle/stream_oracle zelda3_assets.dat

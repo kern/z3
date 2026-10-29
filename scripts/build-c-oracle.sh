@@ -60,6 +60,14 @@ clang $common_flags oracle/spc_phrase_oracle.c snes/dsp.o \
 clang $common_flags oracle/spc_pattern_oracle.c snes/dsp.o \
   -o build/c-oracle/spc_pattern_oracle
 
+clang $common_flags oracle/spc_sfx_oracle.c snes/dsp.o \
+  -o build/c-oracle/spc_sfx_oracle
+
+clang $common_flags oracle/swim_state_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/swim_state_oracle
+
 clang $common_flags oracle/poly_oracle.c src/poly.o \
   -o build/c-oracle/poly_oracle
 

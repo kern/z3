@@ -5,7 +5,9 @@
 //! fields are mirrored: DSP state, input ports, channel indices, and the rest
 //! of RAM retain their independent live values.
 
-use super::{Channel, PatternAddress, PatternCursor, PhraseCursor, SpcPlayer};
+use super::{
+    Channel, PatternAddress, PatternCursor, PhraseCursor, SfxCursor, SfxPosition, SpcPlayer,
+};
 
 type SpcRam = [u8; 65536];
 
@@ -56,6 +58,26 @@ impl MappedValue for PatternCursor {
 }
 
 impl MappedValue for PatternAddress {
+    const WIDTH: usize = <u16 as MappedValue>::WIDTH;
+    fn read(ram: &SpcRam, address: usize) -> Self {
+        Self::at(<u16 as MappedValue>::read(ram, address))
+    }
+    fn write(self, ram: &mut SpcRam, address: usize) {
+        self.address().write(ram, address);
+    }
+}
+
+impl MappedValue for SfxCursor {
+    const WIDTH: usize = <u16 as MappedValue>::WIDTH;
+    fn read(ram: &SpcRam, address: usize) -> Self {
+        Self::at(<u16 as MappedValue>::read(ram, address))
+    }
+    fn write(self, ram: &mut SpcRam, address: usize) {
+        self.address().write(ram, address);
+    }
+}
+
+impl MappedValue for SfxPosition {
     const WIDTH: usize = <u16 as MappedValue>::WIDTH;
     fn read(ram: &SpcRam, address: usize) -> Self {
         Self::at(<u16 as MappedValue>::read(ram, address))
@@ -196,7 +218,7 @@ channel_mapping! {
     pitch_add_per_tick: u16 => 0x370;
     pitch_target: u8 => 0x380;
     fine_tune: u8 => 0x381;
-    sfx_sound_ptr: u16 => 0x390;
+    sfx_sound_ptr: SfxPosition => 0x390;
     sfx_which_sound: u8 => 0x3a0;
     sfx_arr_countdown: u8 => 0x3a1;
     sfx_note_length_left: u8 => 0x3b0;
@@ -219,7 +241,7 @@ player_mapping! {
     is_chan_on: u8 => 0x1a;
     fast_forward: u8 => 0x1b;
     sfx_start_arg_pan: u8 => 0x20;
-    sfx_sound_ptr_cur: u16 => 0x2c;
+    sfx_sound_ptr_cur: SfxCursor => 0x2c;
     music_ptr_toplevel: PhraseCursor => 0x40;
     block_count: u8 => 0x42;
     sfx_timer_accum: u8 => 0x43;
@@ -363,6 +385,30 @@ mod tests {
             );
         }
         for address in [0x2f, 0x32, 0x22f, 0x232] {
+            assert_eq!(ram[address], 0xa5);
+        }
+    }
+
+    #[test]
+    fn sfx_cursor_and_position_codecs_preserve_every_raw_u16() {
+        let mut ram = [0xa5; 65536];
+        assert_eq!(<SfxCursor as MappedValue>::WIDTH, 2);
+        assert_eq!(<SfxPosition as MappedValue>::WIDTH, 2);
+        for value in 0..=u16::MAX {
+            SfxCursor::at(value).write(&mut ram, 0x2c);
+            assert_eq!(&ram[0x2c..0x2e], &value.to_le_bytes());
+            assert_eq!(
+                <SfxCursor as MappedValue>::read(&ram, 0x2c).address(),
+                value
+            );
+            SfxPosition::at(value).write(&mut ram, 0x390);
+            assert_eq!(&ram[0x390..0x392], &value.to_le_bytes());
+            assert_eq!(
+                <SfxPosition as MappedValue>::read(&ram, 0x390).address(),
+                value
+            );
+        }
+        for address in [0x2b, 0x2e, 0x38f, 0x392] {
             assert_eq!(ram[address], 0xa5);
         }
     }

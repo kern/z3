@@ -5,6 +5,7 @@
 //! `NativeGameServices` ensures that verification exercises the same callback
 //! composition as the shipped runtime.
 
+use crate::swim_state::SwimAxis;
 use crate::{
     ancilla::{AncillaHitBox, AncillaRuntime},
     integration::NativeGameServices,
@@ -1336,7 +1337,7 @@ impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for NativeGameServices<'
             ram.write_u8(0x5e, 0);
             ram.write_u8(0x372, 0);
             ram.write_u8(0x50, 0);
-            ram.write_u16(0x32b, 0);
+            ram.set_swim_acceleration_mode(SwimAxis::Vertical, 0);
         }
     }
     fn force_prize_drop(&mut self, ram: &mut Ram<'_>, k: usize, a: u8, b: u8) {

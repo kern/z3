@@ -38,6 +38,7 @@ pub mod sprite_main_bank1;
 pub mod sprite_main_bank2a;
 pub mod sprite_main_bank2b;
 pub mod sprite_state;
+pub mod swim_state;
 pub mod tagalong;
 pub mod tile_detect;
 pub mod tile_map;

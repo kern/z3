@@ -4,6 +4,7 @@
 //! arithmetic is explicitly wrapping to preserve the 65c816/C behavior.
 
 use crate::ram::Ram;
+use crate::swim_state::SwimAxis;
 
 pub const SWIMMING_TAB1: [u8; 4] = [2, 0, 1, 0];
 pub const SWIMMING_TAB2: [u8; 2] = [32, 8];
@@ -1108,7 +1109,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         for address in [0x374, 0x372, 0x5e, 0x3a, 0x3c, 0x50, 0x27] {
             self.ram.write_u8(address, 0)
         }
-        self.ram.write_u16(0x32b, self.ram.read_u16(0x32b) & 0xff00);
+        self.ram.set_swim_acceleration_mode(
+            SwimAxis::Vertical,
+            self.ram.swim_axis(SwimAxis::Vertical).acceleration_mode() & 0xff00,
+        );
         if changed_world {
             self.ram.write_u16(0x4ac, 0)
         }
@@ -2714,8 +2718,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 || self.ram.read_u8(0x3a) & 0x80 == 0)
         {
             if self.ram.read_u8(0x34a) != 0 {
-                self.ram.write_u16(0x334, 0x180);
-                self.ram.write_u16(0x336, 0x180);
+                self.ram.set_swim_speed_limit(SwimAxis::Vertical, 0x180);
+                self.ram.set_swim_speed_limit(SwimAxis::Horizontal, 0x180);
                 self.link_handle_swim_movements();
                 return;
             }
@@ -2833,8 +2837,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.set_player_actual_velocity_z(0xff);
         self.ram.write_u8(0x2c6, 0);
         if self.ram.read_u8(0x34a) != 0 {
-            self.ram.write_u16(0x334, 0x180);
-            self.ram.write_u16(0x336, 0x180);
+            self.ram.set_swim_speed_limit(SwimAxis::Vertical, 0x180);
+            self.ram.set_swim_speed_limit(SwimAxis::Horizontal, 0x180);
             self.link_handle_swim_movements();
             return;
         }
@@ -2953,8 +2957,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.player().flippers() == 0 {
             return;
         }
-        if self.ram.read_u16(0x33c) | self.ram.read_u16(0x33e) == 0 {
-            if self.ram.read_u8(0x32b) != 2 && self.ram.read_u8(0x32d) != 2 {
+        if self.ram.swim_axis(SwimAxis::Vertical).speed()
+            | self.ram.swim_axis(SwimAxis::Horizontal).speed()
+            == 0
+        {
+            if self.ram.swim_axis(SwimAxis::Vertical).mode_low() != 2
+                && self.ram.swim_axis(SwimAxis::Horizontal).mode_low() != 2
+            {
                 self.reset_all_acceleration();
             }
             self.ram.write_u8(0x2e, self.ram.read_u8(0x2e) & 1);
@@ -2971,7 +2980,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         }
         if self.ram.read_u8(0x34f) == 0 {
             let stroke = (self.ram.read_u8(0xf6) | self.ram.read_u8(0xf4)) & 0xc0;
-            if self.ram.read_u16(0x33c) | self.ram.read_u16(0x33e) == 0 || stroke == 0 {
+            if self.ram.swim_axis(SwimAxis::Vertical).speed()
+                | self.ram.swim_axis(SwimAxis::Horizontal).speed()
+                == 0
+                || stroke == 0
+            {
                 self.link_handle_swim_movements();
                 return;
             }
@@ -3000,7 +3013,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             self.ram.write_u8(0x5e, 0);
             self.ram.set_player_action_state(PlayerState::Ground as u8);
             self.ram.write_u8(0x372, 0);
-            self.ram.write_u16(0x32b, self.ram.read_u16(0x32b) & 0xff00);
+            self.ram.set_swim_acceleration_mode(
+                SwimAxis::Vertical,
+                self.ram.swim_axis(SwimAxis::Vertical).acceleration_mode() & 0xff00,
+            );
             if self.ram.read_u8(0x3c) < 9 {
                 self.ram.write_u8(0x50, 0);
             }
@@ -3891,9 +3907,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                         && self.ram.read_u8(0x2e8) & 3 == 0
                         && dir & 3 != 0
                     {
-                        for a in [0x32f, 0x32b, 0x33c, 0x334] {
-                            self.ram.write_u16(a, 0)
-                        }
+                        self.ram.clear_blocked_swim_axis(SwimAxis::Vertical);
                     }
                     self.ram.write_u8(0x302, 1);
                     self.ram.write_u8(0x42, MASK[toward as usize])
@@ -3924,9 +3938,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                             && self.ram.read_u8(0x2e8) & 3 == 0
                             && dir & 0xc != 0
                         {
-                            for a in [0x331, 0x32d, 0x33e, 0x336] {
-                                self.ram.write_u16(a, 0)
-                            }
+                            self.ram.clear_blocked_swim_axis(SwimAxis::Horizontal);
                         }
                         self.ram.write_u8(0x302, 1);
                         self.ram.write_u8(0x43, MASK[toward as usize])
@@ -4211,19 +4223,19 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if self.ram.read_u8(0x34a) == 0 {
             return;
         }
-        for i in 0..2 {
-            let acceleration = self.ram.read_u16(0x33c + i * 2);
+        for axis in SwimAxis::FORWARD {
+            let acceleration = self.ram.swim_axis(axis).speed();
             if acceleration != 0 {
-                self.ram.write_u16(0x334 + i * 2, acceleration);
-                self.ram.write_u16(0x32b + i * 2, 1)
+                self.ram.set_swim_speed_limit(axis, acceleration);
+                self.ram.set_swim_acceleration_mode(axis, 1)
             }
         }
     }
 
     pub fn link_set_ice_max_accel(&mut self) {
         if self.ram.read_u8(0x34a) != 0 {
-            self.ram.write_u16(0x334, 0x180);
-            self.ram.write_u16(0x336, 0x180)
+            self.ram.set_swim_speed_limit(SwimAxis::Vertical, 0x180);
+            self.ram.set_swim_speed_limit(SwimAxis::Horizontal, 0x180)
         }
     }
 
@@ -4231,11 +4243,11 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         let joy = self.ram.read_u8(0xf0) & 0xf;
         let mut mask = 12;
         let mut bit = 8;
-        for i in 0..2 {
+        for axis in SwimAxis::FORWARD {
             if joy & mask != 0 {
                 let moving = self.ram.read_u8(0x34a);
-                self.ram.write_u16(
-                    0x326 + i * 2,
+                self.ram.set_swim_hold_timer(
+                    axis,
                     u16::from(if moving != 0 {
                         SWIMMING_TAB2[usize::from(moving - 1)]
                     } else {
@@ -4243,13 +4255,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                     }),
                 );
                 if (self.ram.read_u8(0x340) | self.ram.read_u8(0x67)) & mask == mask {
-                    self.ram.write_u16(0x32b + i * 2, 2)
+                    self.ram.set_swim_acceleration_mode(axis, 2)
                 } else {
-                    self.ram.write_u16(0x338 + i * 2, u16::from(joy & bit == 0));
-                    self.ram.write_u16(0x32b + i * 2, 0)
+                    self.ram
+                        .set_swim_direction_selector(axis, u16::from(joy & bit == 0));
+                    self.ram.set_swim_acceleration_mode(axis, 0)
                 }
-                if self.ram.read_u16(0x334 + i * 2) == 0 {
-                    self.ram.write_u16(0x334 + i * 2, 240)
+                if self.ram.swim_axis(axis).speed_limit() == 0 {
+                    self.ram.set_swim_speed_limit(axis, 240)
                 }
             }
             mask >>= 2;
@@ -4270,7 +4283,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                 if self.ram.read_u8(0x372) != 0 {
                     direction = self.ram.read_u8(0x340)
                 } else {
-                    if self.ram.read_u16(0x33c) | self.ram.read_u16(0x33e) == 0 {
+                    if self.ram.swim_axis(SwimAxis::Vertical).speed()
+                        | self.ram.swim_axis(SwimAxis::Horizontal).speed()
+                        == 0
+                    {
                         self.ram.write_u8(0x48, 0);
                         self.link_reset_swimming_state()
                     }
@@ -4310,10 +4326,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     pub fn link_handle_swim_accels(&mut self) {
         const ACCELERATION_STEPS: [u16; 9] = [128, 160, 192, 224, 256, 288, 320, 352, 384];
         let mut mask = 12;
-        for i in 0..2 {
+        for axis in SwimAxis::FORWARD {
             if self.ram.read_u8(0xf0) & mask != 0 {
-                let velocity = self.ram.read_u16(0x33c + i * 2);
-                let maximum = self.ram.read_u16(0x334 + i * 2);
+                let velocity = self.ram.swim_axis(axis).speed();
+                let maximum = self.ram.swim_axis(axis).speed_limit();
                 if velocity != 0 && maximum >= 384 {
                     let mut step = ACCELERATION_STEPS[8];
                     for candidate in ACCELERATION_STEPS {
@@ -4322,13 +4338,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
                             break;
                         }
                     }
-                    self.ram.write_u16(0x334 + i * 2, step)
+                    self.ram.set_swim_speed_limit(axis, step)
                 } else if maximum != 0 {
                     self.ram
-                        .write_u16(0x334 + i * 2, maximum.wrapping_add(160).min(384))
+                        .set_swim_speed_limit(axis, maximum.wrapping_add(160).min(384))
                 } else {
-                    self.ram.write_u16(0x33c + i * 2, 1);
-                    self.ram.write_u16(0x334 + i * 2, 240)
+                    self.ram.set_swim_speed(axis, 1);
+                    self.ram.set_swim_speed_limit(axis, 240)
                 }
             }
             mask >>= 2;
@@ -4340,28 +4356,26 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             return;
         }
         let mut mask = 12;
-        for i in 0..2 {
-            let var1_addr = 0x32f + i * 2;
-            let var5_addr = 0x32b + i * 2;
-            let var7_addr = 0x33c + i * 2;
-            let var9_addr = 0x334 + i * 2;
-            if self.ram.read_u8(0xf0) & mask != 0 && self.ram.read_u16(var5_addr) != 2 {
-                let velocity = self.ram.read_u16(var7_addr);
-                if self.ram.read_u16(var1_addr) != 0
-                    || (velocity >= 240 && velocity >= self.ram.read_u16(var9_addr))
+        for axis in SwimAxis::FORWARD {
+            if self.ram.read_u8(0xf0) & mask != 0
+                && self.ram.swim_axis(axis).acceleration_mode() != 2
+            {
+                let velocity = self.ram.swim_axis(axis).speed();
+                if self.ram.swim_axis(axis).acceleration_latch() != 0
+                    || (velocity >= 240 && velocity >= self.ram.swim_axis(axis).speed_limit())
                 {
-                    self.ram.write_u16(var5_addr, 0);
+                    self.ram.set_swim_acceleration_mode(axis, 0);
                     if velocity >= 240 {
-                        self.ram.write_u16(var1_addr, 1);
-                        self.ram.write_u16(var5_addr, 1)
+                        self.ram.set_swim_acceleration_latch(axis, 1);
+                        self.ram.set_swim_acceleration_mode(axis, 1)
                     } else {
-                        self.ram.write_u16(var9_addr, 240);
-                        self.ram.write_u16(var1_addr, 0)
+                        self.ram.set_swim_speed_limit(axis, 240);
+                        self.ram.set_swim_acceleration_latch(axis, 0)
                     }
                 }
             } else {
-                self.ram.write_u16(var9_addr, 240);
-                self.ram.write_u16(var1_addr, 0)
+                self.ram.set_swim_speed_limit(axis, 240);
+                self.ram.set_swim_acceleration_latch(axis, 0)
             }
             mask >>= 2;
         }
@@ -4691,57 +4705,55 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.set_player_actual_velocity_x(0);
         self.ram.set_player_actual_velocity_y(0);
         let mut velocity = [0u16; 2];
-        for i in (0..2).rev() {
-            let var3_addr = 0x326 + i * 2;
-            let var5_addr = 0x32b + i * 2;
-            let var9_addr = 0x334 + i * 2;
-            let var11_addr = 0x338 + i * 2;
-            let var7_addr = 0x33c + i * 2;
-            let countdown = self.ram.read_u16(var3_addr).wrapping_sub(1);
-            self.ram.write_u16(var3_addr, countdown);
+        for axis in SwimAxis::REVERSE {
+            let countdown = self.ram.swim_axis(axis).hold_timer().wrapping_sub(1);
+            self.ram.set_swim_hold_timer(axis, countdown);
             if (countdown as i16) < 0 {
-                self.ram.write_u16(var3_addr, 0);
-                self.ram.write_u16(var5_addr, 1)
+                self.ram.set_swim_hold_timer(axis, 0);
+                self.ram.set_swim_acceleration_mode(axis, 1)
             }
-            let mut table_index = self.ram.read_u16(var5_addr);
+            let mut table_index = self.ram.swim_axis(axis).acceleration_mode();
             if self.ram.read_u8(0x34a) != 0 {
                 table_index =
                     table_index.wrapping_add(u16::from(self.ram.read_u8(0x34a)).wrapping_mul(4))
             }
             let mut sum = self
                 .ram
-                .read_u16(var7_addr)
+                .swim_axis(axis)
+                .speed()
                 .wrapping_add(SWIMMING_ACCELERATION[table_index as usize] as i16 as u16);
             if (sum as i16) <= 0 {
-                let direction = self.ram.read_u8(0x67) & DIRECTION_MASK[i];
+                let direction = self.ram.read_u8(0x67) & DIRECTION_MASK[axis.index()];
                 self.ram.write_u8(0x67, direction);
                 self.ram.write_u8(0x26, direction);
-                if self.ram.read_u16(var5_addr) == 2 {
-                    self.ram.write_u16(var5_addr, 0);
-                    self.ram.write_u16(var9_addr, 240);
-                    self.ram.write_u16(var7_addr, 2)
+                if self.ram.swim_axis(axis).acceleration_mode() == 2 {
+                    self.ram.set_swim_acceleration_mode(axis, 0);
+                    self.ram.set_swim_speed_limit(axis, 240);
+                    self.ram.set_swim_speed(axis, 2)
                 } else {
-                    self.ram.write_u16(var5_addr, 0);
-                    self.ram.write_u16(var9_addr, 0);
-                    self.ram.write_u16(var7_addr, 0)
+                    self.ram.set_swim_acceleration_mode(axis, 0);
+                    self.ram.set_swim_speed_limit(axis, 0);
+                    self.ram.set_swim_speed(axis, 0)
                 }
             } else {
-                let direction_index = self.ram.read_u16(var11_addr) as usize + i * 2;
+                let direction_index =
+                    self.ram.swim_axis(axis).direction_selector() as usize + axis.index() * 2;
                 self.ram.write_u8(
                     0x67,
                     self.ram.read_u8(0x67) | DIRECTION_BIT[direction_index],
                 );
-                if sum >= self.ram.read_u16(var9_addr) {
-                    sum = self.ram.read_u16(var9_addr)
+                if sum >= self.ram.swim_axis(axis).speed_limit() {
+                    sum = self.ram.swim_axis(axis).speed_limit()
                 }
-                self.ram.write_u16(var7_addr, sum)
+                self.ram.set_swim_speed(axis, sum)
             }
-            velocity[i] = self.ram.read_u16(var7_addr);
+            velocity[axis.index()] = self.ram.swim_axis(axis).speed();
             if self.ram.read_u8(0x6a) | self.ram.read_u8(0x6b) != 0 {
-                velocity[i] = velocity[i].wrapping_sub(velocity[i] >> 2)
+                velocity[axis.index()] =
+                    velocity[axis.index()].wrapping_sub(velocity[axis.index()] >> 2)
             }
-            if self.ram.read_u16(var11_addr) == 0 {
-                velocity[i] = 0u16.wrapping_sub(velocity[i])
+            if self.ram.swim_axis(axis).direction_selector() == 0 {
+                velocity[axis.index()] = 0u16.wrapping_sub(velocity[axis.index()])
             }
         }
         self.player_something_with_velocity_tired_or_swim(velocity[1], velocity[0])
@@ -6754,11 +6766,7 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
     }
 
     fn reset_all_acceleration(&mut self) {
-        for address in [
-            0x32f, 0x331, 0x326, 0x328, 0x32b, 0x32d, 0x33c, 0x33e, 0x334, 0x336,
-        ] {
-            self.ram.write_u16(address, 0)
-        }
+        self.ram.reset_swim_acceleration();
     }
 
     fn link_bonk_and_smash(&mut self) {
@@ -7027,11 +7035,13 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         if moving != 0 {
             self.ram.write_u8(0x340, DIRECTION[direction]);
             self.ram.write_u8(0x67, DIRECTION[direction]);
-            self.ram.write_u16(0x338, SW11_Y[direction]);
-            self.ram.write_u16(0x33a, SW11_X[direction]);
+            self.ram
+                .set_swim_direction_selector(SwimAxis::Vertical, SW11_Y[direction]);
+            self.ram
+                .set_swim_direction_selector(SwimAxis::Horizontal, SW11_X[direction]);
             let index = (moving as usize - 1) * 4 + direction;
-            self.ram.write_u16(0x33c, SW7_Y[index]);
-            self.ram.write_u16(0x33e, SW7_X[index])
+            self.ram.set_swim_speed(SwimAxis::Vertical, SW7_Y[index]);
+            self.ram.set_swim_speed(SwimAxis::Horizontal, SW7_X[index])
         }
         self.ram.write_u8(0x4d, 1);
         self.ram.write_u8(0x2f8, 1);
@@ -7693,10 +7703,10 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             } else {
                 let direction = self.ram.read_u8(0x67);
                 if direction & 0xc != 0 {
-                    self.ram.write_u16(0x33c, 0x180)
+                    self.ram.set_swim_speed(SwimAxis::Vertical, 0x180)
                 }
                 if direction & 3 != 0 {
-                    self.ram.write_u16(0x33c, 0x180)
+                    self.ram.set_swim_speed(SwimAxis::Vertical, 0x180)
                 }
                 self.ram.write_u8(
                     0x34a,
@@ -7791,18 +7801,14 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
         self.ram.write_u8(0x5e, 0);
         self.ram.write_u8(0x372, 0);
         self.ram.write_u8(0x50, 0);
-        self.ram.write_u16(0x32b, 0)
+        self.ram.set_swim_acceleration_mode(SwimAxis::Vertical, 0)
     }
 
     pub fn link_reset_swimming_state(&mut self) {
         self.ram.write_u8(0x2cb, 0);
         self.ram.write_u8(0x34f, 0);
         self.ram.write_u8(0x32a, 0);
-        for address in [
-            0x32f, 0x331, 0x326, 0x328, 0x32b, 0x32d, 0x33c, 0x33e, 0x334, 0x336,
-        ] {
-            self.ram.write_u16(address, 0)
-        }
+        self.ram.reset_swim_acceleration();
     }
     pub fn link_control_handler(&mut self) {
         let damage = self.ram.read_u8(0x373);

@@ -1,4 +1,5 @@
 //! Native follower logic. State addresses match `src/variables.h`.
+use crate::swim_state::SwimAxis;
 use crate::{oam, position::SplitCoordinate, ram::Ram};
 
 const MAIN: usize = 0x10;
@@ -56,7 +57,6 @@ const ITEM_IN_HAND: usize = 0x301;
 const STATE_BITS: usize = 0x308;
 const PICKUP_SPRITE: usize = 0x314;
 const BLINK: usize = 0x31f;
-const SWIMCOLL_VAR7: usize = 0x33c;
 const GRABBING_WALL: usize = 0x376;
 const MASTER_SWORD: usize = 0x377;
 const POSITION_MODE: usize = 0x37a;
@@ -618,7 +618,9 @@ pub fn animate_movement<H: TagalongHooks>(
     let mut sc = 0;
     if ain >> 2 & 8 != 0 && matches!(follower, 1 | 6) {
         yt = 8;
-        av = if r.read_u16(SWIMCOLL_VAR7) | r.read_u16(SWIMCOLL_VAR7 + 2) != 0 {
+        av = if r.swim_axis(SwimAxis::Vertical).speed() | r.swim_axis(SwimAxis::Horizontal).speed()
+            != 0
+        {
             r.read_u8(FRAME) >> 1 & 4
         } else {
             r.read_u8(FRAME) >> 2 & 4

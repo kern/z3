@@ -2,6 +2,7 @@
 
 #![allow(non_upper_case_globals)]
 
+use crate::swim_state::SwimAxis;
 use crate::{oam::OamCursor, ram::Ram};
 
 pub trait PlayerOamHooks {
@@ -1157,7 +1158,9 @@ fn select_pose(ram: &mut Ram<'_>, hooks: &impl PlayerOamHooks) -> (u8, u8) {
         yt = 0x11;
         rt &= 1;
         if (ram.read_u8(0x11) == 0 && ram.read_u8(0xf0) & 0xf != 0)
-            || (ram.read_u16(0x33c) | ram.read_u16(0x33e)) != 0
+            || (ram.swim_axis(SwimAxis::Vertical).speed()
+                | ram.swim_axis(SwimAxis::Horizontal).speed())
+                != 0
         {
             yt = 0x13;
             rt = ram.read_u8(0x2cc);
