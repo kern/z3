@@ -287,8 +287,9 @@ pub trait PlayerRuntime {
     fn open_chest(&mut self, _ram: &mut Ram<'_>, _tile: u8) -> Option<(u8, i32)> {
         None
     }
-    fn item_memory_location(&self, _item: u8) -> usize {
-        0
+    fn receipt_item_present(&self, ram: &Ram<'_>, _item: u8) -> bool {
+        // Preserve the old hook default (address0), not the native item rule.
+        ram.read_u8(0) != 0
     }
     fn lift_and_replace_tile(&mut self, _ram: &mut Ram<'_>, _indoors: bool) -> (u8, u16, u16) {
         (0xff, 0, 0)
@@ -2293,11 +2294,8 @@ impl<R: PlayerRuntime> Player<'_, '_, R> {
             42 => 70,
             _ => 0xff,
         };
-        if alternate != 0xff {
-            let address = self.runtime.item_memory_location(item);
-            if self.ram.read_u8(address) != 0 {
-                item = alternate;
-            }
+        if alternate != 0xff && self.runtime.receipt_item_present(self.ram, item) {
+            item = alternate;
         }
         self.link_receive_item(item, chest_position)
     }

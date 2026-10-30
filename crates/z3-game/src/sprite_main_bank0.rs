@@ -10,12 +10,6 @@ use crate::{
     sprite::{DrawMultipleData, PrepOamCoordsRet, ProjectSpeedRet, SpriteSpawnInfo},
 };
 
-const GARNISH_TYPE: usize = 0x1f800;
-const GARNISH_Y_LO: usize = 0x1f81e;
-const GARNISH_X_LO: usize = 0x1f83c;
-const GARNISH_Y_HI: usize = 0x1f85a;
-const GARNISH_X_HI: usize = 0x1f878;
-
 const LINK_Y: usize = 0x20;
 const LINK_X: usize = 0x22;
 const MAIN_MODULE_INDEX: usize = 0x10;
@@ -136,7 +130,6 @@ const OVERLORD_FLOOR: usize = 0xb40;
 const ACTIVATE_BOMB_TRAP_OVERLORD: usize = 0xcf4;
 const ANCILLA_TYPE: usize = 0xc4a;
 const LINK_BOTTLE_INFO: usize = 0xf35c;
-const GARNISH_ACTIVE: usize = 0xfb4;
 const DUNGMAP_VAR7: usize = 0xfa8;
 const DUNGMAP_VAR8: usize = 0xfaa;
 const CUR_OBJECT_INDEX: usize = 0xfa0;
@@ -153,8 +146,6 @@ const LOAD_CHR_HALFSLOT_EVEN_ODD: usize = 0xaaa;
 const FLAG_UNK1: usize = 0xfc1;
 const BYTE_7E0FC6: usize = 0xfc6;
 const IS_IN_DARK_WORLD: usize = 0xfff;
-const GARNISH_COUNTDOWN: usize = 0x1f90e;
-const GARNISH_SPRITE: usize = 0x1f92c;
 const BIRD_TRAVEL_X_LO: usize = 0x1ab0;
 const BIRD_TRAVEL_X_HI: usize = 0x1ac0;
 const BIRD_TRAVEL_Y_LO: usize = 0x1ad0;
@@ -1392,10 +1383,7 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
 
     #[must_use]
     pub fn garnish_alloc_force(&self) -> usize {
-        (0..30)
-            .rev()
-            .find(|&slot| self.ram.read_u8(GARNISH_TYPE + slot) == 0)
-            .unwrap_or(0)
+        self.ram.garnish_find_free_force()
     }
 
     #[must_use]
@@ -1410,10 +1398,7 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
 
     #[must_use]
     pub fn garnish_alloc_limit(&self, limit: i32) -> i32 {
-        (0..=limit)
-            .rev()
-            .find(|&slot| self.ram.read_u8(GARNISH_TYPE + slot as usize) == 0)
-            .unwrap_or(-1)
+        self.ram.garnish_find_free(limit)
     }
 
     pub fn garnish_alloc_overwrite_old_low(&mut self) -> usize {
@@ -1435,20 +1420,15 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
     }
 
     fn advance_garnish_overwrite_cursor(&mut self, reset: u8) -> usize {
-        let cursor = self.ram.read_u8(BYTE_7E0FF8).wrapping_sub(1);
-        let cursor = if (cursor as i8) < 0 { reset } else { cursor };
-        self.ram.write_u8(BYTE_7E0FF8, cursor);
-        usize::from(cursor)
+        self.ram.garnish_advance_overwrite_cursor(reset)
     }
 
     pub fn garnish_set_x(&mut self, slot: usize, x: u16) {
-        self.ram.write_u8(GARNISH_X_LO + slot, x as u8);
-        self.ram.write_u8(GARNISH_X_HI + slot, (x >> 8) as u8);
+        self.ram.garnish_mut(slot).set_x(x);
     }
 
     pub fn garnish_set_y(&mut self, slot: usize, y: u16) {
-        self.ram.write_u8(GARNISH_Y_LO + slot, y as u8);
-        self.ram.write_u8(GARNISH_Y_HI + slot, (y >> 8) as u8);
+        self.ram.garnish_mut(slot).set_y(y);
     }
 
     pub fn sprite_wish_pond3(&mut self, slot: usize) {
@@ -2108,16 +2088,16 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
             return;
         }
         let garnish = self.garnish_alloc_force();
-        self.ram.write_u8(GARNISH_TYPE + garnish, 0x12);
-        self.ram.write_u8(GARNISH_ACTIVE, 0x12);
+        self.ram.set_garnish_kind(garnish, 0x12);
+        self.ram.set_garnish_active_marker(0x12);
         let x_offset = COORDINATE[usize::from(crate::misc::get_random_number(self.ram) & 3)];
         let x = self.sprite_x(slot).wrapping_add(x_offset as i16 as u16);
         let y_offset = COORDINATE[usize::from(crate::misc::get_random_number(self.ram) & 3)];
         let y = self.sprite_y(slot).wrapping_add(y_offset as i16 as u16);
         self.garnish_set_x(garnish, x);
         self.garnish_set_y(garnish, y);
-        self.ram.write_u8(GARNISH_SPRITE + garnish, slot as u8);
-        self.ram.write_u8(GARNISH_COUNTDOWN + garnish, 15);
+        self.ram.set_garnish_source_sprite(garnish, slot as u8);
+        self.ram.set_garnish_countdown(garnish, 15);
     }
 
     pub fn sprite_70_king_helmasaur_fireball(&mut self, slot: usize) {
@@ -4998,12 +4978,13 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
                     }
                 }
                 if (32..160).contains(&delay) && delay & 15 == 0 {
-                    let history =
-                        usize::from(
-                            self.ram.sprite(slot).subtype2().wrapping_sub(
-                                self.ram.read_u8(GARNISH_Y_LO + slot).wrapping_mul(8),
-                            ) & 0x3f,
-                        ) + slot * 0x40;
+                    let history = usize::from(
+                        self.ram
+                            .sprite(slot)
+                            .subtype2()
+                            .wrapping_sub(self.ram.garnish_y_low(slot).wrapping_mul(8))
+                            & 0x3f,
+                    ) + slot * 0x40;
                     let x_low = self
                         .ram
                         .read_u8(MOLDORM_X_LO + history)
@@ -5035,10 +5016,9 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
                         self.ram.set_sprite_flags2(spawned, 3);
                         self.ram.set_sprite_oam_flags(spawned, 0xc);
                         self.runtime.queue_sfx2_with_pan(self.ram, slot, 0xc);
-                        let segments = self.ram.read_u8(GARNISH_Y_LO + slot);
+                        let segments = self.ram.garnish_y_low(slot);
                         if (segments as i8) >= 0 {
-                            self.ram
-                                .write_u8(GARNISH_Y_LO + slot, segments.wrapping_sub(1));
+                            self.ram.set_garnish_y_low(slot, segments.wrapping_sub(1));
                         }
                     }
                 }
@@ -5103,7 +5083,7 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
         }
         let sprite_flags =
             self.ram.sprite(slot).oam_flags() | self.ram.sprite(slot).object_priority();
-        let segment_count = self.ram.read_u8(GARNISH_Y_LO + slot);
+        let segment_count = self.ram.garnish_y_low(slot);
         if (segment_count as i8) < 0 {
             return;
         }
@@ -5492,16 +5472,16 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
 
     pub fn sprite_spawn_poof_garnish(&mut self, sprite: usize) {
         let garnish = self.garnish_alloc_force();
-        self.ram.write_u8(GARNISH_TYPE + garnish, 10);
-        self.ram.write_u8(GARNISH_ACTIVE, 10);
+        self.ram.set_garnish_kind(garnish, 10);
+        self.ram.set_garnish_active_marker(10);
         self.ram
-            .write_u8(GARNISH_X_LO + garnish, self.ram.sprite(sprite).x_low());
+            .set_garnish_x_low(garnish, self.ram.sprite(sprite).x_low());
         self.ram
-            .write_u8(GARNISH_X_HI + garnish, self.ram.sprite(sprite).x_high());
+            .set_garnish_x_high(garnish, self.ram.sprite(sprite).x_high());
         self.garnish_set_y(garnish, self.sprite_y(sprite).wrapping_add(16));
         self.ram
-            .write_u8(GARNISH_SPRITE + garnish, self.ram.sprite(sprite).floor());
-        self.ram.write_u8(GARNISH_COUNTDOWN + garnish, 15);
+            .set_garnish_source_sprite(garnish, self.ram.sprite(sprite).floor());
+        self.ram.set_garnish_countdown(garnish, 15);
     }
 
     pub fn sprite_6c_mirror_portal(&mut self, slot: usize) {
@@ -10771,15 +10751,17 @@ mod tests {
         let mut bytes = [0; WRAM_SIZE];
         let mut hooks = Hooks::default();
         let mut ram = Ram::new(&mut bytes);
-        ram.slice_mut(GARNISH_TYPE, 30).fill(1);
-        ram.write_u8(GARNISH_TYPE + 9, 0);
+        for slot in 0..crate::garnish_state::SLOT_COUNT {
+            ram.set_garnish_kind(slot, 1);
+        }
+        ram.set_garnish_kind(9, 0);
         let mut bank = SpriteMainBank0 {
             ram: &mut ram,
             runtime: &mut hooks,
         };
         assert_eq!(bank.garnish_alloc(), 9);
         assert_eq!(bank.garnish_alloc_low(), 9);
-        bank.ram.write_u8(GARNISH_TYPE + 9, 1);
+        bank.ram.set_garnish_kind(9, 1);
         assert_eq!(bank.garnish_alloc(), -1);
         assert_eq!(bank.garnish_alloc_force(), 0);
         bank.ram.write_u8(BYTE_7E0FF8, 0);
@@ -10787,10 +10769,45 @@ mod tests {
         assert_eq!(bank.garnish_alloc_overwrite_old_low(), 13);
         bank.garnish_set_x(4, 0xabcd);
         bank.garnish_set_y(4, 0x1234);
-        assert_eq!(bank.ram.read_u8(GARNISH_X_LO + 4), 0xcd);
-        assert_eq!(bank.ram.read_u8(GARNISH_X_HI + 4), 0xab);
-        assert_eq!(bank.ram.read_u8(GARNISH_Y_LO + 4), 0x34);
-        assert_eq!(bank.ram.read_u8(GARNISH_Y_HI + 4), 0x12);
+        assert_eq!(bank.ram.garnish_x_low(4), 0xcd);
+        assert_eq!(bank.ram.garnish_x_high(4), 0xab);
+        assert_eq!(bank.ram.garnish_y_low(4), 0x34);
+        assert_eq!(bank.ram.garnish_y_high(4), 0x12);
+    }
+
+    #[test]
+    fn garnish_y_low_remains_lanmolas_signed_segment_scratch() {
+        let mut bytes = Box::new(std::array::from_fn(|i| (i * 23) as u8));
+        let mut ram = Ram::new(&mut bytes);
+        let slot = 1;
+        ram.set_sprite_state(slot, 9);
+        ram.set_sprite_subtype2(slot, 3);
+        ram.write_u8(SUBMODULE_INDEX, 0);
+        ram.write_u8(FLAG_UNK1, 0);
+        // This is a signed "no body" sentinel, not a world-coordinate Y byte
+        // to be normalized or cleared when its Garnish kind is inactive.
+        ram.set_garnish_kind(slot, 0);
+        ram.set_garnish_y_low(slot, 0x80);
+        let mut expected = Box::new(*ram.bytes_mut());
+        let history = slot * 64 + 3;
+        {
+            let mut expected_ram = Ram::new(&mut expected);
+            expected_ram.write_u16(OAM_CUR_PTR, 0x8f0);
+            expected_ram.write_u16(OAM_EXT_CUR_PTR, 0xa5c);
+            expected_ram.set_sprite_graphics(slot, 0);
+            expected_ram.set_sprite_subtype2(slot, 4);
+            expected_ram.write_u8(MOLDORM_X_LO + history, ram.sprite(slot).x_low());
+            expected_ram.write_u8(MOLDORM_Y_LO + history, ram.sprite(slot).y_low());
+            expected_ram.write_u8(BEAMOS_X_HI + history, ram.sprite(slot).z());
+            expected_ram.write_u8(BEAMOS_Y_HI + history, 0);
+        }
+        let mut hooks = Hooks::default();
+        SpriteMainBank0 {
+            ram: &mut ram,
+            runtime: &mut hooks,
+        }
+        .lanmola_draw(slot);
+        assert_eq!(ram.bytes_mut(), &mut *expected);
     }
 
     #[test]

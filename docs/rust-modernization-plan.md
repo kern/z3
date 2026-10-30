@@ -17,11 +17,12 @@ state. All converted views still access the single live compatibility image.
 | Area | Implemented scope | Remaining scope |
 | --- | --- | --- |
 | M01 player views | `PlayerRef`/`PlayerMut`, explicit overlapping byte/word fields, position/velocity/action/equipment/inventory; 411 reads and 373 writes migrated in `player.rs`; complete six-family swimming-axis views across five caller files, including byte aliases and ordered resets | Other player fields/callers, complete region reader/writer and reset maps |
-| M02/M09 sprite/effect pools | 59 sprite fields and 41 effect fields behind live views; 8,782 sprite byte accesses plus 5 word aliases and over 1,000 effect expressions migrated; typed physical slots, reverse search, ordered countdown/reset/property operations and a live partial transition cache | Boss history storage, extended effect workspaces, cross-system callers and other pools |
+| M02/M09 sprite/effect pools | 59 sprite fields and 41 effect fields behind live views; 8,782 sprite byte accesses plus 5 word aliases and over 1,000 effect expressions migrated; typed physical slots, reverse search, ordered countdown/reset/property operations and a live partial transition cache; complete 14-field Garnish domain and seven caller files, including allocation, coordinates and expiration | Boss history storage, extended effect workspaces, cross-system sprite/ancilla callers and Overlord/boss overlays |
 | M03 movement | Shared wrapping 16.8 world position and 8.8 height types; ancilla/sprite XYZ helpers; integer split-coordinate views for controllers/follower history | Player-specific movement and remaining coordinate consumers; no invented fractional controller/follower fields |
 | M04 byte velocity | Explicit wrapping negation, arithmetic halving and wrapped-difference approach; sprite helper and selected bank callers migrated; exhaustive byte/pair tests and C vectors | Remaining gameplay arithmetic, promoted intermediates and carry/borrow operations |
 | M06 asset ranges | Validated file ranges and explicit suffix view; palette and native-host patch adapters no longer subtract pointer integers | Typed asset IDs and stream/table cursors |
 | M07 sound | Named ambient/effect latches, lossless requests, lazy first-writer emitter resolution, player/world/tile pan constructors; migrated regression-sensitive effects, sprite service helpers and NMI | Remaining raw sound call sites and richer effect IDs |
+| M01/M08 receipt inventory | Typed 76-row receipt/41-target grant domain, live byte/word aliases and bottle slots; semantic player query removes pointer-returning callback; independent C schema and whole-WRAM/reference checks | Other item/equipment callers, broader inventory operations and remaining state machines |
 | M10 tile maps | Distinct word indices/byte offsets, live aliased dungeon/overworld maps and collision attributes; selected map callers migrated | Object raster cursors, map stream decoding, remaining map arithmetic and collision scratch/results |
 | M11 graphics uploads | Typed word destinations, immediate transfer operations, explicit clipping/strict policies; separate stripe, UVRAM and scroll decoders; borrowed NMI sources | Packet generation, gameplay-facing upload staging, palette/HDMA views and remaining address-based transfer profiles |
 | M12 OAM | Entry-unit local cursor/player drawing; typed live region allocator, independent pointers and effect wrap policies; two Quake loops migrated; hidden bytes, publication order, overflow/fallback order and one-past results retained | Remaining local effect draw loops, ASCII region selection, native/bank pointer mutations and other entity draw paths |
@@ -39,7 +40,7 @@ See [batch 1](modernization-verification.md), [batch 2](modernization-batch-2.md
 [batch 3](modernization-batch-3.md), [batch 4](modernization-batch-4.md)
 [batch 5](modernization-batch-5.md), [batch 6](modernization-batch-6.md)
 [batch 7](modernization-batch-7.md), [batch 8](modernization-batch-8.md)
-and [batch 9](modernization-batch-9.md)
+[batch 9](modernization-batch-9.md) and [batch 10](modernization-batch-10.md)
 for exact commands, completed gates and recording-sweep status. Counts describe
 source accesses, including migrated existing tests, not distinct state fields.
 
@@ -92,23 +93,23 @@ portable definedness. No pool migration is claimed by this inventory.
 
 ### Explicit follow-up C/Rust discrepancies (2026-10-28)
 
-Next-domain reconnaissance found two additional pre-existing differences. Keep
-them separate from mechanical ownership refactors and reproduce them with
-unchanged C before choosing and documenting a correction; do not weaken gates.
+Next-domain reconnaissance found two additional pre-existing differences. Both
+were reproduced against unchanged C and explicitly corrected in batch 10,
+separately from mechanical ownership changes and without weakening gates.
 
 - `GarnishAllocLimit` returns a supplied negative limit unchanged in C, while
   Rust's empty reverse range returns `-1`. The byte lookup is within backing
   WRAM for limits `-0x1f800..=-1`; `-4` is a concrete helper-only discrepancy.
   Ordinary in-repo callers supply only 14/29, and no game-input/save-derived
-  limit was identified. Raw external helper calls remain a distinct contract
-  to resolve, not a reason to claim unqualified C equality for a pool refactor.
+  limit was identified. The bounded C-defined negative helper domain now
+  returns that limit; below backing WRAM, previous Rust's fallback is retained.
 - Item receipt's `0x8000u16 >> (palace_low >> 1)` narrows before shifting,
   unlike C's promoted 32-bit expression. Palace bytes 32–63 produce defined
   zero in C but differ in existing Rust debug/release behavior. Ordinary-game
   reachability is not proven; raw snapshots, patches and hooks can supply such
-  bytes. Counts 32 or greater in C are not portable defined cases. Preserve
-  failure/write order and explicitly distinguish any correction from the
-  planned typed receipt-target migration.
+  bytes. Counts 32 or greater in C are not portable defined cases. The guarded
+  promoted-width correction retains previous Rust there, verified in debug
+  and release, and preserves target read/OR/write and panic-prefix ordering.
 
 ## Non-negotiable behavior
 

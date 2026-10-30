@@ -49,12 +49,6 @@ const SPRITE_OAM_FLAGS: usize = 0x0f50;
 const SPRITE_FLAGS4: usize = 0x0f60;
 const SPRITE_Z: usize = 0x0f70;
 
-const GARNISH_TYPE: usize = 0x1f800;
-const GARNISH_Y_LO: usize = 0x1f81e;
-const GARNISH_X_LO: usize = 0x1f83c;
-const GARNISH_Y_HI: usize = 0x1f85a;
-const GARNISH_X_HI: usize = 0x1f878;
-const GARNISH_COUNTDOWN: usize = 0x1f90e;
 const OVERWORLD_SPRITE_WAS_LOADED: usize = 0x1ef80;
 
 const K_ARMOS_COORDINATOR_BACK_WALL_X: [u8; 6] = [49, 77, 105, 131, 159, 187];
@@ -574,16 +568,16 @@ pub fn spawn_falling_tile(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: 
     let Some(j) = hooks.garnish_alloc(ram) else {
         return;
     };
-    write_index(ram, GARNISH_TYPE, j, 3);
-    write_index(ram, GARNISH_X_HI, j, read_index(ram, OVERLORD_X_HI, k));
-    write_index(ram, GARNISH_X_LO, j, read_index(ram, OVERLORD_X_LO, k));
-    let pan = hooks.calculate_sfx_pan(ram, read_index(ram, GARNISH_X_LO, j));
+    ram.set_garnish_kind(j, 3);
+    ram.set_garnish_x_high(j, read_index(ram, OVERLORD_X_HI, k));
+    ram.set_garnish_x_low(j, read_index(ram, OVERLORD_X_LO, k));
+    let pan = hooks.calculate_sfx_pan(ram, ram.garnish_x_low(j));
     ram.write_u8(0x12e, pan | 0x1f);
     let y = get_y(ram, k).wrapping_add(16);
-    write_index(ram, GARNISH_Y_LO, j, y as u8);
-    write_index(ram, GARNISH_Y_HI, j, (y >> 8) as u8);
-    write_index(ram, GARNISH_COUNTDOWN, j, 31);
-    ram.write_u8(0xfb4, 31);
+    ram.set_garnish_y_low(j, y as u8);
+    ram.set_garnish_y_high(j, (y >> 8) as u8);
+    ram.set_garnish_countdown(j, 31);
+    ram.set_garnish_active_marker(31);
 }
 
 pub fn wallmaster_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
@@ -937,6 +931,8 @@ mod tests {
         spawn_pos: usize,
         tile: u8,
         garnish: Option<usize>,
+        garnish_pan_mutation: bool,
+        garnish_pan_inputs: Vec<u8>,
         sfx2: Vec<(usize, u8)>,
         sfx3: Vec<(usize, u8)>,
         bombs: Vec<usize>,
@@ -977,7 +973,15 @@ mod tests {
             self.garnish.take()
         }
 
-        fn calculate_sfx_pan(&mut self, _ram: &mut Ram<'_>, x: u8) -> u8 {
+        fn calculate_sfx_pan(&mut self, ram: &mut Ram<'_>, x: u8) -> u8 {
+            if self.garnish_pan_mutation {
+                self.garnish_pan_inputs.push(x);
+                ram.set_garnish_kind(2, 9);
+                ram.set_garnish_x_low(2, 0x55);
+                ram.set_garnish_countdown(2, 0xbb);
+                ram.set_garnish_active_marker(0xaa);
+                set_y(ram, 0, 0x3344);
+            }
             x & 0xc0
         }
 
@@ -1096,7 +1100,34 @@ mod tests {
         assert_eq!(get_x(&ram, 0), 0x0180);
         assert_eq!(get_y(&ram, 0), 0x0230);
         assert_eq!(read_index(&ram, OVERLORD_GEN2, 0), 16);
-        assert_eq!(read_index(&ram, GARNISH_TYPE, 2), 3);
-        assert_eq!(read_index(&ram, GARNISH_COUNTDOWN, 2), 31);
+        assert_eq!(ram.garnish_kind(2), 3);
+        assert_eq!(ram.garnish_countdown(2), 31);
+    }
+
+    #[test]
+    fn falling_tile_pan_hook_observes_partial_spawn_and_later_reads_stay_live() {
+        let mut bytes = Box::new(std::array::from_fn(|i| (i * 19) as u8));
+        let mut ram = Ram::new(&mut bytes);
+        set_x(&mut ram, 0, 0x1280);
+        set_y(&mut ram, 0, 0x2233);
+        let mut expected = Box::new(*ram.bytes_mut());
+        expected[0x1f800 + 2] = 9;
+        expected[0x1f878 + 2] = 0x12;
+        expected[0x1f83c + 2] = 0x55;
+        expected[OVERLORD_Y_LO] = 0x44;
+        expected[OVERLORD_Y_HI] = 0x33;
+        expected[0x12e] = 0x9f;
+        expected[0x1f81e + 2] = 0x54;
+        expected[0x1f85a + 2] = 0x33;
+        expected[0x1f90e + 2] = 31;
+        expected[0xfb4] = 31;
+        let mut hooks = Hooks {
+            garnish: Some(2),
+            garnish_pan_mutation: true,
+            ..Hooks::default()
+        };
+        spawn_falling_tile(&mut ram, &mut hooks, 0);
+        assert_eq!(hooks.garnish_pan_inputs, [0x80]);
+        assert_eq!(ram.bytes_mut(), &mut *expected);
     }
 }

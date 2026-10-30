@@ -6,6 +6,8 @@ cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
 ruby scripts/audit-spc-mapping.rb
 ruby scripts/audit-swim-state.rb
+ruby scripts/audit-garnish-state.rb
+ruby scripts/audit-inventory-receipt.rb
 ruby scripts/audit-recording-abi.rb
 ruby scripts/audit-recorder-reference.rb
 ruby scripts/test-replay-ranges.rb
@@ -31,6 +33,12 @@ cargo test --release -p z3-game \
   sfx_public_samples_match_c_for_zero_id_commands -- --ignored --nocapture
 cargo test --release -p z3-game \
   swim_axes_match_original_c_whole_wram -- --ignored --nocapture
+cargo test --release -p z3-game \
+  receipt_palace_mask_matches_original_c_promoted_shift -- --ignored --nocapture
+cargo test --release -p z3-game \
+  inventory_receipts_match_original_c_whole_wram -- --ignored --nocapture
+cargo test --release -p z3-game \
+  undefined_c_palace_shifts_keep_frozen_rust_behavior_in_each_profile
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -q -p z3-verify --bin check_oracle -- \
   build/c-oracle/stream_oracle zelda3_assets.dat
@@ -56,6 +64,7 @@ cargo run -q -p z3-verify --bin check_stripes -- \
   build/c-oracle/stripe_oracle
 cargo run -q -p z3-verify --bin check_sprite_state -- \
   build/c-oracle/sprite_state_oracle
+cargo run -q -p z3-verify --bin check_garnish
 cargo run -q -p z3-verify --bin check_tile_maps -- \
   build/c-oracle/tile_map_oracle
 cargo run -q -p z3-verify --bin check_oam_allocator -- \

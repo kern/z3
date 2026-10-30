@@ -961,8 +961,21 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.set_arr(0xc4a, slot, 0);
         }
         for address in [
-            0x2ec, 0xb6a, 0xb9b, 0xb88, 0xb99, 0xfb4, 0xb9e, 0xcf4, 0xff9, 0xff8, 0xffb, 0xffc,
-            0xffd, 0xfc6, 0x3fc,
+            0x2ec,
+            0xb6a,
+            0xb9b,
+            0xb88,
+            0xb99,
+            crate::garnish_state::ACTIVE_MARKER_ADDRESS,
+            0xb9e,
+            0xcf4,
+            0xff9,
+            crate::garnish_state::SHARED_OVERWRITE_CURSOR_ADDRESS,
+            0xffb,
+            0xffc,
+            0xffd,
+            0xfc6,
+            0x3fc,
         ] {
             self.w8(address, 0);
         }
@@ -970,7 +983,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.set_arr(OVERLORD_TYPE, slot, 0);
         }
         for slot in (0..30).rev() {
-            self.set_arr(GARNISH_TYPE, slot, 0);
+            self.ram.set_garnish_kind(slot, 0);
         }
     }
     pub fn sprite_reset_all_no_disable(&mut self) {
@@ -3255,7 +3268,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let x = self.garnish_get_x(slot).wrapping_sub(self.r16(0xe2));
         let y = self.garnish_get_y(slot).wrapping_sub(self.r16(0xe8));
         if x >= 256 || y >= 256 {
-            self.set_arr(GARNISH_TYPE, slot, 0);
+            self.ram.set_garnish_kind(slot, 0);
             None
         } else {
             Some((x, y.wrapping_sub(16)))
@@ -4570,26 +4583,24 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         )
     }
     pub fn garnish_get_x(&self, slot: usize) -> u16 {
-        u16::from(self.arr(GARNISH_X_LO, slot)) | u16::from(self.arr(GARNISH_X_HI, slot)) << 8
+        self.ram.garnish(slot).x()
     }
     pub fn garnish_get_y(&self, slot: usize) -> u16 {
-        u16::from(self.arr(GARNISH_Y_LO, slot)) | u16::from(self.arr(GARNISH_Y_HI, slot)) << 8
+        self.ram.garnish(slot).y()
     }
     fn garnish_set_x(&mut self, slot: usize, value: u16) {
-        self.set_arr(GARNISH_X_LO, slot, value as u8);
-        self.set_arr(GARNISH_X_HI, slot, (value >> 8) as u8);
+        self.ram.garnish_mut(slot).set_x(value);
     }
     fn garnish_set_y(&mut self, slot: usize, value: u16) {
-        self.set_arr(GARNISH_Y_LO, slot, value as u8);
-        self.set_arr(GARNISH_Y_HI, slot, (value >> 8) as u8);
+        self.ram.garnish_mut(slot).set_y(value);
     }
     pub fn garnish_sparkle_common(&mut self, slot: usize, shift: u8) {
         const CHAR: [u8; 4] = [0x83, 0xc7, 0x80, 0xb7];
-        let frame = self.arr(GARNISH_COUNTDOWN, slot) >> shift;
+        let frame = self.ram.garnish_countdown(slot) >> shift;
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         let flags = (self.ram.sprite(sprite).oam_flags()
             | self.ram.sprite(sprite).object_priority())
             & 0xf0
@@ -4606,7 +4617,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn garnish_dust_common(&mut self, slot: usize, shift: u8) {
         const CHAR: [u8; 3] = [0xdf, 0xcf, 0xa9];
-        let frame = self.arr(GARNISH_COUNTDOWN, slot) >> shift;
+        let frame = self.ram.garnish_countdown(slot) >> shift;
         self.w8(0xfb5, frame);
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
@@ -4641,7 +4652,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
             x,
@@ -4653,11 +4664,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn garnish02_mothula_beam_trail(&mut self, slot: usize) {
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
-            u16::from(self.arr(GARNISH_X_LO, slot)).wrapping_sub(self.r16(0xe2)),
-            u16::from(self.arr(GARNISH_Y_LO, slot)).wrapping_sub(self.r16(0xe8)),
+            u16::from(self.ram.garnish_x_low(slot)).wrapping_sub(self.r16(0xe2)),
+            u16::from(self.ram.garnish_y_low(slot)).wrapping_sub(self.r16(0xe8)),
             0xaa,
             self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority(),
             2,
@@ -4673,7 +4684,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.current_oam_index(),
             x,
             y,
-            CHAR[usize::from(self.arr(GARNISH_OAM_FLAGS, slot))],
+            CHAR[usize::from(self.ram.garnish_oam_flags(slot))],
             0x25,
             0,
         );
@@ -4683,7 +4694,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
             x,
@@ -4700,7 +4711,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let frame = usize::from(self.arr(GARNISH_COUNTDOWN, slot) >> 3);
+        let frame = usize::from(self.ram.garnish_countdown(slot) >> 3);
         self.set_oam_plain(self.current_oam_index(), x, y, CHAR[frame], FLAGS[frame], 2);
     }
 
@@ -4710,8 +4721,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let frame = usize::from(self.arr(GARNISH_COUNTDOWN, slot) >> 2);
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let frame = usize::from(self.ram.garnish_countdown(slot) >> 2);
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         let offset = XY[frame] as i16 as u16;
         self.set_oam_plain(
             self.current_oam_index(),
@@ -4729,7 +4740,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let frame = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let frame = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
             x,
@@ -4747,12 +4758,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
             x,
             y,
-            CHAR[usize::from(self.arr(GARNISH_COUNTDOWN, slot) >> 3)],
+            CHAR[usize::from(self.ram.garnish_countdown(slot) >> 3)],
             FLAGS[sprite] | 4,
             2,
         );
@@ -4763,12 +4774,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
             x,
             y,
-            CHAR[usize::from(self.arr(GARNISH_COUNTDOWN, slot) >> 3)],
+            CHAR[usize::from(self.ram.garnish_countdown(slot) >> 3)],
             (self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority())
                 & 0xf0
                 | 0x0e,
@@ -4781,12 +4792,12 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let sprite = usize::from(self.arr(GARNISH_SPRITE, slot));
+        let sprite = usize::from(self.ram.garnish_source_sprite(slot));
         self.set_oam_plain(
             self.current_oam_index(),
             x,
             y,
-            CHAR[usize::from(self.arr(GARNISH_OAM_FLAGS, slot).wrapping_sub(7))],
+            CHAR[usize::from(self.ram.garnish_oam_flags(slot).wrapping_sub(7))],
             self.ram.sprite(sprite).oam_flags() | self.ram.sprite(sprite).object_priority(),
             0,
         );
@@ -4799,13 +4810,13 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         ];
         const CHAR: [u8; 7] = [0xac, 0xac, 0x66, 0x66, 0x8e, 0xa0, 0xa2];
         const FLAGS: [u8; 7] = [1, 0x41, 1, 0x41, 0, 0, 0];
-        if self.arr(GARNISH_COUNTDOWN, slot) == 8 {
-            self.set_arr(GARNISH_TYPE, slot, 0x11);
+        if self.ram.garnish_countdown(slot) == 8 {
+            self.ram.set_garnish_kind(slot, 0x11);
         }
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let frame = usize::from(INDEX[usize::from(self.arr(GARNISH_COUNTDOWN, slot) >> 3)]);
+        let frame = usize::from(INDEX[usize::from(self.ram.garnish_countdown(slot) >> 3)]);
         self.set_oam_plain(
             self.current_oam_index(),
             x,
@@ -4839,7 +4850,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let group = usize::from((self.arr(GARNISH_COUNTDOWN, slot) >> 1) & 6);
+        let group = usize::from((self.ram.garnish_countdown(slot) >> 1) & 6);
         let oam_index = self.current_oam_index();
         for output in (0..=1).rev() {
             let frame = output + group;
@@ -4859,7 +4870,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         const CHAR: [u8; 5] = [0x80, 0xcc, 0xcc, 0xea, 0xca];
         const FLAGS: [u8; 5] = [0x30, 0x31, 0x31, 0x31, 0x31];
         const EXT: [u8; 5] = [0, 2, 2, 2, 2];
-        let countdown = self.arr(GARNISH_COUNTDOWN, slot);
+        let countdown = self.ram.garnish_countdown(slot);
         let mut value = countdown;
         if countdown == 0x1e {
             value = self.r8(0x11) | self.r8(0xfc1);
@@ -4896,7 +4907,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             0xe8, 0xe8, 0xe6, 0xe6, 0xe4, 0xe4, 0xe4, 0xe4, 0xe4, 0xe4, 0xe4, 0xe4,
         ];
         const FLAGS: [u8; 4] = [0, 0x40, 0xc0, 0x80];
-        let countdown = self.arr(GARNISH_COUNTDOWN, slot);
+        let countdown = self.ram.garnish_countdown(slot);
         if countdown == 0x50 && self.r8(0x11) | self.r8(0xfc1) == 0 {
             let x = self.garnish_get_x(slot);
             let y = self.garnish_get_y(slot).wrapping_sub(16);
@@ -4917,26 +4928,24 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn garnish13_pyramid_debris(&mut self, slot: usize) {
-        let y = (i32::from(self.arr(GARNISH_Y_LO, slot)) << 8)
-            + i32::from(self.arr(GARNISH_Y_SUBPIXEL, slot))
-            + (i32::from(self.arr(GARNISH_Y_VEL, slot) as i8) << 4);
-        self.set_arr(GARNISH_Y_SUBPIXEL, slot, y as u8);
-        self.set_arr(GARNISH_Y_LO, slot, (y >> 8) as u8);
-        let x = (i32::from(self.arr(GARNISH_X_LO, slot)) << 8)
-            + i32::from(self.arr(GARNISH_X_SUBPIXEL, slot))
-            + (i32::from(self.arr(GARNISH_X_VEL, slot) as i8) << 4);
-        self.set_arr(GARNISH_X_SUBPIXEL, slot, x as u8);
-        self.set_arr(GARNISH_X_LO, slot, (x >> 8) as u8);
-        self.set_arr(
-            GARNISH_Y_VEL,
-            slot,
-            self.arr(GARNISH_Y_VEL, slot).wrapping_add(3),
-        );
+        let y = (i32::from(self.ram.garnish_y_low(slot)) << 8)
+            + i32::from(self.ram.garnish_y_fraction(slot))
+            + (i32::from(self.ram.garnish_y_velocity(slot) as i8) << 4);
+        self.ram.set_garnish_y_fraction(slot, y as u8);
+        self.ram.set_garnish_y_low(slot, (y >> 8) as u8);
+        let x = (i32::from(self.ram.garnish_x_low(slot)) << 8)
+            + i32::from(self.ram.garnish_x_fraction(slot))
+            + (i32::from(self.ram.garnish_x_velocity(slot) as i8) << 4);
+        self.ram.set_garnish_x_fraction(slot, x as u8);
+        self.ram.set_garnish_x_low(slot, (x >> 8) as u8);
+        self.ram
+            .set_garnish_y_velocity(slot, self.ram.garnish_y_velocity(slot).wrapping_add(3));
         let screen_x = self
-            .arr(GARNISH_X_LO, slot)
+            .ram
+            .garnish_x_low(slot)
             .wrapping_sub(self.r16(0xe2) as u8);
         if screen_x >= 248 {
-            self.set_arr(GARNISH_TYPE, slot, 0);
+            self.ram.set_garnish_kind(slot, 0);
             return;
         }
         // The C routine writes the OAM x byte before testing whether y is visible.
@@ -4944,10 +4953,11 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let oam_index = self.current_oam_index();
         self.ram.write_u8(oam::OAM_BUFFER + oam_index * 4, screen_x);
         let screen_y = self
-            .arr(GARNISH_Y_LO, slot)
+            .ram
+            .garnish_y_low(slot)
             .wrapping_sub(self.r16(0xe8) as u8);
         if screen_y >= 240 {
-            self.set_arr(GARNISH_TYPE, slot, 0);
+            self.ram.set_garnish_kind(slot, 0);
             return;
         }
         self.set_oam_plain(
@@ -4962,7 +4972,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn garnish_execute_upper_slots(&mut self) {
         self.hooks.handle_screen_flash(&mut self.ram);
-        if self.r8(0xfb4) != 0 {
+        if self.ram.garnish_active_marker() != 0 {
             for slot in (15..30).rev() {
                 self.garnish_execute_single(slot);
             }
@@ -4970,7 +4980,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn garnish_execute_lower_slots(&mut self) {
-        if self.r8(0xfb4) != 0 {
+        if self.ram.garnish_active_marker() != 0 {
             for slot in (0..15).rev() {
                 self.garnish_execute_single(slot);
             }
@@ -4979,23 +4989,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 
     pub fn garnish_execute_single(&mut self, slot: usize) {
         self.w8(0xfa0, slot as u8);
-        let kind = self.arr(GARNISH_TYPE, slot);
+        let kind = self.ram.garnish_kind(slot);
         if kind == 0 {
             return;
         }
         if (kind == 5 || self.r8(0x11) | self.r8(0xfc1) == 0)
-            && self.arr(GARNISH_COUNTDOWN, slot) != 0
+            && self.ram.garnish_mut(slot).tick_lifetime()
         {
-            let countdown = self.arr(GARNISH_COUNTDOWN, slot).wrapping_sub(1);
-            self.set_arr(GARNISH_COUNTDOWN, slot, countdown);
-            if countdown == 0 {
-                self.set_arr(GARNISH_TYPE, slot, 0);
-                return;
-            }
+            return;
         }
-        let bytes = GARNISH_OAM_MEM_SIZE[usize::from(self.arr(GARNISH_TYPE, slot))];
+        let bytes = GARNISH_OAM_MEM_SIZE[usize::from(self.ram.garnish_kind(slot))];
         if self.r8(0xfb3) != 0 {
-            if self.arr(GARNISH_FLOOR, slot) != 0 {
+            if self.ram.garnish_floor(slot) != 0 {
                 self.oam_allocate_from_region_f(bytes);
             } else {
                 self.oam_allocate_from_region_d(bytes);
@@ -5003,7 +5008,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         } else {
             self.oam_allocate_from_region_a(bytes);
         }
-        match GARNISH_FUNCS[usize::from(self.arr(GARNISH_TYPE, slot) - 1)] {
+        match GARNISH_FUNCS[usize::from(self.ram.garnish_kind(slot) - 1)] {
             1 => self.garnish01_fire_snake_tail(slot),
             2 => self.garnish02_mothula_beam_trail(slot),
             3 => self.garnish03_falling_tile(slot),
@@ -5034,18 +5039,18 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let Some((x, y)) = self.garnish_return_if_prep_fails(slot) else {
             return;
         };
-        let oam_flags = self.arr(GARNISH_OAM_FLAGS, slot);
+        let oam_flags = self.ram.garnish_oam_flags(slot);
         if self.r8(0xfc6) >= 3 {
             return;
         }
-        let debris = self.arr(GARNISH_SPRITE, slot);
+        let debris = self.ram.garnish_source_sprite(slot);
         if debris == 3 {
             self.scatter_debris_draw(slot, x, y);
             return;
         }
         // The C renderer reuses this WRAM scratch byte for the debris kind.
         self.w8(0xfb5, debris);
-        let mut base = usize::from(((self.arr(GARNISH_COUNTDOWN, slot) >> 2) ^ 7) << 2);
+        let mut base = usize::from(((self.ram.garnish_countdown(slot) >> 2) ^ 7) << 2);
         if debris == 4 || debris == 2 && self.r8(0x1b) == 0 {
             base += 0x20;
         }
@@ -5072,10 +5077,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
     }
 
     pub fn scatter_debris_draw(&mut self, slot: usize, x: u16, y: u16) {
-        if self.arr(GARNISH_COUNTDOWN, slot) == 16 {
-            self.set_arr(GARNISH_TYPE, slot, 0);
+        if self.ram.garnish_countdown(slot) == 16 {
+            self.ram.set_garnish_kind(slot, 0);
         }
-        let base = usize::from((self.arr(GARNISH_COUNTDOWN, slot) & 0x0f) >> 2) * 3;
+        let base = usize::from((self.ram.garnish_countdown(slot) & 0x0f) >> 2) * 3;
         let oam = self.current_oam_index();
         for i in (0..=2).rev() {
             let j = base + i;
@@ -5101,8 +5106,8 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
             self.w8(15, 0xff);
             return -1;
         };
-        self.set_arr(GARNISH_TYPE, garnish, 5);
-        self.w8(0xfb4, 5);
+        self.ram.set_garnish_kind(garnish, 5);
+        self.ram.set_garnish_active_marker(5);
         self.garnish_set_x(garnish, self.sprite_get_x(slot).wrapping_add(x));
         self.garnish_set_y(
             garnish,
@@ -5111,9 +5116,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 .wrapping_sub(u16::from(self.ram.sprite(slot).z()))
                 .wrapping_add(16),
         );
-        self.set_arr(GARNISH_COUNTDOWN, garnish, 31);
-        self.set_arr(GARNISH_SPRITE, garnish, slot as u8);
-        self.set_arr(GARNISH_FLOOR, garnish, self.ram.sprite(slot).floor());
+        self.ram.set_garnish_countdown(garnish, 31);
+        self.ram.set_garnish_source_sprite(garnish, slot as u8);
+        self.ram
+            .set_garnish_floor(garnish, self.ram.sprite(slot).floor());
         self.w8(15, garnish as u8);
         garnish as i32
     }
@@ -5138,19 +5144,6 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
 }
 
 const OVERLORD_TYPE: usize = 0xb00;
-const GARNISH_TYPE: usize = 0x1f800;
-const GARNISH_Y_LO: usize = 0x1f81e;
-const GARNISH_X_LO: usize = 0x1f83c;
-const GARNISH_Y_HI: usize = 0x1f85a;
-const GARNISH_X_HI: usize = 0x1f878;
-const GARNISH_Y_VEL: usize = 0x1f896;
-const GARNISH_X_VEL: usize = 0x1f8b4;
-const GARNISH_Y_SUBPIXEL: usize = 0x1f8d2;
-const GARNISH_X_SUBPIXEL: usize = 0x1f8f0;
-const GARNISH_COUNTDOWN: usize = 0x1f90e;
-const GARNISH_SPRITE: usize = 0x1f92c;
-const GARNISH_FLOOR: usize = 0x1f968;
-const GARNISH_OAM_FLAGS: usize = 0x1f9fe;
 
 pub const ABSORB_BIG_KEY: [u8; 2] = [0x40, 0x20];
 pub const ABSORPTION_SFX: [u8; 15] = [
@@ -5548,6 +5541,87 @@ mod tests {
     impl crate::sprite_main_bank0::SpriteMainBank0Runtime for Hooks {}
     impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for Hooks {}
     impl crate::sprite_main_bank1::SpriteMainBank1Runtime for Hooks {}
+
+    #[derive(Default)]
+    struct GarnishHooks {
+        flash_gate: Option<u8>,
+        flashes: usize,
+        tile_slots: Vec<u8>,
+    }
+    impl crate::sprite_main_bank0::SpriteMainBank0Runtime for GarnishHooks {}
+    impl crate::sprite_main_bank1::SpriteMainBank1Runtime for GarnishHooks {}
+    impl crate::sprite_main_bank2a::SpriteMainBank2aRuntime for GarnishHooks {}
+    impl crate::sprite_main_bank2b::SpriteMainBank2bRuntime for GarnishHooks {}
+    impl SpriteHooks for GarnishHooks {
+        fn handle_screen_flash(&mut self, ram: &mut Ram<'_>) {
+            self.flashes += 1;
+            if let Some(marker) = self.flash_gate {
+                ram.set_garnish_active_marker(marker);
+                ram.set_garnish_kind(29, 5);
+                ram.set_garnish_countdown(29, 1);
+            }
+        }
+
+        fn dungeon_update_tilemap_with_common_tile(
+            &mut self,
+            ram: &mut Ram<'_>,
+            _x: u16,
+            _y: u16,
+            _tile: u8,
+        ) {
+            self.tile_slots.push(ram.read_u8(0xfa0));
+            ram.set_garnish_active_marker(0);
+            // Slot14 was already visited; slot4 has not yet been visited.
+            for slot in [4, 14] {
+                ram.set_garnish_kind(slot, 13);
+                ram.set_garnish_countdown(slot, 2);
+            }
+            // FallingTile must read coordinates live after this callback.
+            ram.garnish_mut(10).set_x(12);
+            ram.garnish_mut(10).set_y(44);
+        }
+    }
+
+    #[test]
+    fn garnish_screen_flash_precedes_gate_and_expiry_keeps_full_memory() {
+        for marker in [0, 31] {
+            let mut bytes = Box::new([0; WRAM_SIZE]);
+            bytes[0xfa0] = 0xa5;
+            let mut expected = bytes.clone();
+            expected[crate::garnish_state::ACTIVE_MARKER_ADDRESS] = marker;
+            expected[0x1f800 + 29] = if marker == 0 { 5 } else { 0 };
+            expected[0x1f90e + 29] = if marker == 0 { 1 } else { 0 };
+            if marker != 0 {
+                expected[0xfa0] = 15;
+            }
+            let mut hooks = GarnishHooks {
+                flash_gate: Some(marker),
+                ..GarnishHooks::default()
+            };
+            Sprite::new(&mut bytes, &mut hooks).garnish_execute_upper_slots();
+            assert_eq!(hooks.flashes, 1);
+            assert_eq!(bytes, expected);
+        }
+    }
+
+    #[test]
+    fn garnish_lower_pass_keeps_live_hook_state_and_reverse_slot_order() {
+        let mut bytes = [0; WRAM_SIZE];
+        let mut hooks = GarnishHooks::default();
+        let mut sprite = Sprite::new(&mut bytes, &mut hooks);
+        sprite.oam_reset_region_bases();
+        sprite.ram.set_garnish_active_marker(1);
+        sprite.ram.set_garnish_kind(10, 3);
+        sprite.ram.set_garnish_countdown(10, 31);
+        sprite.garnish_execute_lower_slots();
+        assert_eq!(sprite.ram.garnish_active_marker(), 0);
+        assert_eq!(sprite.ram.garnish_countdown(4), 1);
+        assert_eq!(sprite.ram.garnish_countdown(14), 2);
+        assert_eq!(sprite.ram.read_u8(0xfa0), 0);
+        assert_eq!(sprite.ram.slice(0x830, 4), &[16, 32, 0x80, 0x30]);
+        assert_eq!(hooks.tile_slots, [10]);
+        assert_eq!(hooks.flashes, 0);
+    }
 
     #[derive(Default)]
     struct ExecutionHooks {

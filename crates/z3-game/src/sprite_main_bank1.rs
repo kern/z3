@@ -1533,7 +1533,7 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
         for i in 0..64 {
             self.ram.write_u8(0x1fe00 + k * 0x40 + i, 0xff);
         }
-        self.ram.write_u8(0x1f81e + k, 7);
+        self.ram.set_garnish_y_low(k, 7);
     }
 
     pub fn sprite_prep_crystal_switch(&mut self, k: usize) {
@@ -5168,27 +5168,24 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
         let Some((_, _, flags)) = self.runtime.prep_oam_with_flags(self.ram, k) else {
             return;
         };
-        let garnish = (0..30)
-            .rev()
-            .find(|&j| self.ram.read_u8(0x1f800 + j) == 0)
-            .unwrap_or(0);
-        self.ram.write_u8(0x1f800 + garnish, 22);
-        self.ram.write_u8(0xfb4, 22);
+        let garnish = self.ram.garnish_find_free_force();
+        self.ram.set_garnish_kind(garnish, 22);
+        self.ram.set_garnish_active_marker(22);
         self.ram
-            .write_u8(0x1f83c + garnish, self.ram.sprite(k).x_low());
+            .set_garnish_x_low(garnish, self.ram.sprite(k).x_low());
         self.ram
-            .write_u8(0x1f878 + garnish, self.ram.sprite(k).x_high());
+            .set_garnish_x_high(garnish, self.ram.sprite(k).x_high());
         let y = u16::from_le_bytes([self.ram.sprite(k).y_low(), self.ram.sprite(k).y_high()])
             .wrapping_sub(u16::from(self.ram.sprite(k).z()))
             .wrapping_add(0x10);
         let [ylo, yhi] = y.to_le_bytes();
-        self.ram.write_u8(0x1f81e + garnish, ylo);
-        self.ram.write_u8(0x1f85a + garnish, yhi);
-        self.ram.write_u8(0x1f9fe + garnish, flags);
+        self.ram.set_garnish_y_low(garnish, ylo);
+        self.ram.set_garnish_y_high(garnish, yhi);
+        self.ram.set_garnish_oam_flags(garnish, flags);
         self.ram
-            .write_u8(0x1f968 + garnish, self.ram.sprite(k).floor());
-        self.ram.write_u8(0x1f90e + garnish, 31);
-        self.ram.write_u8(0x1f92c + garnish, scenery);
+            .set_garnish_floor(garnish, self.ram.sprite(k).floor());
+        self.ram.set_garnish_countdown(garnish, 31);
+        self.ram.set_garnish_source_sprite(garnish, scenery);
     }
 
     pub fn dark_world_hint_npc_idle(&mut self, k: usize) {
@@ -6466,16 +6463,16 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
             return;
         }
         let j = self.runtime.garnish_alloc(self.ram);
-        self.ram.write_u8(0x1f800 + j, 8);
-        self.ram.write_u8(0xfb4, 8);
-        self.ram.write_u8(0x1f90e + j, 11);
+        self.ram.set_garnish_kind(j, 8);
+        self.ram.set_garnish_active_marker(8);
+        self.ram.set_garnish_countdown(j, 11);
         let x = self.ram.read_u16(0xfd8);
         let y = self.ram.read_u16(0xfda).wrapping_add(16);
-        self.ram.write_u8(0x1f83c + j, x as u8);
-        self.ram.write_u8(0x1f878 + j, (x >> 8) as u8);
-        self.ram.write_u8(0x1f81e + j, y as u8);
-        self.ram.write_u8(0x1f85a + j, (y >> 8) as u8);
-        self.ram.write_u8(0x1f92c + j, k as u8);
+        self.ram.set_garnish_x_low(j, x as u8);
+        self.ram.set_garnish_x_high(j, (x >> 8) as u8);
+        self.ram.set_garnish_y_low(j, y as u8);
+        self.ram.set_garnish_y_high(j, (y >> 8) as u8);
+        self.ram.set_garnish_source_sprite(j, k as u8);
     }
 
     pub fn garnish_spawn_pyramid_debris(&mut self, x: i8, y: i8, xv: i8, yv: i8) {
@@ -6483,14 +6480,14 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
         self.ram.write_u8(0x12f, 3);
         self.ram.write_u8(0x12e, 31);
         self.ram.write_u8(0x12d, 5);
-        self.ram.write_u8(0x1f800 + k, 19);
-        self.ram.write_u8(0xfb4, 19);
-        self.ram.write_u8(0x1f83c + k, 232u8.wrapping_add(x as u8));
-        self.ram.write_u8(0x1f81e + k, 96u8.wrapping_add(y as u8));
-        self.ram.write_u8(0x1f8b4 + k, xv as u8);
-        self.ram.write_u8(0x1f896 + k, yv as u8);
+        self.ram.set_garnish_kind(k, 19);
+        self.ram.set_garnish_active_marker(19);
+        self.ram.set_garnish_x_low(k, 232u8.wrapping_add(x as u8));
+        self.ram.set_garnish_y_low(k, 96u8.wrapping_add(y as u8));
+        self.ram.set_garnish_x_velocity(k, xv as u8);
+        self.ram.set_garnish_y_velocity(k, yv as u8);
         let delay = (self.runtime.random_number(self.ram) & 31).wrapping_add(48);
-        self.ram.write_u8(0x1f90e + k, delay);
+        self.ram.set_garnish_countdown(k, delay);
     }
 
     pub fn snitch_spawn_guard(&mut self, k: usize) {
@@ -8297,17 +8294,17 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
             return;
         }
         let j = self.runtime.garnish_alloc_force(self.ram);
-        self.ram.write_u8(0x1f800 + j, 20);
-        self.ram.write_u8(0xfb4, 20);
+        self.ram.set_garnish_kind(j, 20);
+        self.ram.set_garnish_active_marker(20);
         let x = u16::from_le_bytes([self.ram.sprite(k).x_low(), self.ram.sprite(k).x_high()])
             .wrapping_add(4);
         let y = u16::from_le_bytes([self.ram.sprite(k).y_low(), self.ram.sprite(k).y_high()])
             .wrapping_add(28);
-        self.ram.write_u8(0x1f83c + j, x as u8);
-        self.ram.write_u8(0x1f878 + j, (x >> 8) as u8);
-        self.ram.write_u8(0x1f81e + j, y as u8);
-        self.ram.write_u8(0x1f85a + j, (y >> 8) as u8);
-        self.ram.write_u8(0x1f90e + j, 10);
+        self.ram.set_garnish_x_low(j, x as u8);
+        self.ram.set_garnish_x_high(j, (x >> 8) as u8);
+        self.ram.set_garnish_y_low(j, y as u8);
+        self.ram.set_garnish_y_high(j, (y >> 8) as u8);
+        self.ram.set_garnish_countdown(j, 10);
     }
 
     pub fn sprite_maze_game_lady(&mut self, k: usize) {

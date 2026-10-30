@@ -57,16 +57,6 @@ const DUNGEON_ROOM_INDEX2: usize = 0x48e;
 const TMP_COUNTER: usize = 0xfb5;
 const CUR_PALACE_INDEX_X2: usize = 0x40c;
 const FOLLOWER_INDICATOR: usize = 0xf3cc;
-const GARNISH_ACTIVE: usize = 0xfb4;
-const GARNISH_TYPE: usize = 0x1f800;
-const GARNISH_Y_LO: usize = 0x1f81e;
-const GARNISH_X_LO: usize = 0x1f83c;
-const GARNISH_Y_HI: usize = 0x1f85a;
-const GARNISH_X_HI: usize = 0x1f878;
-const GARNISH_COUNTDOWN: usize = 0x1f90e;
-const GARNISH_SPRITE: usize = 0x1f92c;
-const GARNISH_FLOOR: usize = 0x1f968;
-const GARNISH_OAM_FLAGS: usize = 0x1f9fe;
 const CUR_SPRITE_X: usize = 0xfd8;
 const CUR_SPRITE_Y: usize = 0xfda;
 const IS_NMI_THREAD_ACTIVE: usize = 0x12a;
@@ -482,14 +472,10 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         self.ram.set_sprite_y_high(k, hi);
     }
     fn set_garnish_x(&mut self, j: usize, value: u16) {
-        let [lo, hi] = value.to_le_bytes();
-        self.ram.write_u8(GARNISH_X_LO + j, lo);
-        self.ram.write_u8(GARNISH_X_HI + j, hi);
+        self.ram.garnish_mut(j).set_x(value);
     }
     fn set_garnish_y(&mut self, j: usize, value: u16) {
-        let [lo, hi] = value.to_le_bytes();
-        self.ram.write_u8(GARNISH_Y_LO + j, lo);
-        self.ram.write_u8(GARNISH_Y_HI + j, hi);
+        self.ram.garnish_mut(j).set_y(value);
     }
 
     // Entries above the self-contained shop/platform tail retain an explicit
@@ -1233,19 +1219,14 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                             14
                         };
                         if let Some(j) = self.runtime.garnish_alloc_with_limit(self.ram, limit) {
-                            self.ram.write_u8(GARNISH_TYPE + j, 21);
-                            self.ram.write_u8(GARNISH_ACTIVE, 21);
+                            self.ram.set_garnish_kind(j, 21);
+                            self.ram.set_garnish_active_marker(21);
+                            self.ram.set_garnish_x_low(j, self.ram.sprite(k).x_low());
+                            self.ram.set_garnish_x_high(j, self.ram.sprite(k).x_high());
                             self.ram
-                                .write_u8(GARNISH_X_LO + j, self.ram.sprite(k).x_low());
-                            self.ram
-                                .write_u8(GARNISH_X_HI + j, self.ram.sprite(k).x_high());
-                            self.ram.write_u8(
-                                GARNISH_Y_LO + j,
-                                self.ram.sprite(k).y_low().wrapping_add(24),
-                            );
-                            self.ram
-                                .write_u8(GARNISH_Y_HI + j, self.ram.sprite(k).y_high());
-                            self.ram.write_u8(GARNISH_COUNTDOWN + j, 15);
+                                .set_garnish_y_low(j, self.ram.sprite(k).y_low().wrapping_add(24));
+                            self.ram.set_garnish_y_high(j, self.ram.sprite(k).y_high());
+                            self.ram.set_garnish_countdown(j, 15);
                         }
                     }
                 }
@@ -3514,14 +3495,13 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let Some(j) = self.runtime.garnish_alloc(self.ram) else {
             return;
         };
-        self.ram.write_u8(GARNISH_TYPE + j, 6);
-        self.ram.write_u8(GARNISH_ACTIVE, 6);
+        self.ram.set_garnish_kind(j, 6);
+        self.ram.set_garnish_active_marker(6);
         self.set_garnish_x(j, self.sprite_x(k));
         self.set_garnish_y(j, self.sprite_y(k).wrapping_add(16));
-        self.ram.write_u8(GARNISH_COUNTDOWN + j, 10);
-        self.ram.write_u8(GARNISH_SPRITE + j, k as u8);
-        self.ram
-            .write_u8(GARNISH_FLOOR + j, self.ram.sprite(k).floor());
+        self.ram.set_garnish_countdown(j, 10);
+        self.ram.set_garnish_source_sprite(j, k as u8);
+        self.ram.set_garnish_floor(j, self.ram.sprite(k).floor());
     }
 
     pub fn babasu(&mut self, k: usize) {
@@ -6180,9 +6160,9 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let Some(j) = self.runtime.garnish_alloc_low(self.ram) else {
             return;
         };
-        self.ram.write_u8(GARNISH_TYPE + j, 7);
-        self.ram.write_u8(GARNISH_ACTIVE, 7);
-        self.ram.write_u8(GARNISH_COUNTDOWN + j, 31);
+        self.ram.set_garnish_kind(j, 7);
+        self.ram.set_garnish_active_marker(7);
+        self.ram.set_garnish_countdown(j, 31);
         let ox = O[(self.runtime.random(self.ram) & 7) as usize];
         let oy = O[(self.runtime.random(self.ram) & 7) as usize];
         self.set_garnish_x(j, self.sprite_x(k).wrapping_add_signed(ox as i16));
@@ -6192,20 +6172,19 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 .wrapping_add_signed(oy as i16)
                 .wrapping_add(16),
         );
-        self.ram.write_u8(GARNISH_FLOOR + j, 0);
+        self.ram.set_garnish_floor(j, 0);
     }
     pub fn laser_beam_build_up_garnish(&mut self, k: usize) {
         let j = self.runtime.garnish_alloc_overwrite_old(self.ram);
-        self.ram.write_u8(GARNISH_TYPE + j, 4);
-        self.ram.write_u8(GARNISH_ACTIVE, 4);
+        self.ram.set_garnish_kind(j, 4);
+        self.ram.set_garnish_active_marker(4);
         self.set_garnish_x(j, self.sprite_x(k));
         self.set_garnish_y(j, self.sprite_y(k).wrapping_add(16));
-        self.ram.write_u8(GARNISH_COUNTDOWN + j, 16);
+        self.ram.set_garnish_countdown(j, 16);
         self.ram
-            .write_u8(GARNISH_OAM_FLAGS + j, self.ram.sprite(k).graphics());
-        self.ram.write_u8(GARNISH_SPRITE + j, k as u8);
-        self.ram
-            .write_u8(GARNISH_FLOOR + j, self.ram.sprite(k).floor());
+            .set_garnish_oam_flags(j, self.ram.sprite(k).graphics());
+        self.ram.set_garnish_source_sprite(j, k as u8);
+        self.ram.set_garnish_floor(j, self.ram.sprite(k).floor());
     }
     pub fn sprite_94_pirogusu(&mut self, k: usize) {
         const A0: [u8; 4] = [2, 3, 0, 1];
@@ -6314,11 +6293,11 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let x = T[(self.runtime.random(self.ram) & 3) as usize];
         let y = T[(self.runtime.random(self.ram) & 3) as usize];
         if let Some(j) = self.runtime.garnish_alloc_low(self.ram) {
-            self.ram.write_u8(GARNISH_TYPE + j, 11);
-            self.ram.write_u8(GARNISH_ACTIVE, 11);
+            self.ram.set_garnish_kind(j, 11);
+            self.ram.set_garnish_active_marker(11);
             self.set_garnish_x(j, self.sprite_x(k).wrapping_add(x as u16));
             self.set_garnish_y(j, self.sprite_y(k).wrapping_add(y as u16).wrapping_add(16));
-            self.ram.write_u8(GARNISH_COUNTDOWN + j, 15);
+            self.ram.set_garnish_countdown(j, 15);
         }
     }
 
@@ -6368,15 +6347,14 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             return;
         }
         for j in (0..15).rev() {
-            if self.ram.read_u8(GARNISH_TYPE + j) == 0 {
-                self.ram.write_u8(GARNISH_TYPE + j, 2);
-                self.ram.write_u8(GARNISH_ACTIVE, 2);
+            if self.ram.garnish_kind(j) == 0 {
+                self.ram.set_garnish_kind(j, 2);
+                self.ram.set_garnish_active_marker(2);
                 self.set_garnish_x(j, self.sprite_x(k));
                 self.set_garnish_y(j, self.sprite_y(k));
-                self.ram.write_u8(GARNISH_COUNTDOWN + j, 16);
-                self.ram.write_u8(GARNISH_SPRITE + j, k as u8);
-                self.ram
-                    .write_u8(GARNISH_FLOOR + j, self.ram.sprite(k).floor());
+                self.ram.set_garnish_countdown(j, 16);
+                self.ram.set_garnish_source_sprite(j, k as u8);
+                self.ram.set_garnish_floor(j, self.ram.sprite(k).floor());
                 break;
             }
         }
@@ -6605,14 +6583,13 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         let Some(k) = self.runtime.garnish_alloc(self.ram) else {
             return;
         };
-        self.ram.write_u8(GARNISH_TYPE + k, 1);
-        self.ram.write_u8(GARNISH_ACTIVE, 1);
+        self.ram.set_garnish_kind(k, 1);
+        self.ram.set_garnish_active_marker(1);
         self.set_garnish_x(k, self.sprite_x(j));
         self.set_garnish_y(k, self.sprite_y(j).wrapping_add(16));
-        self.ram.write_u8(GARNISH_COUNTDOWN + k, 32);
-        self.ram.write_u8(GARNISH_SPRITE + k, j as u8);
-        self.ram
-            .write_u8(GARNISH_FLOOR + k, self.ram.sprite(j).floor());
+        self.ram.set_garnish_countdown(k, 32);
+        self.ram.set_garnish_source_sprite(k, j as u8);
+        self.ram.set_garnish_floor(k, self.ram.sprite(j).floor());
     }
     pub fn sprite_80_firesnake(&mut self, k: usize) {
         const FLAGS: [u8; 4] = [0, 0x40, 0x80, 0xc0];

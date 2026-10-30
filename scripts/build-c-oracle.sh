@@ -68,6 +68,16 @@ clang $common_flags oracle/swim_state_oracle.c \
   -Wl,-rpath,@loader_path \
   -o build/c-oracle/swim_state_oracle
 
+clang $common_flags oracle/inventory_receipt_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/inventory_receipt_oracle
+
+clang $common_flags oracle/garnish_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/garnish_oracle
+
 clang $common_flags oracle/poly_oracle.c src/poly.o \
   -o build/c-oracle/poly_oracle
 

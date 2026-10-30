@@ -50,7 +50,6 @@ const BG1_Y_OFFSET: usize = 0x11c;
 const DIALOGUE_MESSAGE_INDEX: usize = 0x1cf0;
 const LINK_SHIELD_TYPE: usize = 0xf35a;
 const LINK_TIMER_TEMPBUNNY: usize = 0x3f5;
-const GARNISH_COUNTDOWN: usize = 0x1f90e;
 const TMP_COUNTER: usize = 0xfb5;
 const SWAMOLA_TARGET_X_LO: usize = 0x1fd5c;
 const SWAMOLA_TARGET_Y_LO: usize = 0x1fd68;
@@ -65,14 +64,6 @@ const BYTE_7E0FB6: usize = 0xfb6;
 const SPRITE_LIMIT_INSTANCE: usize = 0xb6a;
 const BYTE_7E0B69: usize = 0xb69;
 const FOLLOWER_INDICATOR: usize = 0xf3cc;
-const GARNISH_ACTIVE: usize = 0xfb4;
-const GARNISH_TYPE: usize = 0x1f800;
-const GARNISH_Y_LO: usize = 0x1f81e;
-const GARNISH_X_LO: usize = 0x1f83c;
-const GARNISH_Y_HI: usize = 0x1f85a;
-const GARNISH_X_HI: usize = 0x1f878;
-const GARNISH_SPRITE: usize = 0x1f92c;
-const GARNISH_OAM_FLAGS: usize = 0x1f9fe;
 const COUNTDOWN_FOR_BLINK: usize = 0x31f;
 const LINK_DISABLE_SPRITE_DAMAGE: usize = 0x37b;
 const LINK_AUXILIARY_STATE: usize = 0x4d;
@@ -970,8 +961,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.runtime.move_xy(self.ram, k);
         if self.ram.sprite(k).subtype2() & 7 == 0 {
             let j = self.runtime.garnish_flame_trail(self.ram, k, true);
-            self.ram.write_u8(
-                GARNISH_COUNTDOWN + j,
+            self.ram.set_garnish_countdown(
+                j,
                 if self.ram.sprite(k).animation_clock() == 5 {
                     0x2f
                 } else {
@@ -2060,19 +2051,17 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
     pub fn blind_laser_spawn_trail_garnish(&mut self, j: usize) {
         let k = self.runtime.garnish_alloc_overwrite_old(self.ram);
-        self.ram.write_u8(GARNISH_TYPE + k, 15);
-        self.ram.write_u8(GARNISH_ACTIVE, 15);
+        self.ram.set_garnish_kind(k, 15);
+        self.ram.set_garnish_active_marker(15);
         self.ram
-            .write_u8(GARNISH_OAM_FLAGS + k, self.ram.sprite(j).graphics());
-        self.ram.write_u8(GARNISH_SPRITE + k, j as u8);
-        self.ram
-            .write_u8(GARNISH_X_LO + k, self.ram.sprite(j).x_low());
-        self.ram
-            .write_u8(GARNISH_X_HI + k, self.ram.sprite(j).x_high());
+            .set_garnish_oam_flags(k, self.ram.sprite(j).graphics());
+        self.ram.set_garnish_source_sprite(k, j as u8);
+        self.ram.set_garnish_x_low(k, self.ram.sprite(j).x_low());
+        self.ram.set_garnish_x_high(k, self.ram.sprite(j).x_high());
         let y = self.sprite_y(j).wrapping_add(16);
-        self.ram.write_u8(GARNISH_Y_LO + k, y as u8);
-        self.ram.write_u8(GARNISH_Y_HI + k, (y >> 8) as u8);
-        self.ram.write_u8(GARNISH_COUNTDOWN + k, 10);
+        self.ram.set_garnish_y_low(k, y as u8);
+        self.ram.set_garnish_y_high(k, (y >> 8) as u8);
+        self.ram.set_garnish_countdown(k, 10);
     }
     pub fn sprite_blind_head(&mut self, k: usize) {
         const XL: [u8; 2] = [0x98, 0x58];
@@ -2851,16 +2840,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
         self.runtime.sfx3_with_pan(self.ram, k, 0x14);
         let j = self.runtime.garnish_alloc_overwrite_old(self.ram);
-        self.ram.write_u8(GARNISH_ACTIVE, 0xc);
-        self.ram.write_u8(GARNISH_TYPE + j, 0xc);
-        self.ram.write_u8(GARNISH_SPRITE + j, k as u8);
+        self.ram.set_garnish_active_marker(0xc);
+        self.ram.set_garnish_kind(j, 0xc);
+        self.ram.set_garnish_source_sprite(j, k as u8);
         let x = self.sprite_x(k);
         let y = self.sprite_y(k).wrapping_add(16);
-        self.ram.write_u8(GARNISH_X_LO + j, x as u8);
-        self.ram.write_u8(GARNISH_X_HI + j, (x >> 8) as u8);
-        self.ram.write_u8(GARNISH_Y_LO + j, y as u8);
-        self.ram.write_u8(GARNISH_Y_HI + j, (y >> 8) as u8);
-        self.ram.write_u8(GARNISH_COUNTDOWN + j, 127);
+        self.ram.set_garnish_x_low(j, x as u8);
+        self.ram.set_garnish_x_high(j, (x >> 8) as u8);
+        self.ram.set_garnish_y_low(j, y as u8);
+        self.ram.set_garnish_y_high(j, (y >> 8) as u8);
+        self.ram.set_garnish_countdown(j, 127);
     }
     pub fn sprite_trinexx_fire_add_fire_garnish(&mut self, k: usize) {
         let s = self.ram.sprite(k).subtype2().wrapping_add(1);
@@ -2876,16 +2865,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         } else {
             self.runtime.garnish_alloc_overwrite_old(self.ram)
         };
-        self.ram.write_u8(GARNISH_ACTIVE, 0x10);
-        self.ram.write_u8(GARNISH_TYPE + j, 0x10);
-        self.ram.write_u8(GARNISH_SPRITE + j, k as u8);
+        self.ram.set_garnish_active_marker(0x10);
+        self.ram.set_garnish_kind(j, 0x10);
+        self.ram.set_garnish_source_sprite(j, k as u8);
         let x = self.sprite_x(k);
         let y = self.sprite_y(k).wrapping_add(16);
-        self.ram.write_u8(GARNISH_X_LO + j, x as u8);
-        self.ram.write_u8(GARNISH_X_HI + j, (x >> 8) as u8);
-        self.ram.write_u8(GARNISH_Y_LO + j, y as u8);
-        self.ram.write_u8(GARNISH_Y_HI + j, (y >> 8) as u8);
-        self.ram.write_u8(GARNISH_COUNTDOWN + j, 127);
+        self.ram.set_garnish_x_low(j, x as u8);
+        self.ram.set_garnish_x_high(j, (x >> 8) as u8);
+        self.ram.set_garnish_y_low(j, y as u8);
+        self.ram.set_garnish_y_high(j, (y >> 8) as u8);
+        self.ram.set_garnish_countdown(j, 127);
         j
     }
     pub fn sprite_ca_chain_chomp(&mut self, k: usize) {
@@ -4617,18 +4606,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
 
     pub fn lightning_spawn_garnish(&mut self, k: usize) {
         let j = self.runtime.garnish_alloc_overwrite_old(self.ram);
-        self.ram.write_u8(GARNISH_TYPE + j, 9);
-        self.ram.write_u8(GARNISH_ACTIVE, 9);
+        self.ram.set_garnish_kind(j, 9);
+        self.ram.set_garnish_active_marker(9);
         self.ram
-            .write_u8(GARNISH_SPRITE + j, self.ram.sprite(k).scratch_a());
-        self.ram
-            .write_u8(GARNISH_X_LO + j, self.ram.sprite(k).x_low());
-        self.ram
-            .write_u8(GARNISH_X_HI + j, self.ram.sprite(k).x_high());
+            .set_garnish_source_sprite(j, self.ram.sprite(k).scratch_a());
+        self.ram.set_garnish_x_low(j, self.ram.sprite(k).x_low());
+        self.ram.set_garnish_x_high(j, self.ram.sprite(k).x_high());
         let y = self.sprite_y(k).wrapping_add(16);
-        self.ram.write_u8(GARNISH_Y_LO + j, y as u8);
-        self.ram.write_u8(GARNISH_Y_HI + j, (y >> 8) as u8);
-        self.ram.write_u8(GARNISH_COUNTDOWN + j, 32);
+        self.ram.set_garnish_y_low(j, y as u8);
+        self.ram.set_garnish_y_high(j, (y >> 8) as u8);
+        self.ram.set_garnish_countdown(j, 32);
     }
 
     pub fn sprite_bf_lightning(&mut self, k: usize) {
@@ -7716,7 +7703,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     let y = (self.runtime.random_number(self.ram) & 15) as i8 + 12;
                     let g = self.runtime.garnish_spawn_sparkle(self.ram, k, x, y);
                     if ty == 0xcc {
-                        self.ram.write_u8(GARNISH_TYPE + g, 0xe);
+                        self.ram.set_garnish_kind(g, 0xe);
                     }
                 }
             }

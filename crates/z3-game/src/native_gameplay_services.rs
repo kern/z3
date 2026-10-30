@@ -2136,7 +2136,7 @@ impl crate::overlord::OverlordHooks for NativeGameServices<'_> {
     }
 
     fn garnish_alloc(&mut self, ram: &mut Ram<'_>) -> Option<usize> {
-        (0..30).rev().find(|&slot| ram.read_u8(0x1f800 + slot) == 0)
+        ram.garnishes().find_free_slot()
     }
 
     fn calculate_sfx_pan(&mut self, ram: &mut Ram<'_>, x: u8) -> u8 {
@@ -3836,8 +3836,12 @@ impl PlayerRuntime for NativeGameServices<'_> {
         (item as i8 >= 0).then_some((item, i32::from(chest_position)))
     }
 
-    fn item_memory_location(&self, item: u8) -> usize {
-        crate::misc::ITEM_TARGETS[usize::from(item)]
+    fn receipt_item_present(&self, ram: &Ram<'_>, item: u8) -> bool {
+        crate::inventory_receipt::ReceiptItem::from_raw(item)
+            .spec()
+            .target
+            .byte(ram)
+            != 0
     }
 
     fn lift_and_replace_tile(&mut self, ram: &mut Ram<'_>, indoors: bool) -> (u8, u16, u16) {

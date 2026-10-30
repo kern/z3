@@ -2,6 +2,7 @@
 //!
 //! All addresses are offsets in the original `g_ram` WRAM image.  Operations
 //! owned by other C translation units are exposed through [`MiscHooks`].
+use crate::inventory_receipt::ReceiptItem;
 use crate::ram::Ram;
 use crate::sound::{SoundPort, SoundRequest};
 
@@ -141,6 +142,7 @@ const MUSHROOM: usize = 0xf344;
 const MIRROR: usize = 0xf353;
 const MOON_PEARL: usize = 0xf357;
 const SWORD: usize = 0xf359;
+#[cfg(test)]
 const BOTTLES: usize = 0xf35c;
 const ABILITY_FLAGS: usize = 0xf379;
 const PROGRESS: usize = 0xf3c5;
@@ -174,22 +176,6 @@ pub const RECEIVE_ITEM_GFX: [u8; 76] = [
     0x23, 0x23, 0x29, 0x2a, 0x2c, 0x2b, 3, 3, 0x34, 0x35, 0x31, 0x33, 2, 0x32, 0x36, 0x37, 0x2c, 6,
     0xc, 0x38,
 ];
-pub const ITEM_TARGETS: [usize; 76] = [
-    0xf359, 0xf359, 0xf359, 0xf359, 0xf35a, 0xf35a, 0xf35a, 0xf345, 0xf346, 0xf34b, 0xf342, 0xf340,
-    0xf341, 0xf344, 0xf35c, 0xf347, 0xf348, 0xf349, 0xf34a, 0xf34c, 0xf34c, 0xf350, 0xf35c, 0xf36b,
-    0xf351, 0xf352, 0xf353, 0xf354, 0xf354, 0xf34e, 0xf356, 0xf357, 0xf37a, 0xf34d, 0xf35b, 0xf35b,
-    0xf36f, 0xf364, 0xf36c, 0xf375, 0xf375, 0xf344, 0xf341, 0xf35c, 0xf35c, 0xf35c, 0xf36d, 0xf36e,
-    0xf36e, 0xf375, 0xf366, 0xf368, 0xf360, 0xf360, 0xf360, 0xf374, 0xf374, 0xf374, 0xf340, 0xf340,
-    0xf35c, 0xf35c, 0xf36c, 0xf36c, 0xf360, 0xf360, 0xf372, 0xf376, 0xf376, 0xf373, 0xf360, 0xf360,
-    0xf35c, 0xf359, 0xf34c, 0xf355,
-];
-const ITEM_VALUES: [i8; 76] = [
-    1, 2, 3, 4, 1, 2, 3, 1, 1, 1, 1, 1, 1, 2, -1, 1, 1, 1, 1, 1, 2, 1, -1, -1, 1, 1, 2, 1, 2, 1, 1,
-    1, -1, 1, -1, 2, -1, -1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -5, -20,
-    -1, -1, -1, 1, 3, -1, -1, -1, -1, -100, -50, -1, 1, 10, -1, -1, -1, -1, 1, 3, 1,
-];
-const BOTTLE_LIST: [u8; 7] = [0x16, 0x2b, 0x2c, 0x2d, 0x3d, 0x3c, 0x48];
-const POTION_LIST: [u8; 5] = [0x2e, 0x2f, 0x30, 0xff, 0xe];
 const PAN_TABLE: [u8; 3] = [0, 0x80, 0x40];
 const TORCH_PANS: [u8; 8] = [0x80, 0x80, 0x80, 0, 0, 0x40, 0x40, 0x40];
 const LIT_TORCH_COLORS: [u8; 4] = [31, 8, 4, 0];
@@ -445,22 +431,7 @@ pub fn sprite_sfx3_with_pan<H: MiscHooks>(r: &mut Ram<'_>, hooks: &H, k: usize, 
 }
 
 pub fn item_receipt_give_bottled_item(r: &mut Ram<'_>, item: u8) {
-    if let Some(j) = BOTTLE_LIST.iter().position(|&v| v == item) {
-        for i in 0..4 {
-            if r.read_u8(BOTTLES + i) < 2 {
-                r.write_u8(BOTTLES + i, j as u8 + 2);
-                return;
-            }
-        }
-    }
-    if let Some(j) = POTION_LIST.iter().position(|&v| v == item) {
-        for i in 0..4 {
-            if r.read_u8(BOTTLES + i) == 2 {
-                r.write_u8(BOTTLES + i, j as u8 + 3);
-                return;
-            }
-        }
-    }
+    crate::inventory_receipt::give_bottled_receipt(r, item);
 }
 
 pub fn main_show_text_message(r: &mut Ram<'_>) {
@@ -1086,12 +1057,14 @@ pub fn ancilla_add_item_receipt<H: MiscHooks>(
     let j = usize::from(r.read_u8(RECEIVE_ITEM));
     r.write_u8(IMMOBILIZED, if j == 0x20 { 2 } else { 1 });
     if j == 0 {
-        r.write_u8(ITEM_TARGETS[4], ITEM_VALUES[0] as u8);
+        let target = ReceiptItem::from_raw(4).spec().target;
+        r.set_inventory_byte(target, ReceiptItem::from_raw(0).spec().initial_value as u8);
     }
-    let p = ITEM_TARGETS[j];
-    let value = ITEM_VALUES[j];
+    let spec = ReceiptItem::from_raw(j as u8).spec();
+    let p = spec.target;
+    let value = spec.initial_value;
     if value >= 0 {
-        r.write_u8(p, value as u8);
+        r.set_inventory_byte(p, value as u8);
     }
 
     if j == 0x1f {
@@ -1110,19 +1083,27 @@ pub fn ancilla_add_item_receipt<H: MiscHooks>(
         0x39 => Some(2),
         _ => None,
     } {
-        let v = r.read_u8(p) | t;
-        r.write_u8(p, v);
+        let v = r.inventory_byte(p) | t;
+        r.set_inventory_byte(p, v);
         if v & 7 == 7 {
             r.write_u8(MAP_ICONS, 4);
         }
         inc8(r, MAP_STATE);
     } else if j == 0x22 {
-        if r.read_u8(p) == 0 {
-            r.write_u8(p, 1);
+        if r.inventory_byte(p) == 0 {
+            r.set_inventory_byte(p, 1);
         }
     } else if matches!(j, 0x25 | 0x32 | 0x33) {
-        let bit = 0x8000u16 >> (r.read_u8(PALACE_X2) >> 1);
-        r.write_u16(p, r.read_u16(p) | bit);
+        let shift = r.read_u8(PALACE_X2) >> 1;
+        let bit = if shift < 32 {
+            // C promotes 0x8000 to a 32-bit int: shifts16..31 yield zero.
+            (0x8000u32 >> shift) as u16
+        } else {
+            // Original C is undefined here. Preserve the existing Rust
+            // behavior, including debug panic timing, rather than masking it.
+            0x8000u16 >> shift
+        };
+        r.insert_inventory_dungeon_bits(p, bit);
     } else if j == 0x3e {
         if r.read_u8(LINK_STATE_BITS) & 0x80 != 0 {
             r.write_u8(PICK_THROW, 2);
@@ -1145,7 +1126,7 @@ pub fn ancilla_add_item_receipt<H: MiscHooks>(
         }
     } else if j == 0x29 {
         if r.read_u8(MUSHROOM) != 2 {
-            r.write_u8(p, 1);
+            r.set_inventory_byte(p, 1);
             hooks.call(r, MiscCall::RefreshIcon);
         }
     } else {
@@ -1162,11 +1143,11 @@ pub fn ancilla_add_item_receipt<H: MiscHooks>(
             None
         };
         if let Some(t) = increment {
-            let v = r.read_u8(p).wrapping_add(t).min(99);
-            r.write_u8(p, v);
+            let v = r.inventory_byte(p).wrapping_add(t).min(99);
+            r.set_inventory_byte(p, v);
             hooks.call(r, MiscCall::RefreshIcon);
         } else if j == 0x17 {
-            r.write_u8(p, r.read_u8(p).wrapping_add(1) & 3);
+            r.set_inventory_byte(p, r.inventory_byte(p).wrapping_add(1) & 3);
             r.write_u8(SFX2, 0x2d | link_calculate_sfx_pan(r));
         } else if j == 1 {
             hooks.call(r, MiscCall::OverworldSetSongList);
@@ -1285,6 +1266,9 @@ pub fn wallmaster_send_player_to_last_entrance<H: MiscHooks>(r: &mut Ram<'_>, ho
 fn inc8(r: &mut Ram<'_>, address: usize) {
     r.write_u8(address, r.read_u8(address).wrapping_add(1));
 }
+
+#[cfg(test)]
+pub(crate) mod receipt_frozen;
 
 #[cfg(test)]
 mod tests {
@@ -1414,12 +1398,12 @@ mod tests {
         item_receipt_give_bottled_item(&mut r, 0x2b);
         assert_eq!(r.read_u8(BOTTLES), 3);
         r.write_u8(RECEIVE_ITEM, 0x24);
-        r.write_u8(ITEM_TARGETS[0x24], 98);
+        r.write_u8(0xf36f, 98);
         r.write_u16(LINK_X, 0x120);
         r.write_u16(LINK_Y, 0x220);
         let mut hooks = Hooks::default();
         ancilla_add_item_receipt(&mut r, &mut hooks, 0x22, 4, 0);
-        assert_eq!(r.read_u8(ITEM_TARGETS[0x24]), 99);
+        assert_eq!(r.read_u8(0xf36f), 99);
         assert_eq!(hooks.xy, Some((0, 0x12a, 0x212)));
         assert!(hooks.calls.contains(&MiscCall::RefreshIcon));
     }
