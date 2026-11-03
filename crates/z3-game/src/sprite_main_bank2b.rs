@@ -112,14 +112,6 @@ const LINK_DELAY_TIMER_SPIN_ATTACK: usize = 0x3d;
 const TAGALONG_EVENT_FLAGS: usize = 0x2f2;
 const BITMASK_OF_DRAGSTATE: usize = 0x48;
 const TRIGGER_SPECIAL_ENTRANCE: usize = 0x4c6;
-const OVERLORD_X_LO: usize = 0xb08;
-const OVERLORD_X_HI: usize = 0xb10;
-const OVERLORD_Y_HI: usize = 0xb20;
-const OVERLORD_GEN2: usize = 0xb30;
-const OVERLORD_FLOOR: usize = 0xb40;
-const OVERLORD_Y_LO: usize = 0xb18;
-const OVERLORD_GEN1: usize = 0xb28;
-const OVERLORD_GEN3: usize = 0xb38;
 const ANCILLA_Y_LO: usize = 0xbfa;
 const ANCILLA_X_LO: usize = 0xc04;
 const ANCILLA_Y_HI: usize = 0xc0e;
@@ -1052,7 +1044,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
             return;
         }
         self.arrghus_handle_puffs(k);
-        self.ram.write_u8(OVERLORD_X_LO + 4, 1);
+        self.ram.set_boss_orbit_speed(1);
         if self.ram.sprite(k).hit_timer() & 127 == 2 {
             self.ram.set_sprite_ai_state(k, 3);
             self.runtime.queue_sfx3(self.ram, k, 0x32);
@@ -1120,10 +1112,10 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 if self.ram.sprite(k).main_delay() == 0 {
                     self.ram.set_sprite_ai_state(k, 0);
                     if !self.runtime.check_if_room_is_clear(self.ram) {
-                        let n = self.ram.read_u8(OVERLORD_X_LO + 3).wrapping_add(1);
-                        self.ram.write_u8(OVERLORD_X_LO + 3, n);
+                        let n = self.ram.boss_orbit_count().wrapping_add(1);
+                        self.ram.set_boss_orbit_count(n);
                         if n == 4 {
-                            self.ram.write_u8(OVERLORD_X_LO + 3, 0);
+                            self.ram.set_boss_orbit_count(0);
                             self.ram.set_sprite_ai_state(k, 2);
                             self.ram.set_sprite_main_delay(k, 176);
                         } else {
@@ -1148,21 +1140,19 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 }
             }
             2 => {
-                self.ram.write_u8(OVERLORD_X_LO + 4, 8);
+                self.ram.set_boss_orbit_speed(8);
                 let d = self.ram.sprite(k).main_delay();
                 if d < 32 {
-                    let n = self.ram.read_u8(OVERLORD_X_LO + 2).wrapping_sub(1);
-                    self.ram.write_u8(OVERLORD_X_LO + 2, n);
+                    let n = self.ram.boss_orbit_radius().wrapping_sub(1);
+                    self.ram.set_boss_orbit_radius(n);
                     if (n as i8) < 0 {
-                        self.ram.write_u8(OVERLORD_X_LO + 2, 0);
+                        self.ram.set_boss_orbit_radius(0);
                         self.ram.set_sprite_ai_state(k, 1);
                         self.ram.set_sprite_main_delay(k, 112);
                     }
                 } else if d < 96 {
-                    self.ram.write_u8(
-                        OVERLORD_X_LO + 2,
-                        self.ram.read_u8(OVERLORD_X_LO + 2).wrapping_add(1),
-                    );
+                    self.ram
+                        .set_boss_orbit_radius(self.ram.boss_orbit_radius().wrapping_add(1));
                 } else if d == 96 {
                     self.runtime.queue_sfx3(self.ram, k, 0x26);
                 } else if d & 15 == 0 {
@@ -1922,12 +1912,12 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                         self.ram.set_sprite_scratch_d(k, 0);
                         let j = self.ram.read_u8(BYTE_7E0FDE) as usize;
                         let x = u16::from_le_bytes([
-                            self.ram.read_u8(OVERLORD_X_LO + j),
-                            self.ram.read_u8(OVERLORD_X_HI + j),
+                            self.ram.controller_x_low(j),
+                            self.ram.controller_x_high(j),
                         ]);
                         let y = u16::from_le_bytes([
-                            self.ram.read_u8(OVERLORD_Y_LO + j),
-                            self.ram.read_u8(OVERLORD_Y_HI + j),
+                            self.ram.controller_y_low(j),
+                            self.ram.controller_y_high(j),
                         ]);
                         if y >= self.sprite_y(k) {
                             self.ram.set_sprite_ai_state(k, 3);
@@ -4608,9 +4598,9 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         ];
         let angle = self
             .ram
-            .read_u16(OVERLORD_X_LO)
-            .wrapping_add(u16::from(self.ram.read_u8(OVERLORD_X_LO + 4)));
-        self.ram.write_u16(OVERLORD_X_LO, angle);
+            .boss_orbit_phase()
+            .wrapping_add(u16::from(self.ram.boss_orbit_speed()));
+        self.ram.set_boss_orbit_phase(angle);
         if self.ram.read_u8(FRAME_COUNTER) & 3 == 0 {
             let a = self.ram.sprite(k).scratch_a().wrapping_add(1);
             self.ram
@@ -4623,7 +4613,7 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         }
         for i in 0..13 {
             let r = (angle.wrapping_add(T0[i])) ^ T1[i];
-            let radius = self.ram.read_u8(OVERLORD_X_LO + 2).wrapping_add(T2[i]);
+            let radius = self.ram.boss_orbit_radius().wrapping_add(T2[i]);
             let sv = self.runtime.arrgi_sin(
                 r,
                 radius.wrapping_add_signed(T3[self.ram.sprite(k).scratch_a() as usize + i]),
@@ -4639,10 +4629,10 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 .wrapping_sub(16);
             let [xl, xh] = x.to_le_bytes();
             let [yl, yh] = y.to_le_bytes();
-            self.ram.write_u8(OVERLORD_X_HI + i, xl);
-            self.ram.write_u8(OVERLORD_Y_HI + i, xh);
-            self.ram.write_u8(OVERLORD_GEN2 + i, yl);
-            self.ram.write_u8(OVERLORD_FLOOR + i, yh);
+            self.ram.set_boss_orbit_x_low(i, xl);
+            self.ram.set_boss_orbit_x_high(i, xh);
+            self.ram.set_boss_orbit_y_low(i, yl);
+            self.ram.set_boss_orbit_y_high(i, yh);
         }
         self.ram.write_u8(TMP_COUNTER, 13);
     }
@@ -4683,25 +4673,23 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
         }
         let i = k + 7;
         if self.ram.sprite(k).ai_state() == 0 {
+            self.ram.set_sprite_x_low(k, self.ram.boss_arrghi_x_low(i));
             self.ram
-                .set_sprite_x_low(k, self.ram.read_u8(OVERLORD_X_LO + i));
+                .set_sprite_x_high(k, self.ram.boss_arrghi_x_high(i));
+            self.ram.set_sprite_y_low(k, self.ram.boss_arrghi_y_low(i));
             self.ram
-                .set_sprite_x_high(k, self.ram.read_u8(OVERLORD_Y_LO + i));
-            self.ram
-                .set_sprite_y_low(k, self.ram.read_u8(OVERLORD_GEN1 + i));
-            self.ram
-                .set_sprite_y_high(k, self.ram.read_u8(OVERLORD_GEN3 + i));
+                .set_sprite_y_high(k, self.ram.boss_arrghi_y_high(i));
             return;
         }
         self.runtime.check_damage_from_link(self.ram, k);
         if ((k as u8) ^ self.ram.read_u8(FRAME_COUNTER)) & 3 == 0 {
             let x = u16::from_le_bytes([
-                self.ram.read_u8(OVERLORD_X_LO + i),
-                self.ram.read_u8(OVERLORD_Y_LO + i),
+                self.ram.boss_arrghi_x_low(i),
+                self.ram.boss_arrghi_x_high(i),
             ]);
             let y = u16::from_le_bytes([
-                self.ram.read_u8(OVERLORD_GEN1 + i),
-                self.ram.read_u8(OVERLORD_GEN3 + i),
+                self.ram.boss_arrghi_y_low(i),
+                self.ram.boss_arrghi_y_high(i),
             ]);
             let (yv, xv) = self.runtime.project_speed(self.ram, k, x, y, 4);
             self.ram
@@ -4712,14 +4700,14 @@ impl<R: SpriteMainBank2bRuntime> SpriteMainBank2b<'_, '_, R> {
                 .ram
                 .sprite(k)
                 .x_low()
-                .wrapping_sub(self.ram.read_u8(OVERLORD_X_LO + i))
+                .wrapping_sub(self.ram.boss_arrghi_x_low(i))
                 .wrapping_add(8)
                 < 16
                 && self
                     .ram
                     .sprite(k)
                     .y_low()
-                    .wrapping_sub(self.ram.read_u8(OVERLORD_GEN1 + i))
+                    .wrapping_sub(self.ram.boss_arrghi_y_low(i))
                     .wrapping_add(8)
                     < 16
             {
@@ -8143,11 +8131,11 @@ mod tests {
     #[test]
     fn arrghus_phase_adds_only_low_byte_of_step() {
         with_bank(|b| {
-            b.ram.write_u16(OVERLORD_X_LO, 0x0800);
-            b.ram.write_u8(OVERLORD_X_LO + 4, 0xa0);
-            b.ram.write_u8(OVERLORD_X_LO + 5, 0xe0);
+            b.ram.set_boss_orbit_phase(0x0800);
+            b.ram.set_boss_orbit_speed(0xa0);
+            b.ram.set_controller_x_low(5, 0xe0);
             b.arrghus_handle_puffs(0);
-            assert_eq!(b.ram.read_u16(OVERLORD_X_LO), 0x08a0);
+            assert_eq!(b.ram.boss_orbit_phase(), 0x08a0);
         });
     }
     #[test]

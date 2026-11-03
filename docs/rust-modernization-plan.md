@@ -44,6 +44,11 @@ See [batch 1](modernization-verification.md), [batch 2](modernization-batch-2.md
 for exact commands, completed gates and recording-sweep status. Counts describe
 source accesses, including migrated existing tests, not distinct state fields.
 
+[Batch 11](modernization-batch-11.md) is accepted: live SPC table and upload
+owners, controller allocation/lifecycle views and explicitly shared boss
+workspaces, with the complete state/pixel/PCM and both audio-observer sweeps
+passing.
+
 ## Remaining-domain census (2026-10-16)
 
 Read-only reconnaissance during batch 8 identified these next complete-domain

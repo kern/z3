@@ -5,8 +5,10 @@ scripts/test-c-oracle.sh
 cargo fmt --all --check
 ruby scripts/audit-rust-port.rb
 ruby scripts/audit-spc-mapping.rb
+ruby scripts/audit-spc-data.rb
 ruby scripts/audit-swim-state.rb
 ruby scripts/audit-garnish-state.rb
+ruby scripts/audit-controller-state.rb
 ruby scripts/audit-inventory-receipt.rb
 ruby scripts/audit-recording-abi.rb
 ruby scripts/audit-recorder-reference.rb
@@ -31,6 +33,12 @@ cargo test --release -p z3-game \
   sfx_cursors_match_static_c_handlers -- --ignored --nocapture
 cargo test --release -p z3-game \
   sfx_public_samples_match_c_for_zero_id_commands -- --ignored --nocapture
+cargo test -p z3-game \
+  pan_interpolation_full_byte_delta_matches_original_c -- --ignored --nocapture
+cargo test --release -p z3-game \
+  pan_interpolation_full_byte_delta_matches_original_c -- --ignored --nocapture
+cargo test --release -p z3-game \
+  spc_data_and_valid_uploads_match_original_c -- --ignored --nocapture
 cargo test --release -p z3-game \
   swim_axes_match_original_c_whole_wram -- --ignored --nocapture
 cargo test --release -p z3-game \
@@ -75,6 +83,8 @@ cargo run -q -p z3-verify --bin check_tile_detect -- \
   build/c-oracle/tile_detect_oracle
 cargo run -q -p z3-verify --bin check_overlord -- \
   build/c-oracle/overlord_oracle
+cargo run -q -p z3-verify --bin check_overlord_state -- \
+  build/c-oracle/overlord_state_oracle zelda3_assets.dat
 cargo run -q -p z3-verify --bin check_tagalong -- \
   build/c-oracle/tagalong_oracle
 cargo run -q -p z3-verify --bin check_select_file -- \

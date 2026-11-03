@@ -121,12 +121,6 @@ const BYTE_7E0B88: usize = 0xb88;
 const ARCHERY_GAME_ARROWS_LEFT: usize = 0xb99;
 const ARCHERY_GAME_OUT_OF_ARROWS: usize = 0xb9a;
 const SPRITE_LIMIT_INSTANCE: usize = 0xb6a;
-const OVERLORD_X_HI: usize = 0xb10;
-const OVERLORD_X_LO: usize = 0xb08;
-const OVERLORD_Y_LO: usize = 0xb18;
-const OVERLORD_Y_HI: usize = 0xb20;
-const OVERLORD_GEN2: usize = 0xb30;
-const OVERLORD_FLOOR: usize = 0xb40;
 const ACTIVATE_BOMB_TRAP_OVERLORD: usize = 0xcf4;
 const ANCILLA_TYPE: usize = 0xc4a;
 const LINK_BOTTLE_INFO: usize = 0xf35c;
@@ -4621,10 +4615,10 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
             self.runtime
                 .sprite_check_damage_to_and_from_link(self.ram, slot);
             if self.ram.sprite(slot).ai_state() == 0 {
-                let target_x = u16::from(self.ram.read_u8(OVERLORD_X_HI + slot))
-                    | (u16::from(self.ram.read_u8(OVERLORD_Y_HI + slot)) << 8);
-                let target_y = u16::from(self.ram.read_u8(OVERLORD_GEN2 + slot))
-                    | (u16::from(self.ram.read_u8(OVERLORD_FLOOR + slot)) << 8);
+                let target_x = u16::from(self.ram.boss_orbit_x_low(slot))
+                    | (u16::from(self.ram.boss_orbit_x_high(slot)) << 8);
+                let target_y = u16::from(self.ram.boss_orbit_y_low(slot))
+                    | (u16::from(self.ram.boss_orbit_y_high(slot)) << 8);
                 let velocity = self
                     .runtime
                     .sprite_project_speed_towards_location(self.ram, slot, target_x, target_y, 16);
@@ -4645,13 +4639,13 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
                 }
             } else {
                 self.ram
-                    .set_sprite_x_low(slot, self.ram.read_u8(OVERLORD_X_HI + slot));
+                    .set_sprite_x_low(slot, self.ram.boss_orbit_x_low(slot));
                 self.ram
-                    .set_sprite_x_high(slot, self.ram.read_u8(OVERLORD_Y_HI + slot));
+                    .set_sprite_x_high(slot, self.ram.boss_orbit_x_high(slot));
                 self.ram
-                    .set_sprite_y_low(slot, self.ram.read_u8(OVERLORD_GEN2 + slot));
+                    .set_sprite_y_low(slot, self.ram.boss_orbit_y_low(slot));
                 self.ram
-                    .set_sprite_y_high(slot, self.ram.read_u8(OVERLORD_FLOOR + slot));
+                    .set_sprite_y_high(slot, self.ram.boss_orbit_y_high(slot));
             }
         }
     }
@@ -8865,10 +8859,10 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
             }
             1 => {
                 let overlord = usize::from(self.ram.read_u8(BYTE_7E0FDE));
-                let x = u16::from(self.ram.read_u8(OVERLORD_X_LO + overlord))
-                    | (u16::from(self.ram.read_u8(OVERLORD_X_HI + overlord)) << 8);
-                let y = u16::from(self.ram.read_u8(OVERLORD_Y_LO + overlord))
-                    | (u16::from(self.ram.read_u8(OVERLORD_Y_HI + overlord)) << 8);
+                let x = u16::from(self.ram.controller_x_low(overlord))
+                    | (u16::from(self.ram.controller_x_high(overlord)) << 8);
+                let y = u16::from(self.ram.controller_y_low(overlord))
+                    | (u16::from(self.ram.controller_y_high(overlord)) << 8);
                 if y >= self.sprite_y(slot) {
                     self.ram.set_sprite_ai_state(slot, 2);
                     self.ram.set_sprite_velocity_x(slot, 0);
@@ -8901,10 +8895,10 @@ impl<R: SpriteMainBank0Runtime> SpriteMainBank0<'_, '_, R> {
             2 => {
                 if self.ram.sprite(slot).main_delay() == 0 {
                     let overlord = usize::from(self.ram.read_u8(BYTE_7E0FDE));
-                    let x = u16::from(self.ram.read_u8(OVERLORD_X_LO + overlord))
-                        | (u16::from(self.ram.read_u8(OVERLORD_X_HI + overlord)) << 8);
-                    let y = u16::from(self.ram.read_u8(OVERLORD_Y_LO + overlord))
-                        | (u16::from(self.ram.read_u8(OVERLORD_Y_HI + overlord)) << 8);
+                    let x = u16::from(self.ram.controller_x_low(overlord))
+                        | (u16::from(self.ram.controller_x_high(overlord)) << 8);
+                    let y = u16::from(self.ram.controller_y_low(overlord))
+                        | (u16::from(self.ram.controller_y_high(overlord)) << 8);
                     self.set_sprite_x(slot, x);
                     self.set_sprite_y(slot, y);
                     let position = y.wrapping_sub(self.ram.read_u16(OVERWORLD_OFFSET_BASE_Y))

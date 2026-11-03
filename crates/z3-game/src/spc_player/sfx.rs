@@ -92,19 +92,18 @@ impl SpcPlayer {
                 }
             }
             if cmd == 0xe0 {
-                let preset = usize::from(self.sfx_sound_ptr_cur.advance_read(&self.ram));
-                let address = 0x3e00 + preset * 9;
-                let params = <[u8; 9]>::try_from(&self.ram[address..address + 9]).unwrap();
+                let preset = self.sfx_sound_ptr_cur.advance_read(&self.ram);
+                let params = SpcData::new(&self.ram).dsp_preset(preset);
                 let reg = self.channels[ci].index * 16;
-                self.dsp_write(reg + V0VOLL, params[0]);
-                self.dsp_write(reg + V0VOLR, params[1]);
-                self.dsp_write(reg + V0PITCHL, params[2]);
-                self.dsp_write(reg + V0PITCHH, params[3]);
-                self.dsp_write(reg + V0SRCN, params[4]);
-                self.dsp_write(reg + V0ADSR1, params[5]);
-                self.dsp_write(reg + V0ADSR2, params[6]);
-                self.dsp_write(reg + V0GAIN, params[7]);
-                self.channels[ci].instrument_pitch_base = u16::from(params[8]) << 8;
+                self.dsp_write(reg + V0VOLL, params.voice_registers[0]);
+                self.dsp_write(reg + V0VOLR, params.voice_registers[1]);
+                self.dsp_write(reg + V0PITCHL, params.voice_registers[2]);
+                self.dsp_write(reg + V0PITCHH, params.voice_registers[3]);
+                self.dsp_write(reg + V0SRCN, params.voice_registers[4]);
+                self.dsp_write(reg + V0ADSR1, params.voice_registers[5]);
+                self.dsp_write(reg + V0ADSR2, params.voice_registers[6]);
+                self.dsp_write(reg + V0GAIN, params.voice_registers[7]);
+                self.channels[ci].instrument_pitch_base = params.pitch_base;
                 self.sfx_sound_ptr_cur.advance();
             } else if cmd == 0xf9 || cmd == 0xf1 {
                 if cmd == 0xf9 {
@@ -124,8 +123,8 @@ impl SpcPlayer {
                 self.sfx_note_continue(ci);
                 break;
             } else if cmd == 0xff {
-                let table = 0x17beu16 + u16::from(self.channels[ci].sfx_which_sound) * 2;
-                let pointer = SfxPosition::at(read16(&self.ram, table));
+                let pointer =
+                    SpcData::new(&self.ram).port1_entry(self.channels[ci].sfx_which_sound);
                 self.sfx_sound_ptr_cur.jump_to(pointer);
                 self.channels[ci].sfx_sound_ptr = pointer;
             } else {
@@ -167,7 +166,7 @@ impl SpcPlayer {
         self.port1_active = 0x80;
         self.is_chan_on |= 0x80;
         self.dsp_write(KOF, 0x80);
-        self.new_value_from_snes[1] = self.ram[0x17ff + usize::from(sound)];
+        self.new_value_from_snes[1] = SpcData::new(&self.ram).paired_sound(sound);
         if self.new_value_from_snes[1] == 0 {
             return;
         }
@@ -218,8 +217,8 @@ impl SpcPlayer {
                     self.channels[ci].sfx_arr_countdown =
                         self.channels[ci].sfx_arr_countdown.wrapping_sub(1);
                     if self.channels[ci].sfx_arr_countdown == 0 {
-                        let address = 0x17beu16 + u16::from(self.channels[ci].sfx_which_sound) * 2;
-                        let pointer = SfxPosition::at(read16(&self.ram, address));
+                        let pointer =
+                            SpcData::new(&self.ram).port1_entry(self.channels[ci].sfx_which_sound);
                         self.sfx_sound_ptr_cur.jump_to(pointer);
                         self.channels[ci].sfx_sound_ptr = pointer;
                         self.sfx_channel_tick(ci, false);
@@ -278,9 +277,8 @@ impl SpcPlayer {
                     self.channels[ci].sfx_arr_countdown =
                         self.channels[ci].sfx_arr_countdown.wrapping_sub(1);
                     if self.channels[ci].sfx_arr_countdown == 0 {
-                        let base = if port == 2 { 0x181e } else { 0x191a };
-                        let address = base + usize::from(self.channels[ci].sfx_which_sound) * 2;
-                        let pointer = SfxPosition::at(read16(&self.ram, address as u16));
+                        let pointer = SpcData::new(&self.ram)
+                            .secondary_entry(port, self.channels[ci].sfx_which_sound);
                         self.sfx_sound_ptr_cur.jump_to(pointer);
                         self.channels[ci].sfx_sound_ptr = pointer;
                         self.sfx_channel_tick(ci, false);
@@ -298,12 +296,7 @@ impl SpcPlayer {
 
     pub(super) fn allocate_sfx_channel(&mut self, port: usize) -> usize {
         let command = self.new_value_from_snes[port];
-        let flag_address = if port == 2 {
-            0x18dc + usize::from(command & 0x3f)
-        } else {
-            0x19d8 + usize::from(command & 0x3f)
-        };
-        self.sfx_play_echo_flag = self.ram[flag_address];
+        self.sfx_play_echo_flag = SpcData::new(&self.ram).echo_flag(port, command);
         let active = if port == 2 {
             self.port2_active
         } else {
@@ -359,9 +352,8 @@ impl SpcPlayer {
                 self.port3_active |= self.current_bit;
             }
             self.dsp_write(KOF, self.current_bit);
-            let base = if port == 2 { 0x189d } else { 0x1999 };
             self.new_value_from_snes[port] =
-                self.ram[base + usize::from(self.channels[ci].sfx_which_sound)];
+                SpcData::new(&self.ram).chained_sound(port, self.channels[ci].sfx_which_sound);
         }
     }
 }

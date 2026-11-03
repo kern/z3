@@ -21,15 +21,6 @@ use crate::sprite_main_bank0::{
     GANON_DRAW_X, GANON_DRAW_Y, LARGE_SHADOW_DRAW_DATA, SINUS_LOOKUP_TABLE,
 };
 
-const OVERLORD_X_LO: usize = 0xb08;
-const OVERLORD_TYPE: usize = 0xb00;
-const OVERLORD_X_HI: usize = 0xb10;
-const OVERLORD_Y_LO: usize = 0xb18;
-const OVERLORD_Y_HI: usize = 0xb20;
-const OVERLORD_GEN2: usize = 0xb30;
-const OVERLORD_GEN1: usize = 0xb28;
-const OVERLORD_FLOOR: usize = 0xb40;
-
 const FRAME_COUNTER: usize = 0x1a;
 const PLAYER_IS_INDOORS: usize = 0x1b;
 const LINK_Y: usize = 0x20;
@@ -1027,16 +1018,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const X: [i8; 2] = [20, -18];
         const Y: [i8; 2] = [-20, -20];
         let j = self.ram.sprite(0).scratch_d() as usize;
-        let x = u16::from_le_bytes([
-            self.ram.read_u8(OVERLORD_X_HI + k),
-            self.ram.read_u8(OVERLORD_Y_HI + k),
-        ])
-        .wrapping_add_signed(X[j] as i16);
-        let y = u16::from_le_bytes([
-            self.ram.read_u8(OVERLORD_GEN2 + k),
-            self.ram.read_u8(OVERLORD_FLOOR + k),
-        ])
-        .wrapping_add_signed(Y[j] as i16);
+        let x = u16::from_le_bytes([self.ram.boss_orbit_x_low(k), self.ram.boss_orbit_x_high(k)])
+            .wrapping_add_signed(X[j] as i16);
+        let y = u16::from_le_bytes([self.ram.boss_orbit_y_low(k), self.ram.boss_orbit_y_high(k)])
+            .wrapping_add_signed(Y[j] as i16);
         self.set_sprite_x(k, x);
         self.set_sprite_y(k, y);
     }
@@ -1088,8 +1073,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const Y: [i8; 16] = [
             32, 28, 24, 16, 0, -16, -24, -28, -32, -28, -24, -16, 0, 16, 24, 28,
         ];
-        let phase = self.ram.read_u16(OVERLORD_X_LO).wrapping_sub(4);
-        self.ram.write_u16(OVERLORD_X_LO, phase);
+        let phase = self.ram.boss_orbit_phase().wrapping_sub(4);
+        self.ram.set_boss_orbit_phase(phase);
         for i in 0..8 {
             let t = phase.wrapping_add((i * 64) as u16) & 0x1ff;
             if self.ram.sprite(i + 1).ai_state() != 2 {
@@ -1099,15 +1084,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             let x = self
                 .sprite_x(0)
-                .wrapping_add_signed(ganon_sin(t, self.ram.read_u8(OVERLORD_X_LO + 2)) as i16);
-            self.ram.write_u8(OVERLORD_X_HI + i + 1, x as u8);
-            self.ram.write_u8(OVERLORD_Y_HI + i + 1, (x >> 8) as u8);
-            let y = self.sprite_y(0).wrapping_add_signed(ganon_sin(
-                t.wrapping_add(0x80),
-                self.ram.read_u8(OVERLORD_X_LO + 2),
-            ) as i16);
-            self.ram.write_u8(OVERLORD_GEN2 + i + 1, y as u8);
-            self.ram.write_u8(OVERLORD_FLOOR + i + 1, (y >> 8) as u8);
+                .wrapping_add_signed(ganon_sin(t, self.ram.boss_orbit_radius()) as i16);
+            self.ram.set_boss_orbit_x_low(i + 1, x as u8);
+            self.ram.set_boss_orbit_x_high(i + 1, (x >> 8) as u8);
+            let y = self
+                .sprite_y(0)
+                .wrapping_add_signed(
+                    ganon_sin(t.wrapping_add(0x80), self.ram.boss_orbit_radius()) as i16,
+                );
+            self.ram.set_boss_orbit_y_low(i + 1, y as u8);
+            self.ram.set_boss_orbit_y_high(i + 1, (y >> 8) as u8);
         }
         self.ram.write_u8(TMP_COUNTER, 8);
     }
@@ -1360,7 +1346,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             }
             7 => {
                 self.ganon_health_floor(k, 160);
-                self.ram.write_u8(OVERLORD_X_LO + 2, 40);
+                self.ram.set_boss_orbit_radius(40);
                 let d = self.ram.sprite(k).main_delay();
                 if d == 0 {
                     self.ram.set_sprite_ai_state(k, 8);
@@ -1387,10 +1373,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         self.ram.set_sprite_main_delay(j, DEL[j - 1]);
                     }
                 } else {
-                    self.ram.write_u8(
-                        OVERLORD_X_LO + 2,
+                    self.ram.set_boss_orbit_radius(
                         self.ram
-                            .read_u8(OVERLORD_X_LO + 2)
+                            .boss_orbit_radius()
                             .wrapping_add_signed(TAB[(d >> 4 & 15) as usize]),
                     );
                     self.ganon_phase1_animate_trident_spin(k);
@@ -1657,10 +1642,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         const TY: [u8; 4] = [12, 13, 14, 15];
         const X: [u8; 4] = [0x18, 0xd8, 0xd8, 0x18];
         const Y: [u8; 4] = [0x28, 0x28, 0xd8, 0xd8];
-        let Some(j) = (0..8)
-            .rev()
-            .find(|&j| self.ram.read_u8(OVERLORD_TYPE + j) == 0)
-        else {
+        let Some(j) = self.ram.controllers().find_free() else {
             return;
         };
         let t = self.ram.sprite(k).animation_clock() as usize;
@@ -1668,15 +1650,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             return;
         }
         self.ram.set_sprite_animation_clock(k, (t + 1) as u8);
-        self.ram.write_u8(OVERLORD_TYPE + j, TY[t]);
-        self.ram.write_u8(OVERLORD_X_LO + j, X[t]);
+        self.ram.set_controller_kind(j, TY[t]);
+        self.ram.set_controller_x_low(j, X[t]);
         self.ram
-            .write_u8(OVERLORD_X_HI + j, (self.ram.read_u16(LINK_X) >> 8) as u8);
-        self.ram.write_u8(OVERLORD_Y_LO + j, Y[t]);
+            .set_controller_x_high(j, (self.ram.read_u16(LINK_X) >> 8) as u8);
+        self.ram.set_controller_y_low(j, Y[t]);
         self.ram
-            .write_u8(OVERLORD_Y_HI + j, (self.ram.read_u16(LINK_Y) >> 8) as u8);
-        self.ram.write_u8(OVERLORD_GEN1 + j, 0);
-        self.ram.write_u8(OVERLORD_GEN2 + j, 0);
+            .set_controller_y_high(j, (self.ram.read_u16(LINK_Y) >> 8) as u8);
+        self.ram.set_controller_scratch_a(j, 0);
+        self.ram.set_controller_timer(j, 0);
     }
 
     pub fn ganon_func1(&mut self, k: usize, t: u8) {
@@ -3232,13 +3214,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     pub fn helmasaur_king_initialize(&mut self, k: usize) {
-        self.ram.write_u8(OVERLORD_GEN1 + 7, 0x30);
-        self.ram.write_u8(OVERLORD_GEN1 + 5, 0x80);
-        self.ram.write_u8(OVERLORD_GEN1 + 6, 0);
-        self.ram.write_u8(OVERLORD_GEN2, 0);
-        self.ram.write_u8(OVERLORD_GEN2 + 3, 0);
-        self.ram.write_u8(OVERLORD_GEN2 + 1, 0);
-        self.ram.write_u8(OVERLORD_GEN2 + 2, 0);
+        self.ram.set_boss_helmasaur_radius(0x30);
+        self.ram.set_boss_helmasaur_phase_low(0x80);
+        self.ram.set_boss_helmasaur_turn(0);
+        self.ram.set_boss_helmasaur_swing_state(0);
+        self.ram.set_boss_helmasaur_next_tail(0);
+        self.ram.set_boss_helmasaur_velocity_low(0);
+        self.ram.set_boss_helmasaur_velocity_high(0);
         self.helmasaur_king_reinitialize(k);
     }
     pub fn helmasaur_king_reinitialize(&mut self, k: usize) {
@@ -3248,7 +3230,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         ];
         let t = self.ram.sprite(k).subtype2() as usize;
         for i in (0..4).rev() {
-            self.ram.write_u8(OVERLORD_X_LO + i, T[(t + i * 8) & 31]);
+            self.ram
+                .set_boss_helmasaur_leg_frame(i, T[(t + i * 8) & 31]);
         }
     }
     pub fn helmasaur_king_handle_movement(&mut self, k: usize) {
@@ -3415,10 +3398,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     .set_sprite_y_low(k, self.ram.sprite(k).y_low().wrapping_add(16));
                 self.trinexx_cache_position(k);
                 for i in [2usize, 3, 5, 7] {
-                    self.ram.write_u8(OVERLORD_X_LO + i, 0);
+                    self.ram.set_boss_trinexx_control(i, 0);
                 }
-                self.ram.write_u8(OVERLORD_X_HI, 0);
-                self.ram.write_u8(OVERLORD_X_LO + 6, 255);
+                self.ram.set_boss_trinexx_ready(0);
+                self.ram.set_boss_trinexx_startup_delay(255);
                 self.trinexx_restore_xy(k);
             }
             0xcc | 0xcd => {
@@ -5509,9 +5492,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
     }
 
     pub fn helmasaur_king_swing_tail(&mut self, k: usize) {
-        self.ram.write_u8(
-            OVERLORD_X_LO + 4,
-            self.ram.read_u8(OVERLORD_X_LO + 4).wrapping_add(1),
+        self.ram.set_boss_helmasaur_animation_clock(
+            self.ram.boss_helmasaur_animation_clock().wrapping_add(1),
         );
         self.helmasaur_king_reinitialize(k);
         let mask = if self.ram.sprite(k).animation_clock() != 0 {
@@ -5523,17 +5505,16 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             let j = self.ram.sprite(k).scratch_d() & 1;
             let v = self
                 .ram
-                .read_u8(OVERLORD_GEN2)
+                .boss_helmasaur_swing_state()
                 .wrapping_add(if j != 0 { 255 } else { 1 });
-            self.ram.write_u8(OVERLORD_GEN2, v);
+            self.ram.set_boss_helmasaur_swing_state(v);
             if v == [16u8, 240][j as usize] {
                 self.ram
                     .set_sprite_scratch_d(k, self.ram.sprite(k).scratch_d().wrapping_add(1));
             }
-            self.ram.write_u16(
-                OVERLORD_GEN1 + 5,
+            self.ram.set_boss_helmasaur_phase(
                 self.ram
-                    .read_u16(OVERLORD_GEN1 + 5)
+                    .boss_helmasaur_phase()
                     .wrapping_add_signed(v as i8 as i16),
             );
         }
@@ -5541,39 +5522,35 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         if a == 0 {
             return;
         }
-        if self.ram.read_u8(OVERLORD_GEN2) == 0 {
+        if self.ram.boss_helmasaur_swing_state() == 0 {
             self.runtime.sfx3_with_pan(self.ram, k, 6);
         }
         if a == 2 {
             let j = self.ram.sprite(k).head_direction();
             let v = self
                 .ram
-                .read_u16(OVERLORD_GEN2 + 1)
+                .boss_helmasaur_velocity()
                 .wrapping_add_signed(if j != 0 { -4 } else { 4 });
-            self.ram.write_u16(OVERLORD_GEN2 + 1, v);
+            self.ram.set_boss_helmasaur_velocity(v);
             if v as u8 == if j != 0 { 132 } else { 124 } {
                 self.ram.set_sprite_animation_clock(k, 3);
             }
-            self.ram.write_u8(
-                OVERLORD_GEN1 + 7,
-                self.ram.read_u8(OVERLORD_GEN1 + 7).wrapping_add(3),
-            );
+            self.ram
+                .set_boss_helmasaur_radius(self.ram.boss_helmasaur_radius().wrapping_add(3));
         } else if a == 3 {
             let j = self.ram.sprite(k).head_direction() ^ 1;
             let v = self
                 .ram
-                .read_u16(OVERLORD_GEN2 + 1)
+                .boss_helmasaur_velocity()
                 .wrapping_add_signed(if j != 0 { -4 } else { 4 });
-            self.ram.write_u16(OVERLORD_GEN2 + 1, v);
+            self.ram.set_boss_helmasaur_velocity(v);
             if v == 0 {
                 self.ram.set_sprite_animation_clock(k, 0);
             }
-            self.ram.write_u8(
-                OVERLORD_GEN1 + 7,
-                self.ram.read_u8(OVERLORD_GEN1 + 7).wrapping_sub(3),
-            );
-        } else if self.ram.read_u8(OVERLORD_GEN2) | self.ram.sprite(k).aux3_delay() == 0 {
-            let hd = self.ram.read_u8(OVERLORD_GEN1 + 6) & 1;
+            self.ram
+                .set_boss_helmasaur_radius(self.ram.boss_helmasaur_radius().wrapping_sub(3));
+        } else if self.ram.boss_helmasaur_swing_state() | self.ram.sprite(k).aux3_delay() == 0 {
+            let hd = self.ram.boss_helmasaur_turn() & 1;
             self.ram.set_sprite_head_direction(k, hd);
             let (r, _) = self.runtime.is_right_of_link(self.ram, k);
             if (r ^ 1) == hd {
@@ -5616,7 +5593,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             OAM_EXT_CUR_PTR,
             self.ram.read_u16(OAM_EXT_CUR_PTR).wrapping_add(0x10),
         );
-        let j = (self.ram.read_u8(OVERLORD_X_LO + 4) >> 2 & 7) as usize;
+        let j = (self.ram.boss_helmasaur_animation_clock() >> 2 & 7) as usize;
         let first = (usize::from(self.ram.read_u16(OAM_CUR_PTR)) - crate::oam::OAM_BUFFER) / 4;
         for i in (0..2).rev() {
             crate::oam::set_plain(
@@ -5700,7 +5677,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             let y = info
                 .y
                 .wrapping_add_signed(Y[i] as i16)
-                .wrapping_add(self.ram.read_u8(OVERLORD_X_LO + i) as u16) as u8;
+                .wrapping_add(self.ram.boss_helmasaur_leg_frame(i) as u16)
+                as u8;
             let f = FL[i] ^ info.flags;
             let entry = first + 2 * (3 - i);
             crate::oam::set_plain(self.ram, entry, x, y, CH[i], f, 2);
@@ -5761,8 +5739,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             };
             let rs = self
                 .ram
-                .read_u16(OVERLORD_GEN1 + 5)
-                .wrapping_add(self.ram.read_u16(OVERLORD_GEN2 + 1));
+                .boss_helmasaur_phase()
+                .wrapping_add(self.ram.boss_helmasaur_velocity());
             let f = ((rs >> 8) as u8).wrapping_sub(1);
             let r6 = ((if (f as i8) < 0 {
                 0u16.wrapping_sub(rs)
@@ -5777,15 +5755,15 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 } else {
                     r6 as u16
                 };
-            let r15 = ((self.ram.read_u8(OVERLORD_GEN1 + 7) as u16 * MB[i] as u16) >> 8) as u8;
+            let r15 = ((self.ram.boss_helmasaur_radius() as u16 * MB[i] as u16) >> 8) as u8;
             self.ram
-                .write_u8(OVERLORD_X_LO + i + 5, ganon_sin(angle, r15) as u8);
-            self.ram.write_u8(
-                OVERLORD_Y_LO + i + 5,
+                .set_boss_helmasaur_tail_x(i, ganon_sin(angle, r15) as u8);
+            self.ram.set_boss_helmasaur_tail_y(
+                i,
                 ganon_sin(angle.wrapping_add(0x80), r15).wrapping_sub(40) as u8,
             );
         }
-        let start = self.ram.read_u8(OVERLORD_GEN2 + 3);
+        let start = self.ram.boss_helmasaur_next_tail();
         let oam_ptr = self.ram.read_u16(OAM_CUR_PTR);
         let ext_ptr = self.ram.read_u16(OAM_EXT_CUR_PTR);
         for i in start..16 {
@@ -5795,10 +5773,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 self.ram,
                 entry,
                 info.x
-                    .wrapping_add(self.ram.read_u8(OVERLORD_X_LO + i as usize + 5) as u16)
+                    .wrapping_add(self.ram.boss_helmasaur_tail_x(i as usize) as u16)
                     as u8,
                 info.y
-                    .wrapping_add(self.ram.read_u8(OVERLORD_Y_LO + i as usize + 5) as u16)
+                    .wrapping_add(self.ram.boss_helmasaur_tail_y(i as usize) as u16)
                     as u8,
                 if i == start { 0xe4 } else { 0xac },
                 info.flags ^ 0x1b,
@@ -7109,7 +7087,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         self.set_sprite_y(k, y);
     }
     pub fn sprite_cb_trinexx_rock_head(&mut self, k: usize) {
-        if self.ram.read_u8(OVERLORD_X_HI) != 0 {
+        if self.ram.boss_trinexx_ready() != 0 {
             self.sprite_trinexx_final_phase(k);
             return;
         }
@@ -7124,7 +7102,7 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             self.ram.write_u8(FLAG_BLOCK_LINK_MENU, a);
             let d = self.ram.sprite(k).main_delay();
             if d == 0 {
-                self.ram.write_u8(OVERLORD_X_HI, 1);
+                self.ram.set_boss_trinexx_ready(1);
                 self.sprite_initialized_segmented(k);
                 self.ram.set_sprite_subtype2(k, 0);
                 self.ram.set_sprite_head_direction(k, 0);
@@ -7169,9 +7147,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 self.trinexx_cache_position(k);
                 self.ram
                     .set_sprite_scratch_c(k, self.ram.sprite(k).y_low().wrapping_sub(12));
-                self.ram.write_u16(
-                    OVERLORD_X_LO + 7,
-                    self.ram.read_u16(OVERLORD_X_LO + 7).wrapping_add(2),
+                self.ram.set_boss_trinexx_tail_phase(
+                    self.ram.boss_trinexx_tail_phase().wrapping_add(2),
                 );
             }
             return;
@@ -7200,11 +7177,10 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 },
             );
         }
-        if self.ram.read_u8(OVERLORD_X_LO + 6) != 0 {
+        if self.ram.boss_trinexx_startup_delay() != 0 {
             if self.ram.read_u8(FRAME_COUNTER) & 1 == 0 {
-                self.ram.write_u8(
-                    OVERLORD_X_LO + 6,
-                    self.ram.read_u8(OVERLORD_X_LO + 6).wrapping_sub(1),
+                self.ram.set_boss_trinexx_startup_delay(
+                    self.ram.boss_trinexx_startup_delay().wrapping_sub(1),
                 );
             }
             return;
@@ -7230,9 +7206,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         return;
                     }
                     self.ram
-                        .write_u8(OVERLORD_X_LO, [0x60, 0x78, 0x78, 0x90][j as usize]);
+                        .set_boss_trinexx_target_x_low([0x60, 0x78, 0x78, 0x90][j as usize]);
                     self.ram
-                        .write_u8(OVERLORD_X_LO + 1, [0x80, 0x70, 0x60, 0x80][j as usize]);
+                        .set_boss_trinexx_target_y_low([0x80, 0x70, 0x60, 0x80][j as usize]);
                     let r = self.runtime.random_number(self.ram);
                     self.ram
                         .set_sprite_subtype(k, j + u8::from(r & 3 == 0) * 0x80);
@@ -7249,9 +7225,9 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                     self.ram.set_sprite_main_delay(k, 48);
                 } else {
                     let x = (self.ram.sprite(k).x_high() as u16) << 8
-                        | self.ram.read_u8(OVERLORD_X_LO) as u16;
+                        | self.ram.boss_trinexx_target_x_low() as u16;
                     let y = (self.ram.sprite(k).y_high() as u16) << 8
-                        | self.ram.read_u8(OVERLORD_X_LO + 1) as u16;
+                        | self.ram.boss_trinexx_target_y_low() as u16;
                     let speed = if (self.ram.sprite(k).subtype() as i8) < 0 {
                         16
                     } else {
@@ -7279,13 +7255,13 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                         .set_sprite_scratch_c(k, self.ram.sprite(k).y_low().wrapping_sub(12));
                     if self
                         .ram
-                        .read_u8(OVERLORD_X_LO)
+                        .boss_trinexx_target_x_low()
                         .wrapping_sub(self.ram.sprite(k).x_low())
                         .wrapping_add(2)
                         < 4
                         && self
                             .ram
-                            .read_u8(OVERLORD_X_LO + 1)
+                            .boss_trinexx_target_y_low()
                             .wrapping_sub(self.ram.sprite(k).y_low())
                             .wrapping_add(2)
                             < 4
@@ -7343,29 +7319,26 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
         }
     }
     pub fn trinexx_wag_tail(&mut self, _k: usize) {
-        if self.ram.read_u8(OVERLORD_X_LO + 5) == 0 {
-            let v = self.ram.read_u8(OVERLORD_X_LO + 4).wrapping_add(1);
-            self.ram.write_u8(OVERLORD_X_LO + 4, v);
+        if self.ram.boss_trinexx_delay() == 0 {
+            let v = self.ram.boss_trinexx_clock().wrapping_add(1);
+            self.ram.set_boss_trinexx_clock(v);
             if v & 3 == 0 {
-                let j = self.ram.read_u8(OVERLORD_X_LO + 3) & 1;
-                let p =
-                    self.ram
-                        .read_u8(OVERLORD_X_LO + 2)
-                        .wrapping_add(if j != 0 { 255 } else { 1 });
-                self.ram.write_u8(OVERLORD_X_LO + 2, p);
+                let j = self.ram.boss_trinexx_direction() & 1;
+                let p = self
+                    .ram
+                    .boss_trinexx_bend()
+                    .wrapping_add(if j != 0 { 255 } else { 1 });
+                self.ram.set_boss_trinexx_bend(p);
                 if p == if j != 0 { 0 } else { 6 } {
-                    self.ram.write_u8(
-                        OVERLORD_X_LO + 3,
-                        self.ram.read_u8(OVERLORD_X_LO + 3).wrapping_add(1),
+                    self.ram.set_boss_trinexx_direction(
+                        self.ram.boss_trinexx_direction().wrapping_add(1),
                     );
-                    self.ram.write_u8(OVERLORD_X_LO + 5, 8);
+                    self.ram.set_boss_trinexx_delay(8);
                 }
             }
         } else {
-            self.ram.write_u8(
-                OVERLORD_X_LO + 5,
-                self.ram.read_u8(OVERLORD_X_LO + 5).wrapping_sub(1),
-            );
+            self.ram
+                .set_boss_trinexx_delay(self.ram.boss_trinexx_delay().wrapping_sub(1));
         }
     }
     pub fn trinexx_handle_shell_collision(&mut self, k: usize) {
@@ -7514,8 +7487,8 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
             40, 47, 52, 24, 32, 39, 42, 44, 24, 32, 37, 37, 33,
         ];
         const CH: [u8; 5] = [6, 0x28, 0x28, 0x2c, 0x2c];
-        let g = self.ram.read_u8(OVERLORD_X_LO + 2) as usize;
-        let tail = self.ram.read_u16(OVERLORD_X_LO + 7);
+        let g = self.ram.boss_trinexx_bend() as usize;
+        let tail = self.ram.boss_trinexx_tail_phase();
         for i in 0..5 {
             let j = g * 5 + i;
             crate::oam::set_helper0(
@@ -8147,19 +8120,19 @@ impl<R: SpriteMainBank2aRuntime> SpriteMainBank2a<'_, '_, R> {
                 return;
             }
             self.ram.set_sprite_hit_timer(k, t | 240);
-            let j = self.ram.read_u8(OVERLORD_GEN2 + 3);
+            let j = self.ram.boss_helmasaur_next_tail();
             if t < 128 && t & 7 == 0 && j != 16 {
-                self.ram.write_u8(OVERLORD_GEN2 + 3, j + 1);
+                self.ram.set_boss_helmasaur_next_tail(j + 1);
                 self.ram.write_u16(
                     CUR_SPRITE_X,
                     self.sprite_x(k).wrapping_add_signed(
-                        self.ram.read_u8(OVERLORD_X_LO + 5 + j as usize) as i8 as i16,
+                        self.ram.boss_helmasaur_tail_x(j as usize) as i8 as i16,
                     ),
                 );
                 self.ram.write_u16(
                     CUR_SPRITE_Y,
                     self.sprite_y(k).wrapping_add_signed(
-                        self.ram.read_u8(OVERLORD_Y_LO + 5 + j as usize) as i8 as i16,
+                        self.ram.boss_helmasaur_tail_y(j as usize) as i8 as i16,
                     ),
                 );
                 self.sprite_make_boss_explosion(k);

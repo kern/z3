@@ -1864,18 +1864,18 @@ impl<R: SpriteMainBank1Runtime> SpriteMainBank1<'_, '_, R> {
         let subtype = self.runtime.random_number(self.ram);
         self.ram.set_sprite_subtype2(k, subtype);
         if k == 13 {
-            self.ram.write_u8(0xb08 + 2, 0);
-            self.ram.write_u8(0xb08 + 3, 0);
+            self.ram.set_boss_arrghi_x_low(2, 0);
+            self.ram.set_boss_arrghi_x_low(3, 0);
             self.runtime.arrghus_handle_puffs(self.ram, 0);
         }
         self.ram
-            .set_sprite_x_low(k, self.ram.read_u8(0xb08 + k + 7));
+            .set_sprite_x_low(k, self.ram.boss_arrghi_x_low(k + 7));
         self.ram
-            .set_sprite_x_high(k, self.ram.read_u8(0xb18 + k + 7));
+            .set_sprite_x_high(k, self.ram.boss_arrghi_x_high(k + 7));
         self.ram
-            .set_sprite_y_low(k, self.ram.read_u8(0xb28 + k + 7));
+            .set_sprite_y_low(k, self.ram.boss_arrghi_y_low(k + 7));
         self.ram
-            .set_sprite_y_high(k, self.ram.read_u8(0xb38 + k + 7));
+            .set_sprite_y_high(k, self.ram.boss_arrghi_y_high(k + 7));
     }
 
     pub fn sprite_prep_talking_tree(&mut self, k: usize) {

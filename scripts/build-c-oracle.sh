@@ -63,6 +63,9 @@ clang $common_flags oracle/spc_pattern_oracle.c snes/dsp.o \
 clang $common_flags oracle/spc_sfx_oracle.c snes/dsp.o \
   -o build/c-oracle/spc_sfx_oracle
 
+clang $common_flags oracle/spc_data_oracle.c snes/dsp.o \
+  -o build/c-oracle/spc_data_oracle
+
 clang $common_flags oracle/swim_state_oracle.c \
   -Lbuild/c-oracle -lz3c_oracle \
   -Wl,-rpath,@loader_path \
@@ -122,6 +125,11 @@ clang $common_flags oracle/tile_detect_oracle.c src/tile_detect.o \
 
 clang $common_flags oracle/overlord_oracle.c src/overlord.o \
   -o build/c-oracle/overlord_oracle
+
+clang $common_flags oracle/overlord_state_oracle.c \
+  -Lbuild/c-oracle -lz3c_oracle \
+  -Wl,-rpath,@loader_path \
+  -o build/c-oracle/overlord_state_oracle
 
 clang $common_flags oracle/tagalong_oracle.c src/tagalong.o \
   -o build/c-oracle/tagalong_oracle

@@ -1,5 +1,14 @@
 //! Native music player port from `src/spc_player.c`.
 
+mod data;
+#[cfg(test)]
+mod data_oracle_tests;
+mod upload;
+#[cfg(test)]
+mod upload_baseline_tests;
+pub use data::ChannelPatternTable;
+use data::{BASE_NOTE_FREQS, EFFECT_BYTE_LENGTH, FIR, SpcData};
+pub use upload::UploadError;
 mod pattern_cursor;
 mod phrase_cursor;
 #[cfg(test)]
@@ -41,14 +50,6 @@ const DIR: u8 = 0x5d;
 const FLG: u8 = 0x6c;
 const ESA: u8 = 0x6d;
 const EDL: u8 = 0x7d;
-
-const EFFECT_BYTE_LENGTH: [u8; 27] = [
-    1, 1, 2, 3, 0, 1, 2, 1, 2, 1, 1, 3, 0, 1, 2, 3, 1, 3, 3, 0, 1, 3, 0, 3, 3, 3, 1,
-];
-
-fn read16(ram: &[u8; 65536], address: u16) -> u16 {
-    u16::from_le_bytes([ram[address as usize], ram[address.wrapping_add(1) as usize]])
-}
 
 fn spc_div_helper(a: i32, b: u8) -> u16 {
     let negative = a & 0x100 != 0;
@@ -343,10 +344,6 @@ impl SpcPlayer {
     }
 
     fn write_volume_to_dsp(&mut self, ci: usize, mut volume: u16) {
-        const VOLUME_TABLE: [u8; 22] = [
-            0, 1, 3, 7, 13, 21, 30, 41, 52, 66, 81, 94, 103, 110, 115, 119, 122, 124, 125, 126,
-            127, 127,
-        ];
         if self.is_chan_on & self.cur_chan_bit != 0 {
             return;
         }
@@ -354,21 +351,14 @@ impl SpcPlayer {
         let phase = self.channels[ci].pan_flag_with_phase_invert;
         for side in 0..2u8 {
             let j = usize::from(volume >> 8);
-            let lo = if j >= 21 {
-                self.ram[j + 0x1178]
-            } else {
-                VOLUME_TABLE[j]
-            };
-            let hi = if j >= 21 {
-                self.ram[j + 0x1179]
-            } else {
-                VOLUME_TABLE[j + 1]
-            };
-            let interpolation = i16::from(hi) - i16::from(lo);
+            let (lo, hi) = SpcData::new(&self.ram).pan_segment(j);
+            // C promotes these byte operands to int. Full-byte RAM fallback
+            // segments can exceed i16 during multiplication (255 * 255).
+            let interpolation = i32::from(hi) - i32::from(lo);
             let mut result =
-                u8::try_from(i16::from(lo) + ((interpolation * i16::from(volume as u8)) >> 8))
+                u8::try_from(i32::from(lo) + ((interpolation * i32::from(volume as u8)) >> 8))
                     .unwrap_or_else(|_| {
-                        (i16::from(lo) + ((interpolation * i16::from(volume as u8)) >> 8)) as u8
+                        (i32::from(lo) + ((interpolation * i32::from(volume as u8)) >> 8)) as u8
                     });
             result = ((u16::from(result) * u16::from(final_volume)) >> 8) as u8;
             if (phase.wrapping_shl(u32::from(side))) & 0x80 != 0 {
@@ -380,9 +370,6 @@ impl SpcPlayer {
     }
 
     fn write_pitch(&mut self, ci: usize, mut pitch: u16) {
-        const BASE_NOTE_FREQS: [u16; 13] = [
-            2143, 2270, 2405, 2548, 2700, 2860, 3030, 3211, 3402, 3604, 3818, 4045, 4286,
-        ];
         let high = (pitch >> 8) as u8;
         if high >= 0x34 {
             pitch = pitch.wrapping_add(u16::from(high - 0x34));
@@ -442,23 +429,22 @@ impl SpcPlayer {
                 .wrapping_add(54)
                 .wrapping_add(self.percussion_base_id);
         }
-        let address = usize::from(instrument) * 6 + 0x3d00;
-        let params = <[u8; 6]>::try_from(&self.ram[address..address + 6]).unwrap();
+        let params = SpcData::new(&self.ram).instrument(instrument);
         if self.is_chan_on & self.cur_chan_bit != 0 {
             return;
         }
         let reg = self.channels[ci].index * 16;
-        if params[0] & 0x80 != 0 {
-            self.reg_flg = (self.reg_flg & 0x20) | (params[0] & 0x1f);
+        if params.source & 0x80 != 0 {
+            self.reg_flg = (self.reg_flg & 0x20) | (params.source & 0x1f);
             self.reg_non |= self.cur_chan_bit;
             self.dsp_write(reg + V0SRCN, 0);
         } else {
-            self.dsp_write(reg + V0SRCN, params[0]);
+            self.dsp_write(reg + V0SRCN, params.source);
         }
-        self.dsp_write(reg + V0ADSR1, params[1]);
-        self.dsp_write(reg + V0ADSR2, params[2]);
-        self.dsp_write(reg + V0GAIN, params[3]);
-        self.channels[ci].instrument_pitch_base = u16::from_be_bytes([params[4], params[5]]);
+        self.dsp_write(reg + V0ADSR1, params.adsr1);
+        self.dsp_write(reg + V0ADSR2, params.adsr2);
+        self.dsp_write(reg + V0GAIN, params.gain);
+        self.channels[ci].instrument_pitch_base = params.pitch_base;
     }
 
     fn compute_pitch_add(&mut self, ci: usize, pitch: u8) {
@@ -605,10 +591,6 @@ impl SpcPlayer {
                 self.reg_flg |= 0x20;
             }
             0xf7 => {
-                const FIR: [i8; 32] = [
-                    127, 0, 0, 0, 0, 0, 0, 0, 88, -65, -37, -16, -2, 7, 12, 12, 12, 33, 43, 43, 19,
-                    -2, -13, -7, 52, 51, 0, -39, -27, 1, -4, -21,
-                ];
                 self.setup_echo_parameter_edl(arg);
                 self.reg_efb = self.next_pattern_byte(ci);
                 let preset = usize::from(self.next_pattern_byte(ci)) * 8;
@@ -913,10 +895,8 @@ impl SpcPlayer {
             self.pause_music_ctr = 0;
             self.byte_3e1 = 0;
             self.port_to_snes[0] = command;
-            self.music_ptr_toplevel.jump_to(read16(
-                &self.ram,
-                0xd000u16.wrapping_add(u16::from(command - 1) * 2),
-            ));
+            self.music_ptr_toplevel
+                .jump_to(SpcData::new(&self.ram).song_entry(command - 1));
             self.counter_sf0c = 2;
             self.key_off |= self.is_chan_on ^ 0xff;
             return;
@@ -972,18 +952,12 @@ impl SpcPlayer {
                                 continue;
                             }
                             if cmd & 0x80 == 0 {
-                                const NOTE_VOL: [u8; 16] = [
-                                    25, 50, 76, 101, 114, 127, 140, 152, 165, 178, 191, 203, 216,
-                                    229, 242, 252,
-                                ];
-                                const GATE: [u8; 8] = [50, 101, 127, 152, 178, 203, 229, 252];
                                 self.channels[ci].note_length = cmd;
                                 cmd = self.next_pattern_byte(ci);
                                 if cmd & 0x80 == 0 {
-                                    self.channels[ci].note_gate_off_fixedpt =
-                                        GATE[usize::from((cmd >> 4) & 7)];
-                                    self.channels[ci].channel_volume_master =
-                                        NOTE_VOL[usize::from(cmd & 0xf)];
+                                    let parameters = SpcData::note_parameters(cmd);
+                                    self.channels[ci].note_gate_off_fixedpt = parameters.gate;
+                                    self.channels[ci].channel_volume_master = parameters.volume;
                                     cmd = self.next_pattern_byte(ci);
                                 }
                             }
@@ -1061,11 +1035,9 @@ impl SpcPlayer {
     fn load_next_phrase(&mut self) -> bool {
         loop {
             match self.music_ptr_toplevel.next_entry(&self.ram) {
-                PhraseEntry::PatternTable(mut address) => {
+                PhraseEntry::PatternTable(table) => {
                     for ci in 0..8 {
-                        self.channels[ci].pattern_order_ptr_for_chan =
-                            PatternCursor::at(read16(&self.ram, address));
-                        address = address.wrapping_add(2);
+                        self.channels[ci].pattern_order_ptr_for_chan = table.channel(&self.ram, ci);
                     }
                     self.cur_chan_bit = 1;
                     for ci in 0..8 {
@@ -1190,26 +1162,9 @@ impl SpcPlayer {
         self.dsp_write(0x2c, 0);
         self.dsp_write(0x3c, 0);
         self.dsp_write(0x5c, 255);
-        let mut p = 0;
-        loop {
-            if p + 2 > data.len() {
-                return Err(UploadError::Truncated);
-            }
-            let n = u16::from_le_bytes([data[p], data[p + 1]]) as usize;
-            p += 2;
-            if n == 0 {
-                break;
-            }
-            if p + 2 + n > data.len() {
-                return Err(UploadError::Truncated);
-            }
-            let mut a = u16::from_le_bytes([data[p], data[p + 1]]);
-            p += 2;
-            for &v in &data[p..p + n] {
-                self.ram[a as usize] = v;
-                a = a.wrapping_add(1)
-            }
-            p += n
+        let mut blocks = upload::UploadBlocks::new(data);
+        while let Some(block) = blocks.next_block()? {
+            block.apply(&mut self.ram);
         }
         self.pause_music_ctr = 0;
         self.port_to_snes[0] = 0;
@@ -1238,11 +1193,6 @@ impl SpcPlayer {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UploadError {
-    Truncated,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

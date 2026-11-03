@@ -4,6 +4,8 @@
 //! Every 16-bit position survives snapshot encoding, including low-memory
 //! addresses and wrapped word reads at the end of RAM.
 
+use super::ChannelPatternTable;
+
 /// One phrase-control word. All 65,536 word values have defined meanings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PhraseEntry {
@@ -11,7 +13,7 @@ pub enum PhraseEntry {
     FastForwardOn,
     FastForwardOff,
     Repeat(u8),
-    PatternTable(u16),
+    PatternTable(ChannelPatternTable),
 }
 
 /// The persistent position of the next unread phrase-control word.
@@ -44,7 +46,7 @@ impl PhraseCursor {
     pub fn next_entry(&mut self, ram: &[u8; 65536]) -> PhraseEntry {
         let word = self.take_word(ram);
         if word >> 8 != 0 {
-            return PhraseEntry::PatternTable(word);
+            return PhraseEntry::PatternTable(ChannelPatternTable::at(word));
         }
         match word {
             0 => PhraseEntry::Stop,
@@ -84,7 +86,7 @@ mod tests {
             let actual = cursor.next_entry(&ram);
             let expected = if word >= 0x100 {
                 categories[4] += 1;
-                PhraseEntry::PatternTable(word)
+                PhraseEntry::PatternTable(ChannelPatternTable::at(word))
             } else {
                 match word {
                     0 => {

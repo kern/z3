@@ -6,19 +6,6 @@
 
 use crate::{position::SplitCoordinate, ram::Ram};
 
-const OVERLORD_TYPE: usize = 0x0b00;
-const OVERLORD_X_LO: usize = 0x0b08;
-const OVERLORD_X_HI: usize = 0x0b10;
-const OVERLORD_Y_LO: usize = 0x0b18;
-const OVERLORD_Y_HI: usize = 0x0b20;
-const OVERLORD_GEN1: usize = 0x0b28;
-const OVERLORD_GEN2: usize = 0x0b30;
-const OVERLORD_GEN3: usize = 0x0b38;
-const OVERLORD_FLOOR: usize = 0x0b40;
-const OVERLORD_OFFSET_SPRITE_POS: usize = 0x0b48;
-const CONTROLLER_X: SplitCoordinate = SplitCoordinate::new(OVERLORD_X_LO, OVERLORD_X_HI);
-const CONTROLLER_Y: SplitCoordinate = SplitCoordinate::new(OVERLORD_Y_LO, OVERLORD_Y_HI);
-
 const SPRITE_IGNORE_PROJECTILE: usize = 0x0ba0;
 const SPRITE_FLAGS5: usize = 0x0be0;
 const SPRITE_BUMP_DAMAGE: usize = 0x0cd2;
@@ -137,20 +124,20 @@ fn add_i8(value: u16, offset: i8) -> u16 {
 
 #[must_use]
 pub fn get_x(ram: &Ram<'_>, k: usize) -> u16 {
-    CONTROLLER_X.pixels(ram, k)
+    ram.controller(k).x()
 }
 
 #[must_use]
 pub fn get_y(ram: &Ram<'_>, k: usize) -> u16 {
-    CONTROLLER_Y.pixels(ram, k)
+    ram.controller(k).y()
 }
 
 pub fn set_x(ram: &mut Ram<'_>, k: usize, value: u16) {
-    CONTROLLER_X.set_pixels(ram, k, value);
+    ram.controller_mut(k).set_x(value);
 }
 
 pub fn set_y(ram: &mut Ram<'_>, k: usize, value: u16) {
-    CONTROLLER_Y.set_pixels(ram, k, value);
+    ram.controller_mut(k).set_y(value);
 }
 
 #[must_use]
@@ -191,14 +178,14 @@ pub fn execute_all(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks) {
         return;
     }
     for k in (0..8).rev() {
-        if read_index(ram, OVERLORD_TYPE, k) != 0 {
+        if ram.controller_kind(k) != 0 {
             execute_single(ram, hooks, k);
         }
     }
 }
 
 pub fn execute_single(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let kind = read_index(ram, OVERLORD_TYPE, k);
+    let kind = ram.controller_kind(k);
     check_if_active(ram, k);
     match kind {
         1 => position_target(ram, k),
@@ -258,73 +245,73 @@ pub fn spawn_boulder(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks) {
 }
 
 pub fn armos_coordinator_bounce(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if timer != 0 {
-        write_index(ram, OVERLORD_GEN2, k, timer - 1);
+        ram.set_controller_timer(k, timer - 1);
     }
-    match read_index(ram, OVERLORD_GEN1, k) {
+    match ram.controller_scratch_a(k) {
         0 => {
             if read_index(ram, SPRITE_A, 0) != 0 {
-                write_index(ram, OVERLORD_X_LO, k, 120);
-                write_index(ram, OVERLORD_FLOOR, k, 255);
-                write_index(ram, OVERLORD_X_LO, 2, 64);
-                write_index(ram, OVERLORD_X_LO, 0, 192);
-                write_index(ram, OVERLORD_X_LO, 1, 1);
+                ram.set_controller_x_low(k, 120);
+                ram.set_controller_floor(k, 255);
+                ram.set_boss_orbit_radius(64);
+                ram.set_boss_orbit_phase_low(192);
+                ram.set_boss_orbit_phase_high(1);
                 armos_coordinator_rotate_knights(ram, hooks, k);
             }
         }
         1 => {
             if armos_coordinator_check_knights(ram) {
-                let value = read_index(ram, OVERLORD_GEN1, k).wrapping_add(1);
-                write_index(ram, OVERLORD_GEN1, k, value);
-                write_index(ram, OVERLORD_GEN2, k, 0xff);
+                let value = ram.controller_scratch_a(k).wrapping_add(1);
+                ram.set_controller_scratch_a(k, value);
+                ram.set_controller_timer(k, 0xff);
             }
         }
         2 | 4 => armos_coordinator_rotate_knights(ram, hooks, k),
         3 => {
-            let radius = read_index(ram, OVERLORD_X_LO, 2).wrapping_sub(1);
-            write_index(ram, OVERLORD_X_LO, 2, radius);
+            let radius = ram.boss_orbit_radius().wrapping_sub(1);
+            ram.set_boss_orbit_radius(radius);
             if radius == 32 {
-                let state = read_index(ram, OVERLORD_GEN1, k).wrapping_add(1);
-                write_index(ram, OVERLORD_GEN1, k, state);
-                write_index(ram, OVERLORD_GEN2, k, 64);
+                let state = ram.controller_scratch_a(k).wrapping_add(1);
+                ram.set_controller_scratch_a(k, state);
+                ram.set_controller_timer(k, 64);
             }
             armos_coordinator_rotate(ram, hooks, k);
         }
         5 => {
-            let radius = read_index(ram, OVERLORD_X_LO, 2).wrapping_add(1);
-            write_index(ram, OVERLORD_X_LO, 2, radius);
+            let radius = ram.boss_orbit_radius().wrapping_add(1);
+            ram.set_boss_orbit_radius(radius);
             if radius == 64 {
-                let state = read_index(ram, OVERLORD_GEN1, k).wrapping_add(1);
-                write_index(ram, OVERLORD_GEN1, k, state);
-                write_index(ram, OVERLORD_GEN2, k, 64);
+                let state = ram.controller_scratch_a(k).wrapping_add(1);
+                ram.set_controller_scratch_a(k, state);
+                ram.set_controller_timer(k, 64);
             }
             armos_coordinator_rotate(ram, hooks, k);
         }
         6 => {
-            if read_index(ram, OVERLORD_GEN2, k) != 0 {
+            if ram.controller_timer(k) != 0 {
                 return;
             }
             armos_coordinator_disable_coercion(ram);
             for j in (0..6).rev() {
-                write_index(ram, OVERLORD_X_HI, j, K_ARMOS_COORDINATOR_BACK_WALL_X[j]);
-                write_index(ram, OVERLORD_GEN2, j, 48);
+                ram.set_boss_orbit_x_low(j, K_ARMOS_COORDINATOR_BACK_WALL_X[j]);
+                ram.set_boss_orbit_y_low(j, 48);
             }
-            let state = read_index(ram, OVERLORD_GEN1, k).wrapping_add(1);
-            write_index(ram, OVERLORD_GEN1, k, state);
-            write_index(ram, OVERLORD_GEN2, k, 255);
+            let state = ram.controller_scratch_a(k).wrapping_add(1);
+            ram.set_controller_scratch_a(k, state);
+            ram.set_controller_timer(k, 255);
         }
         7 => {
-            if read_index(ram, OVERLORD_GEN2, k) != 0 {
+            if ram.controller_timer(k) != 0 {
                 return;
             }
             for j in (0..6).rev() {
-                let value = read_index(ram, OVERLORD_GEN2, j).wrapping_add(1);
-                write_index(ram, OVERLORD_GEN2, j, value);
+                let value = ram.boss_orbit_y_low(j).wrapping_add(1);
+                ram.set_boss_orbit_y_low(j, value);
                 if value == 192 {
-                    write_index(ram, OVERLORD_GEN1, k, 1);
-                    let direction = read_index(ram, OVERLORD_FLOOR, k).wrapping_neg();
-                    write_index(ram, OVERLORD_FLOOR, k, direction);
+                    ram.set_controller_scratch_a(k, 1);
+                    let direction = ram.controller_floor(k).wrapping_neg();
+                    ram.set_controller_floor(k, direction);
                     armos_coordinator_disable_coercion(ram);
                     armos_coordinator_rotate(ram, hooks, k);
                     return;
@@ -347,7 +334,7 @@ pub fn invisible_stalfos(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: u
     {
         return;
     }
-    write_index(ram, OVERLORD_TYPE, k, 0);
+    ram.set_controller_kind(k, 0);
     ram.write_u8(0xfb5, 3);
     loop {
         let i = usize::from(ram.read_u8(0xfb5));
@@ -357,7 +344,7 @@ pub fn invisible_stalfos(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: u
         sprite_set_x(ram, j, add_i8(ram.read_u16(0x22), K_RED_STALFOS_TRAP_X[i]));
         sprite_set_y(ram, j, add_i8(ram.read_u16(0x20), K_RED_STALFOS_TRAP_Y[i]));
         write_index(ram, SPRITE_DELAY_MAIN, j, K_RED_STALFOS_TRAP_DELAY[i]);
-        write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+        write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
         write_index(ram, SPRITE_E, j, 1);
         write_index(ram, SPRITE_FLAGS2, j, 3);
         write_index(ram, SPRITE_D, j, 2);
@@ -379,17 +366,17 @@ pub fn pot_trap(ram: &mut Ram<'_>, k: usize) {
             .wrapping_add(32)
             < 64
     {
-        write_index(ram, OVERLORD_TYPE, k, 0);
+        ram.set_controller_kind(k, 0);
         ram.write_u8(0xb9e, ram.read_u8(0xb9e).wrapping_add(1));
     }
 }
 
 pub fn zoro_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let timer = read_index(ram, OVERLORD_GEN2, k).wrapping_sub(1);
-    write_index(ram, OVERLORD_GEN2, k, timer);
+    let timer = ram.controller_timer(k).wrapping_sub(1);
+    ram.set_controller_timer(k, timer);
     let mut x = get_x(ram, k).wrapping_add(8);
     let y = get_y(ram, k).wrapping_add(8);
-    if hooks.tile_attribute(ram, read_index(ram, OVERLORD_FLOOR, k), &mut x, y) != 0x82
+    if hooks.tile_attribute(ram, ram.controller_floor(k), &mut x, y) != 0x82
         || timer >= 0x18
         || timer & 3 != 0
     {
@@ -400,7 +387,7 @@ pub fn zoro_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize)
         sprite_set_x(ram, j, add_i8(info.overlord_x, offset).wrapping_add(8));
         write_index(ram, SPRITE_Y_LO, j, (info.overlord_y as u8).wrapping_add(8));
         write_index(ram, SPRITE_Y_HI, j, (info.overlord_y >> 8) as u8);
-        write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+        write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
         write_index(ram, SPRITE_FLAGS4, j, 1);
         write_index(ram, SPRITE_E, j, 1);
         write_index(ram, SPRITE_IGNORE_PROJECTILE, j, 1);
@@ -415,20 +402,20 @@ pub fn zoro_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize)
 }
 
 pub fn wizzrobe_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if timer != 128 {
         if ram.read_u8(0x1a) & 1 != 0 {
-            write_index(ram, OVERLORD_GEN2, k, timer.wrapping_sub(1));
+            ram.set_controller_timer(k, timer.wrapping_sub(1));
         }
         return;
     }
-    write_index(ram, OVERLORD_GEN2, k, 127);
+    ram.set_controller_timer(k, 127);
     for i in (0..4).rev() {
         if let Some((j, _)) = hooks.spawn_sprite(ram, k, 0x9b, 12) {
             sprite_set_x(ram, j, add_i8(ram.read_u16(0x22), K_OVERLORD_WIZZROBE_X[i]));
             sprite_set_y(ram, j, add_i8(ram.read_u16(0x20), K_OVERLORD_WIZZROBE_Y[i]));
             write_index(ram, SPRITE_DELAY_MAIN, j, K_OVERLORD_WIZZROBE_DELAY[i]);
-            write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+            write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
             write_index(ram, SPRITE_B, j, 1);
         }
     }
@@ -441,21 +428,21 @@ pub fn tile_room(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
     if x & 0xff00 != 0 || y & 0xff00 != 0 {
         return;
     }
-    let timer = read_index(ram, OVERLORD_GEN2, k).wrapping_sub(1);
-    write_index(ram, OVERLORD_GEN2, k, timer);
+    let timer = ram.controller_timer(k).wrapping_sub(1);
+    ram.set_controller_timer(k, timer);
     if timer != 0x80 {
         return;
     }
     if tile_room_spawn_tile(ram, hooks, k).is_none() {
-        write_index(ram, OVERLORD_GEN2, k, 0x81);
+        ram.set_controller_timer(k, 0x81);
         return;
     }
-    let count = read_index(ram, OVERLORD_GEN1, k).wrapping_add(1);
-    write_index(ram, OVERLORD_GEN1, k, count);
+    let count = ram.controller_scratch_a(k).wrapping_add(1);
+    ram.set_controller_scratch_a(k, count);
     if count != 22 {
-        write_index(ram, OVERLORD_GEN2, k, 0xe0);
+        ram.set_controller_timer(k, 0xe0);
     } else {
-        write_index(ram, OVERLORD_TYPE, k, 0);
+        ram.set_controller_kind(k, 0);
     }
 }
 
@@ -466,7 +453,7 @@ pub fn tile_room_spawn_tile(
 ) -> Option<usize> {
     let (j, _) = hooks.spawn_sprite(ram, k, 0x94, 15)?;
     write_index(ram, SPRITE_E, j, 1);
-    let i = usize::from(read_index(ram, OVERLORD_GEN1, k));
+    let i = usize::from(ram.controller_scratch_a(k));
     write_index(ram, SPRITE_X_LO, j, K_SPAWN_FLYING_TILE_X[i]);
     write_index(
         ram,
@@ -474,9 +461,9 @@ pub fn tile_room_spawn_tile(
         j,
         K_SPAWN_FLYING_TILE_Y[i].wrapping_sub(8),
     );
-    write_index(ram, SPRITE_Y_HI, j, read_index(ram, OVERLORD_Y_HI, k));
-    write_index(ram, SPRITE_X_HI, j, read_index(ram, OVERLORD_X_HI, k));
-    write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+    write_index(ram, SPRITE_Y_HI, j, ram.controller_y_high(k));
+    write_index(ram, SPRITE_X_HI, j, ram.controller_x_high(k));
+    write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
     write_index(ram, SPRITE_HEALTH, j, 4);
     write_index(ram, SPRITE_FLAGS5, j, 0);
     write_index(ram, SPRITE_HEALTH, j, 0);
@@ -488,15 +475,15 @@ pub fn tile_room_spawn_tile(
 }
 
 pub fn pirogusu_spawner_left(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let subtype = read_index(ram, OVERLORD_TYPE, k).wrapping_sub(16);
+    let subtype = ram.controller_kind(k).wrapping_sub(16);
     ram.write_u8(0xfb5, subtype);
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if timer != 128 {
-        write_index(ram, OVERLORD_GEN2, k, timer.wrapping_sub(1));
+        ram.set_controller_timer(k, timer.wrapping_sub(1));
         return;
     }
     let delay = (hooks.random_number(ram) & 31).wrapping_add(96);
-    write_index(ram, OVERLORD_GEN2, k, delay);
+    ram.set_controller_timer(k, delay);
     let count = (0..16)
         .filter(|&i| {
             read_index(ram, SPRITE_STATE, i) != 0 && read_index(ram, SPRITE_TYPE, i) == 0x10
@@ -508,7 +495,7 @@ pub fn pirogusu_spawner_left(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, 
     if let Some((j, info)) = hooks.spawn_sprite(ram, k, 0x94, 12) {
         sprite_set_x(ram, j, info.overlord_x);
         sprite_set_y(ram, j, info.overlord_y);
-        write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+        write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
         write_index(ram, SPRITE_DELAY_MAIN, j, 32);
         write_index(ram, SPRITE_D, j, subtype);
         write_index(
@@ -521,29 +508,29 @@ pub fn pirogusu_spawner_left(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, 
 }
 
 pub fn falling_square(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if timer != 0 {
-        if read_index(ram, OVERLORD_GEN3, k) != 0 {
-            write_index(ram, OVERLORD_GEN2, k, timer.wrapping_sub(1));
+        if ram.controller_scratch_c(k) != 0 {
+            ram.set_controller_timer(k, timer.wrapping_sub(1));
             return;
         }
         let x = get_x(ram, k).wrapping_sub(ram.read_u16(0xe2));
         let y = get_y(ram, k).wrapping_sub(ram.read_u16(0xe8));
         if x & 0xff00 == 0 && y & 0xff00 == 0 {
-            let value = read_index(ram, OVERLORD_GEN3, k).wrapping_add(1);
-            write_index(ram, OVERLORD_GEN3, k, value);
+            let value = ram.controller_scratch_c(k).wrapping_add(1);
+            ram.set_controller_scratch_c(k, value);
         }
         return;
     }
 
-    write_index(ram, OVERLORD_GEN2, k, 16);
+    ram.set_controller_timer(k, 16);
     spawn_falling_tile(ram, hooks, k);
-    let path = usize::from(read_index(ram, OVERLORD_TYPE, k).wrapping_sub(10));
-    let step = read_index(ram, OVERLORD_GEN1, k);
-    write_index(ram, OVERLORD_GEN1, k, step.wrapping_add(1));
+    let path = usize::from(ram.controller_kind(k).wrapping_sub(10));
+    let step = ram.controller_scratch_a(k);
+    ram.set_controller_scratch_a(k, step.wrapping_add(1));
     let length = K_CRUMBLE_TILE_PATH_OFFS[path + 1] - K_CRUMBLE_TILE_PATH_OFFS[path];
     if step == length {
-        write_index(ram, OVERLORD_TYPE, k, 0);
+        ram.set_controller_kind(k, 0);
     }
     let command =
         K_CRUMBLE_TILE_PATH_DATA[usize::from(K_CRUMBLE_TILE_PATH_OFFS[path].wrapping_add(step))];
@@ -569,8 +556,8 @@ pub fn spawn_falling_tile(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: 
         return;
     };
     ram.set_garnish_kind(j, 3);
-    ram.set_garnish_x_high(j, read_index(ram, OVERLORD_X_HI, k));
-    ram.set_garnish_x_low(j, read_index(ram, OVERLORD_X_LO, k));
+    ram.set_garnish_x_high(j, ram.controller_x_high(k));
+    ram.set_garnish_x_low(j, ram.controller_x_low(k));
     let pan = hooks.calculate_sfx_pan(ram, ram.garnish_x_low(j));
     ram.write_u8(0x12e, pan | 0x1f);
     let y = get_y(ram, k).wrapping_add(16);
@@ -581,14 +568,14 @@ pub fn spawn_falling_tile(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: 
 }
 
 pub fn wallmaster_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if timer != 128 {
         if ram.read_u8(0x1a) & 1 == 0 {
-            write_index(ram, OVERLORD_GEN2, k, timer.wrapping_sub(1));
+            ram.set_controller_timer(k, timer.wrapping_sub(1));
         }
         return;
     }
-    write_index(ram, OVERLORD_GEN2, k, 127);
+    ram.set_controller_timer(k, 127);
     let Some((j, _)) = hooks.spawn_sprite(ram, k, 0x90, 12) else {
         return;
     };
@@ -600,12 +587,12 @@ pub fn wallmaster_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: 
 }
 
 pub fn blob_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if timer != 0 {
-        write_index(ram, OVERLORD_GEN2, k, timer.wrapping_sub(1));
+        ram.set_controller_timer(k, timer.wrapping_sub(1));
         return;
     }
-    write_index(ram, OVERLORD_GEN2, k, 0xa0);
+    ram.set_controller_timer(k, 0xa0);
     let count = (0..16)
         .filter(|&i| {
             read_index(ram, SPRITE_STATE, i) != 0 && read_index(ram, SPRITE_TYPE, i) == 0x8f
@@ -638,33 +625,29 @@ pub fn blob_spawner(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize)
 
 pub fn moving_floor(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
     if read_index(ram, SPRITE_STATE, 0) == 4 {
-        write_index(ram, OVERLORD_TYPE, k, 0);
+        ram.set_controller_kind(k, 0);
         ram.write_u8(0x41a, 1);
         return;
     }
-    if read_index(ram, OVERLORD_GEN1, k) == 0 {
-        let counter = read_index(ram, OVERLORD_GEN2, k).wrapping_add(1);
-        write_index(ram, OVERLORD_GEN2, k, counter);
+    if ram.controller_scratch_a(k) == 0 {
+        let counter = ram.controller_timer(k).wrapping_add(1);
+        ram.set_controller_timer(k, counter);
         if counter == 32 {
-            write_index(ram, OVERLORD_GEN2, k, 0);
-            let mask = if read_index(ram, OVERLORD_X_LO, k) != 0 {
-                3
-            } else {
-                1
-            };
+            ram.set_controller_timer(k, 0);
+            let mask = if ram.controller_x_low(k) != 0 { 3 } else { 1 };
             let direction = (hooks.random_number(ram) & mask) * 2;
             ram.write_u8(0x41a, direction);
             let delay = (hooks.random_number(ram) & 127).wrapping_add(128);
-            write_index(ram, OVERLORD_GEN2, k, delay);
-            write_index(ram, OVERLORD_GEN1, k, 1);
+            ram.set_controller_timer(k, delay);
+            ram.set_controller_scratch_a(k, 1);
         } else {
             ram.write_u8(0x41a, 1);
         }
     } else {
-        let timer = read_index(ram, OVERLORD_GEN2, k).wrapping_sub(1);
-        write_index(ram, OVERLORD_GEN2, k, timer);
+        let timer = ram.controller_timer(k).wrapping_sub(1);
+        ram.set_controller_timer(k, timer);
         if timer == 0 {
-            write_index(ram, OVERLORD_GEN1, k, 0);
+            ram.set_controller_scratch_a(k, 0);
         }
     }
 }
@@ -679,38 +662,38 @@ pub fn falling_stalfos(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usi
     if x & 0xff00 != 0 || y & 0xff00 != 0 {
         return;
     }
-    let state = read_index(ram, OVERLORD_GEN1, k);
+    let state = ram.controller_scratch_a(k);
     if state == 0 {
         if ram.read_u8(0xb9e) != 0 {
-            write_index(ram, OVERLORD_GEN1, k, 1);
+            ram.set_controller_scratch_a(k, 1);
         }
         return;
     }
-    write_index(ram, OVERLORD_GEN1, k, state.wrapping_add(1));
+    ram.set_controller_scratch_a(k, state.wrapping_add(1));
     if state != K_STALFOS_TRAP_TRIGGER[k] {
         return;
     }
-    write_index(ram, OVERLORD_TYPE, k, 0);
+    ram.set_controller_kind(k, 0);
     let Some((j, info)) = hooks.spawn_sprite(ram, k, 0x85, 12) else {
         return;
     };
     sprite_set_x(ram, j, info.overlord_x);
     sprite_set_y(ram, j, info.overlord_y);
     write_index(ram, SPRITE_Z, j, 224);
-    write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+    write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
     write_index(ram, SPRITE_D, j, 0);
     play_falling_sfx(ram, hooks, j);
 }
 
 pub fn bad_switch_snake(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
-    let counter = read_index(ram, OVERLORD_GEN1, k);
+    let counter = ram.controller_scratch_a(k);
     if counter == 0 {
         if ram.read_u8(0xcf4) != 0 {
-            write_index(ram, OVERLORD_GEN1, k, 1);
+            ram.set_controller_scratch_a(k, 1);
         }
         return;
     }
-    write_index(ram, OVERLORD_GEN1, k, counter.wrapping_add(1));
+    ram.set_controller_scratch_a(k, counter.wrapping_add(1));
     if counter != K_SNAKE_TRAP_OVERLORD_TAB1[k] {
         return;
     }
@@ -723,10 +706,10 @@ pub fn bad_switch_snake(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: us
     write_index(ram, SPRITE_E, j, 192);
     let flags = read_index(ram, SPRITE_FLAGS3, j) | 0x10;
     write_index(ram, SPRITE_FLAGS3, j, flags);
-    write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+    write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
     hooks.queue_sfx2_with_pan(ram, j, 0x20);
-    let kind = read_index(ram, OVERLORD_TYPE, k);
-    write_index(ram, OVERLORD_TYPE, k, 0);
+    let kind = ram.controller_kind(k);
+    ram.set_controller_kind(k, 0);
     if kind == 26 {
         write_index(ram, SPRITE_TYPE, j, 74);
         hooks.transmute_to_bomb(ram, j);
@@ -743,43 +726,33 @@ pub fn full_room_cannons(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: u
     ram.write_u8(0xfb6, 0);
     let choice = usize::from(hooks.random_number(ram) & 15);
     ram.write_u8(0xfb5, K_ALL_DIRECTION_METAL_BALL_FACTORY_IDX[choice]);
-    write_index(
-        ram,
-        OVERLORD_X_LO,
-        k,
-        K_ALL_DIRECTION_METAL_BALL_FACTORY_X[choice],
-    );
-    write_index(ram, OVERLORD_X_HI, k, ram.read_u8(0xfb0));
-    write_index(
-        ram,
-        OVERLORD_Y_LO,
-        k,
-        K_ALL_DIRECTION_METAL_BALL_FACTORY_Y[choice],
-    );
-    write_index(ram, OVERLORD_Y_HI, k, ram.read_u8(0xfb1).wrapping_add(1));
+    ram.set_controller_x_low(k, K_ALL_DIRECTION_METAL_BALL_FACTORY_X[choice]);
+    ram.set_controller_x_high(k, ram.read_u8(0xfb0));
+    ram.set_controller_y_low(k, K_ALL_DIRECTION_METAL_BALL_FACTORY_Y[choice]);
+    ram.set_controller_y_high(k, ram.read_u8(0xfb1).wrapping_add(1));
     spawn_cannon_ball(ram, hooks, k, 0);
 }
 
 pub fn vertical_cannon(ram: &mut Ram<'_>, hooks: &mut impl OverlordHooks, k: usize) {
     let x = get_x(ram, k).wrapping_sub(ram.read_u16(0xe2));
     if x & 0xff00 != 0 {
-        write_index(ram, OVERLORD_GEN2, k, 255);
+        ram.set_controller_timer(k, 255);
         return;
     }
-    let timer = read_index(ram, OVERLORD_GEN2, k);
+    let timer = ram.controller_timer(k);
     if ram.read_u8(0x1a) & 1 == 0 && timer != 0 {
-        write_index(ram, OVERLORD_GEN2, k, timer - 1);
+        ram.set_controller_timer(k, timer - 1);
     }
     ram.write_u8(0xfb5, 2);
     ram.write_u8(0xfb6, 0);
-    let counter = read_index(ram, OVERLORD_GEN1, k).wrapping_sub(1);
-    write_index(ram, OVERLORD_GEN1, k, counter);
+    let counter = ram.controller_scratch_a(k).wrapping_sub(1);
+    ram.set_controller_scratch_a(k, counter);
     if counter as i8 >= 0 {
         return;
     }
-    write_index(ram, OVERLORD_GEN1, k, 56);
-    let x_offset = if read_index(ram, OVERLORD_GEN2, k) == 0 {
-        write_index(ram, OVERLORD_GEN2, k, 160);
+    ram.set_controller_scratch_a(k, 56);
+    let x_offset = if ram.controller_timer(k) == 0 {
+        ram.set_controller_timer(k, 160);
         ram.write_u8(0xfb6, 160);
         8
     } else {
@@ -812,7 +785,7 @@ pub fn spawn_cannon_ball(
         j,
         K_OVERLORD_SPAWN_BALL_Y_VEL[direction] as u8,
     );
-    write_index(ram, SPRITE_FLOOR, j, read_index(ram, OVERLORD_FLOOR, k));
+    write_index(ram, SPRITE_FLOOR, j, ram.controller_floor(k));
     let special = ram.read_u8(0xfb6);
     if special != 0 {
         write_index(ram, SPRITE_AI_STATE, j, special);
@@ -845,8 +818,8 @@ pub fn check_if_active(ram: &mut Ram<'_>, k: usize) {
     if usize::from(x >> 15) == j && usize::from(y >> 15) == j {
         return;
     }
-    write_index(ram, OVERLORD_TYPE, k, 0);
-    let block = ram.read_u16(OVERLORD_OFFSET_SPRITE_POS + k * 2);
+    ram.set_controller_kind(k, 0);
+    let block = ram.controller_source_position(k);
     if block != 0xffff {
         let mask = 0x80 >> (block & 7);
         let address = OVERWORLD_SPRITE_WAS_LOADED + usize::from(block >> 3);
@@ -855,30 +828,30 @@ pub fn check_if_active(ram: &mut Ram<'_>, k: usize) {
 }
 
 pub fn armos_coordinator_rotate_knights(ram: &mut Ram<'_>, hooks: &impl OverlordHooks, k: usize) {
-    if read_index(ram, OVERLORD_GEN2, k) == 0 {
-        let state = read_index(ram, OVERLORD_GEN1, k).wrapping_add(1);
-        write_index(ram, OVERLORD_GEN1, k, state);
+    if ram.controller_timer(k) == 0 {
+        let state = ram.controller_scratch_a(k).wrapping_add(1);
+        ram.set_controller_scratch_a(k, state);
     }
     armos_coordinator_rotate(ram, hooks, k);
 }
 
 pub fn armos_coordinator_rotate(ram: &mut Ram<'_>, hooks: &impl OverlordHooks, k: usize) {
     let angle = ram
-        .read_u16(OVERLORD_X_LO)
-        .wrapping_add(read_index(ram, OVERLORD_FLOOR, k) as i8 as i16 as u16);
-    ram.write_u16(OVERLORD_X_LO, angle);
+        .boss_orbit_phase()
+        .wrapping_add(ram.controller_floor(k) as i8 as i16 as u16);
+    ram.set_boss_orbit_phase(angle);
     for (i, phase) in K_ARMOS_COORDINATOR_TAB0.iter().copied().enumerate() {
         let theta = angle.wrapping_add(phase);
-        let radius = read_index(ram, OVERLORD_X_LO, 2);
+        let radius = ram.boss_orbit_radius();
         let x = add_i8(get_x(ram, k), armos_sin(hooks, theta, radius));
-        write_index(ram, OVERLORD_X_HI, i, x as u8);
-        write_index(ram, OVERLORD_Y_HI, i, (x >> 8) as u8);
+        ram.set_boss_orbit_x_low(i, x as u8);
+        ram.set_boss_orbit_x_high(i, (x >> 8) as u8);
         let y = add_i8(
             get_y(ram, k),
             armos_sin(hooks, theta.wrapping_add(0x80), radius),
         );
-        write_index(ram, OVERLORD_GEN2, i, y as u8);
-        write_index(ram, OVERLORD_FLOOR, i, (y >> 8) as u8);
+        ram.set_boss_orbit_y_low(i, y as u8);
+        ram.set_boss_orbit_y_high(i, (y >> 8) as u8);
     }
     ram.write_u8(0xfb5, 6);
 }
@@ -933,6 +906,7 @@ mod tests {
         garnish: Option<usize>,
         garnish_pan_mutation: bool,
         garnish_pan_inputs: Vec<u8>,
+        spawn_live_controllers: bool,
         sfx2: Vec<(usize, u8)>,
         sfx3: Vec<(usize, u8)>,
         bombs: Vec<usize>,
@@ -969,7 +943,14 @@ mod tests {
             self.tile
         }
 
-        fn garnish_alloc(&mut self, _ram: &mut Ram<'_>) -> Option<usize> {
+        fn garnish_alloc(&mut self, ram: &mut Ram<'_>) -> Option<usize> {
+            if self.spawn_live_controllers {
+                ram.set_controller_kind(2, 1);
+                ram.set_controller_kind(7, 1);
+                // The traversal pause gate is evaluated before the loop, not
+                // again for each subsequently live controller slot.
+                ram.write_u8(0x11, 1);
+            }
             self.garnish.take()
         }
 
@@ -1027,12 +1008,12 @@ mod tests {
         let mut bytes = [0; WRAM_SIZE];
         let mut ram = Ram::new(&mut bytes);
         let mut hooks = Hooks::default();
-        write_index(&mut ram, OVERLORD_TYPE, 2, 1);
+        ram.set_controller_kind(2, 1);
         set_x(&mut ram, 2, 0x5000);
         set_y(&mut ram, 2, 0x5000);
-        ram.write_u16(OVERLORD_OFFSET_SPRITE_POS + 4, 0xffff);
+        ram.set_controller_source_position(2, 0xffff);
         execute_single(&mut ram, &mut hooks, 2);
-        assert_eq!(read_index(&ram, OVERLORD_TYPE, 2), 0);
+        assert_eq!(ram.controller_kind(2), 0);
         assert_eq!(ram.read_u8(0xfde), 2);
     }
 
@@ -1044,9 +1025,9 @@ mod tests {
         set_y(&mut ram, 0, 7);
         ram.write_u16(0x22, 0xfff8);
         ram.write_u16(0x20, 0xfffb);
-        write_index(&mut ram, OVERLORD_TYPE, 0, 23);
+        ram.set_controller_kind(0, 23);
         pot_trap(&mut ram, 0);
-        assert_eq!(read_index(&ram, OVERLORD_TYPE, 0), 0);
+        assert_eq!(ram.controller_kind(0), 0);
         assert_eq!(ram.read_u8(0xb9e), 1);
     }
 
@@ -1058,12 +1039,12 @@ mod tests {
             random: vec![3, 5],
             ..Hooks::default()
         };
-        write_index(&mut ram, OVERLORD_GEN2, 1, 31);
-        write_index(&mut ram, OVERLORD_X_LO, 1, 1);
+        ram.set_controller_timer(1, 31);
+        ram.set_controller_x_low(1, 1);
         moving_floor(&mut ram, &mut hooks, 1);
         assert_eq!(ram.read_u8(0x41a), 6);
-        assert_eq!(read_index(&ram, OVERLORD_GEN2, 1), 133);
-        assert_eq!(read_index(&ram, OVERLORD_GEN1, 1), 1);
+        assert_eq!(ram.controller_timer(1), 133);
+        assert_eq!(ram.controller_scratch_a(1), 1);
     }
 
     #[test]
@@ -1074,8 +1055,8 @@ mod tests {
             spawn_slots: vec![4],
             ..Hooks::default()
         };
-        write_index(&mut ram, OVERLORD_TYPE, 0, 26);
-        write_index(&mut ram, OVERLORD_GEN1, 0, 0x20);
+        ram.set_controller_kind(0, 26);
+        ram.set_controller_scratch_a(0, 0x20);
         set_x(&mut ram, 0, 0x2345);
         set_y(&mut ram, 0, 0x3456);
         bad_switch_snake(&mut ram, &mut hooks, 0);
@@ -1093,15 +1074,44 @@ mod tests {
             garnish: Some(2),
             ..Hooks::default()
         };
-        write_index(&mut ram, OVERLORD_TYPE, 0, 10);
+        ram.set_controller_kind(0, 10);
         set_x(&mut ram, 0, 0x0180);
         set_y(&mut ram, 0, 0x0220);
         falling_square(&mut ram, &mut hooks, 0);
         assert_eq!(get_x(&ram, 0), 0x0180);
         assert_eq!(get_y(&ram, 0), 0x0230);
-        assert_eq!(read_index(&ram, OVERLORD_GEN2, 0), 16);
+        assert_eq!(ram.controller_timer(0), 16);
         assert_eq!(ram.garnish_kind(2), 3);
         assert_eq!(ram.garnish_countdown(2), 31);
+    }
+
+    #[test]
+    fn controller_reverse_pass_keeps_live_spawns_and_one_time_pause_gate() {
+        let mut bytes = Box::new(std::array::from_fn(|i| (i * 17) as u8));
+        let mut ram = Ram::new(&mut bytes);
+        ram.clear_controller_kinds_reverse();
+        ram.write_u8(0x11, 0);
+        ram.write_u8(0xfc1, 0);
+        ram.write_u8(0x1b, 1);
+        ram.set_controller_kind(6, 10);
+        ram.set_controller_timer(6, 0);
+        ram.set_controller_scratch_a(6, 0);
+        set_x(&mut ram, 6, 0);
+        set_y(&mut ram, 6, 0);
+        let mut expected = Box::new(*ram.bytes_mut());
+        expected[0xb00 + 2] = 1;
+        expected[0xb00 + 7] = 1;
+        expected[0x11] = 1;
+        expected[0xb30 + 6] = 16;
+        expected[0xb28 + 6] = 1;
+        expected[0xb18 + 6] = 16;
+        expected[0xfde] = 2;
+        let mut hooks = Hooks {
+            spawn_live_controllers: true,
+            ..Hooks::default()
+        };
+        execute_all(&mut ram, &mut hooks);
+        assert_eq!(ram.bytes_mut(), &*expected);
     }
 
     #[test]
@@ -1114,8 +1124,8 @@ mod tests {
         expected[0x1f800 + 2] = 9;
         expected[0x1f878 + 2] = 0x12;
         expected[0x1f83c + 2] = 0x55;
-        expected[OVERLORD_Y_LO] = 0x44;
-        expected[OVERLORD_Y_HI] = 0x33;
+        expected[0xb18] = 0x44;
+        expected[0xb20] = 0x33;
         expected[0x12e] = 0x9f;
         expected[0x1f81e + 2] = 0x54;
         expected[0x1f85a + 2] = 0x33;

@@ -1431,11 +1431,11 @@ impl DungeonHooks for NativeGameServices<'_> {
                 || ram.read_u8(0xf60 + i) & 0x40 != 0
                 || x.wrapping_sub(ram.read_u16(0xe2)) >= 256
                 || y.wrapping_sub(ram.read_u16(0xe8)) >= 256
-        }) && (0..8).all(|i| !matches!(ram.read_u8(0xb00 + i), 0x14 | 0x18))
+        }) && ram.controllers().room_clear()
     }
     fn sprite_check_if_room_is_clear(&self, ram: &Ram<'_>) -> bool {
         (0..16).all(|i| ram.read_u8(0xdd0 + i) == 0 || ram.read_u8(0xf60 + i) & 0x40 != 0)
-            && (0..8).all(|i| !matches!(ram.read_u8(0xb00 + i), 0x14 | 0x18))
+            && ram.controllers().room_clear()
     }
     fn load_overworld_songs(&mut self, ram: &mut Ram<'_>) {
         crate::misc::load_overworld_songs(ram, self);

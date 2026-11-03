@@ -420,7 +420,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         self.ram.set_sprite_z(slot, info.r4_z);
     }
     pub fn sprite_check_if_overlords_clear(&self) -> bool {
-        (0..8).all(|i| !matches!(self.arr(OVERLORD_TYPE, i), 0x14 | 0x18))
+        self.ram.controllers().room_clear()
     }
     pub fn sprite_check_if_room_is_clear(&self) -> bool {
         (0..16).all(|i| self.ram.sprite(i).state() == 0 || self.ram.sprite(i).flags4() & 0x40 != 0)
@@ -858,10 +858,10 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 info.r0_x = self.sprite_get_x(parent);
                 info.r2_y = self.sprite_get_y(parent);
                 info.r4_z = self.ram.sprite(parent).z();
-                info.r5_overlord_x =
-                    u16::from(self.arr(0xb08, parent)) | u16::from(self.arr(0xb10, parent)) << 8;
-                info.r7_overlord_y =
-                    u16::from(self.arr(0xb18, parent)) | u16::from(self.arr(0xb20, parent)) << 8;
+                info.r5_overlord_x = u16::from(self.ram.controller_x_low(parent))
+                    | u16::from(self.ram.controller_x_high(parent)) << 8;
+                info.r7_overlord_y = u16::from(self.ram.controller_y_low(parent))
+                    | u16::from(self.ram.controller_y_high(parent)) << 8;
                 self.sprite_prep_load_properties(slot);
                 if self.r8(0x1b) == 0 {
                     self.ram.set_sprite_scratch_n_word(slot, 0xffff);
@@ -916,13 +916,21 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 self.w8(0x309, 0);
                 self.w8(0x308, 0);
                 self.ram.set_sprite_state(slot, 0);
-            } else if state != 0 && kind != 0x6c && self.ram.sprite(slot).room() != self.r8(0x40a) {
+            // C's state10 branch never falls through to room filtering, even
+            // for its preserved EC/D2 kinds. Explicit original-C parity fix.
+            } else if state != 10
+                && state != 0
+                && kind != 0x6c
+                && self.ram.sprite(slot).room() != self.r8(0x40a)
+            {
                 self.ram.set_sprite_state(slot, 0);
             }
         }
         for slot in (0..8).rev() {
-            if self.arr(OVERLORD_TYPE, slot) != 0 && self.arr(0xcca, slot) != self.r8(0x40a) {
-                self.set_arr(OVERLORD_TYPE, slot, 0);
+            if self.ram.controller_kind(slot) != 0
+                && self.ram.controller_spawned_area(slot) != self.r8(0x40a)
+            {
+                self.ram.set_controller_kind(slot, 0);
             }
         }
     }
@@ -979,9 +987,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         ] {
             self.w8(address, 0);
         }
-        for slot in (0..8).rev() {
-            self.set_arr(OVERLORD_TYPE, slot, 0);
-        }
+        self.ram.clear_controller_kinds_reverse();
         for slot in (0..30).rev() {
             self.ram.set_garnish_kind(slot, 0);
         }
@@ -1062,23 +1068,24 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         let y = source[0];
         let x = source[1];
         let kind = source[2];
-        self.set_arr(OVERLORD_TYPE, slot, kind);
-        self.set_arr(0xb40, slot, y >> 7);
+        self.ram.set_controller_kind(slot, kind);
+        self.ram.set_controller_floor(slot, y >> 7);
         let ypos = (u16::from(y) << 4 & 0x1ff).wrapping_add(u16::from(self.r8(0xfb1)) << 8);
-        self.set_arr(0xb18, slot, ypos as u8);
-        self.set_arr(0xb20, slot, (ypos >> 8) as u8);
+        self.ram.set_controller_y_low(slot, ypos as u8);
+        self.ram.set_controller_y_high(slot, (ypos >> 8) as u8);
         let xpos = (u16::from(x) << 4 & 0x1ff).wrapping_add(u16::from(self.r8(0xfb0)) << 8);
-        self.set_arr(0xb08, slot, xpos as u8);
-        self.set_arr(0xb10, slot, (xpos >> 8) as u8);
-        self.set_arr(0xcca, slot, self.r8(0x40a));
-        self.set_arr(0xb28, slot, 0);
-        self.set_arr(0xb30, slot, 0);
-        self.set_arr(0xb38, slot, 0);
+        self.ram.set_controller_x_low(slot, xpos as u8);
+        self.ram.set_controller_x_high(slot, (xpos >> 8) as u8);
+        self.ram.set_controller_spawned_area(slot, self.r8(0x40a));
+        self.ram.set_controller_scratch_a(slot, 0);
+        self.ram.set_controller_timer(slot, 0);
+        self.ram.set_controller_scratch_c(slot, 0);
         if matches!(kind, 10 | 11) {
-            self.set_arr(0xb30, slot, 160);
+            self.ram.set_controller_timer(slot, 160);
         } else if kind == 3 {
-            self.set_arr(0xb30, slot, 255);
-            self.set_arr(0xb08, slot, self.arr(0xb08, slot).wrapping_sub(8));
+            self.ram.set_controller_timer(slot, 255);
+            self.ram
+                .set_controller_x_low(slot, self.ram.controller_x_low(slot).wrapping_sub(8));
         }
     }
 
@@ -3696,30 +3703,27 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
                 return;
             };
             self.w8(loaded_address, self.r8(loaded_address) | mask);
-            self.w16(0xb48 + slot * 2, block);
+            self.ram.set_controller_source_position(slot, block);
             let kind = sprite_to_spawn.wrapping_sub(0xf3);
-            self.set_arr(OVERLORD_TYPE, slot, kind);
-            self.set_arr(
-                0xb08,
+            self.ram.set_controller_kind(slot, kind);
+            self.ram.set_controller_x_low(
                 slot,
                 ((block << 4) as u8).wrapping_add(if kind == 1 { 8 } else { 0 }),
             );
-            self.set_arr(0xb18, slot, block as u8 & 0xf0);
-            self.set_arr(
-                0xb10,
+            self.ram.set_controller_y_low(slot, block as u8 & 0xf0);
+            self.ram.set_controller_x_high(
                 slot,
                 ((block >> 8) as u8 & 3).wrapping_add((self.r16(0xfbc) >> 8) as u8),
             );
-            self.set_arr(
-                0xb20,
+            self.ram.set_controller_y_high(
                 slot,
                 ((block >> 10) as u8).wrapping_add((self.r16(0xfbe) >> 8) as u8),
             );
-            self.set_arr(0xb40, slot, 0);
-            self.set_arr(0xcca, slot, self.r8(0x40a));
-            self.set_arr(0xb28, slot, 0);
-            self.set_arr(0xb30, slot, 0);
-            self.set_arr(0xb38, slot, 0);
+            self.ram.set_controller_floor(slot, 0);
+            self.ram.set_controller_spawned_area(slot, self.r8(0x40a));
+            self.ram.set_controller_scratch_a(slot, 0);
+            self.ram.set_controller_timer(slot, 0);
+            self.ram.set_controller_scratch_c(slot, 0);
         } else {
             let Some(slot) = self.overworld_alloc_sprite(sprite_to_spawn) else {
                 return;
@@ -5124,7 +5128,7 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         garnish as i32
     }
     fn alloc_overlord(&self) -> Option<usize> {
-        (0..8).rev().find(|&i| self.arr(OVERLORD_TYPE, i) == 0)
+        self.ram.controllers().find_free()
     }
     fn overworld_alloc_sprite(&self, kind: u8) -> Option<usize> {
         let top = if kind == 0x58 {
@@ -5142,8 +5146,6 @@ impl<'a, 'h, H: SpriteHooks> Sprite<'a, 'h, H> {
         })
     }
 }
-
-const OVERLORD_TYPE: usize = 0xb00;
 
 pub const ABSORB_BIG_KEY: [u8; 2] = [0x40, 0x20];
 pub const ABSORPTION_SFX: [u8; 15] = [
@@ -5601,6 +5603,41 @@ mod tests {
             Sprite::new(&mut bytes, &mut hooks).garnish_execute_upper_slots();
             assert_eq!(hooks.flashes, 1);
             assert_eq!(bytes, expected);
+        }
+    }
+
+    #[test]
+    fn initializer_c_state_ten_branch_keeps_special_kinds_before_room_filter() {
+        // Original-C RED found state10/EC or D2 was incorrectly filtered by
+        // room. Cover exact prefix writes and other states around that fix.
+        for slot in [0, 7, 15] {
+            for kind in [0, 0x6c, 0xd2, 0xec, 255] {
+                for state in [0, 1, 9, 10] {
+                    for room_differs in [false, true] {
+                        let mut bytes = Box::new([0; WRAM_SIZE]);
+                        let mut ram = Ram::new(&mut bytes);
+                        ram.set_sprite_kind(slot, kind);
+                        ram.set_sprite_state(slot, state);
+                        ram.set_sprite_room(slot, if room_differs { 0x35 } else { 0x34 });
+                        ram.write_u8(0x40a, 0x34);
+                        ram.write_u8(0x308, 0xa5);
+                        ram.write_u8(0x309, 0x5a);
+                        let mut expected = Box::new(*ram.bytes_mut());
+                        if state == 10 {
+                            if !matches!(kind, 0xec | 0xd2) {
+                                expected[0x308] = 0;
+                                expected[0x309] = 0;
+                                expected[0xdd0 + slot] = 0;
+                            }
+                        } else if state != 0 && kind != 0x6c && room_differs {
+                            expected[0xdd0 + slot] = 0;
+                        }
+                        let mut hooks = Hooks;
+                        Sprite::new(ram.bytes_mut(), &mut hooks).sprite_initialize_slots();
+                        assert_eq!(ram.bytes_mut(), &*expected);
+                    }
+                }
+            }
         }
     }
 

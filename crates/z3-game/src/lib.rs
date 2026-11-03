@@ -22,6 +22,7 @@ mod native_services;
 pub mod nmi;
 pub mod oam;
 pub mod overlord;
+pub mod overlord_state;
 pub mod overworld;
 pub mod player;
 pub mod player_oam;
