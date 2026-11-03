@@ -98,19 +98,6 @@ const DIALOGUE_MESSAGE_INDEX: usize = 0x1cf0;
 const INTRO_DID_RUN_STEP: usize = 0x1f00;
 const NMI_FLAG_UPDATE_POLY: usize = 0x1f0c;
 const VRAM_UPLOAD_DATA: usize = 0x1002;
-const SPRITE_OBJ_PRIO: usize = 0xb89;
-const SPRITE_Y_LO: usize = 0xd00;
-const SPRITE_X_LO: usize = 0xd10;
-const SPRITE_Y_HI: usize = 0xd20;
-const SPRITE_X_HI: usize = 0xd30;
-const SPRITE_GRAPHICS: usize = 0xdc0;
-const SPRITE_D: usize = 0xde0;
-const SPRITE_TYPE: usize = 0xe20;
-const SPRITE_FLAGS2: usize = 0xe40;
-const SPRITE_FLAGS3: usize = 0xe60;
-const SPRITE_HEAD_DIR: usize = 0xeb0;
-const SPRITE_OAM_FLAGS: usize = 0xf50;
-const SPRITE_Z: usize = 0xf70;
 const CUR_SPRITE_X: usize = 0xfd8;
 const CUR_SPRITE_Y: usize = 0xfda;
 const MAIN_PALETTE: usize = 0xc500;
@@ -215,21 +202,21 @@ pub trait AttractRuntime {
     fn fade_music_and_reset_sram_mirror(&mut self, _ram: &mut Ram<'_>) {}
     fn sprite_prep_reset_properties(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
     fn sprite_set_x(&mut self, ram: &mut Ram<'_>, k: usize, x: u16) {
-        ram.write_u8(SPRITE_X_LO + k, x as u8);
-        ram.write_u8(SPRITE_X_HI + k, (x >> 8) as u8);
+        ram.set_sprite_x_low(k, x as u8);
+        ram.set_sprite_x_high(k, (x >> 8) as u8);
     }
     fn sprite_set_y(&mut self, ram: &mut Ram<'_>, k: usize, y: u16) {
-        ram.write_u8(SPRITE_Y_LO + k, y as u8);
-        ram.write_u8(SPRITE_Y_HI + k, (y >> 8) as u8);
+        ram.set_sprite_y_low(k, y as u8);
+        ram.set_sprite_y_high(k, (y >> 8) as u8);
     }
     fn sprite_get_16_bit_coords(&mut self, ram: &mut Ram<'_>, k: usize) {
         ram.write_u16(
             CUR_SPRITE_X,
-            u16::from(ram.read_u8(SPRITE_X_LO + k)) | u16::from(ram.read_u8(SPRITE_X_HI + k)) << 8,
+            u16::from(ram.sprite(k).x_low()) | u16::from(ram.sprite(k).x_high()) << 8,
         );
         ram.write_u16(
             CUR_SPRITE_Y,
-            u16::from(ram.read_u8(SPRITE_Y_LO + k)) | u16::from(ram.read_u8(SPRITE_Y_HI + k)) << 8,
+            u16::from(ram.sprite(k).y_low()) | u16::from(ram.sprite(k).y_high()) << 8,
         );
     }
     fn guard_handle_all_animation(&mut self, _ram: &mut Ram<'_>, _k: usize) {}
@@ -1154,18 +1141,18 @@ impl<R: AttractRuntime> Attract<'_, '_, '_, '_, R> {
     ) {
         self.runtime.sprite_set_x(self.ram, k, x);
         self.runtime.sprite_set_y(self.ram, k, y);
-        self.ram.write_u8(SPRITE_Z + k, 0);
+        self.ram.set_sprite_z(k, 0);
         self.runtime.sprite_get_16_bit_coords(self.ram, k);
-        self.ram.write_u8(SPRITE_D + k, dir);
-        self.ram.write_u8(SPRITE_HEAD_DIR + k, dir);
+        self.ram.set_sprite_scratch_d(k, dir);
+        self.ram.set_sprite_head_direction(k, dir);
         self.ram
-            .write_u8(SPRITE_GRAPHICS + k, [11, 4, 0, 7][usize::from(dir)] + gfx);
-        self.ram.write_u8(SPRITE_FLAGS3 + k, 16);
-        self.ram.write_u8(SPRITE_OBJ_PRIO + k, 0);
-        self.ram.write_u8(SPRITE_OAM_FLAGS + k, flags | 0x30);
+            .set_sprite_graphics(k, [11, 4, 0, 7][usize::from(dir)] + gfx);
+        self.ram.set_sprite_flags3(k, 16);
+        self.ram.set_sprite_object_priority(k, 0);
+        self.ram.set_sprite_oam_flags(k, flags | 0x30);
         self.ram
-            .write_u8(SPRITE_TYPE + k, if flags == 9 { 0x41 } else { 0x43 });
-        self.ram.write_u8(SPRITE_FLAGS2 + k, 7);
+            .set_sprite_kind(k, if flags == 9 { 0x41 } else { 0x43 });
+        self.ram.set_sprite_flags2(k, 7);
         let i = k * 8;
         self.ram.write_u16(OAM_CUR_PTR, (0x800 + i * 4) as u16);
         self.ram.write_u16(OAM_EXT_CUR_PTR, (0xa20 + i) as u16);
@@ -1430,5 +1417,106 @@ mod tests {
             assert_eq!(a.ram.read_u8(ATTRACT_VAR20), 0);
             assert_eq!(a.ram.read_u8(ATTRACT_VAR21), 2);
         });
+    }
+
+    /// The pre-migration implementation, written with the raw sprite-pool
+    /// addresses the module used to declare.
+    fn raw_simulate_soldier(
+        ram: &mut Ram<'_>,
+        k: usize,
+        x: u16,
+        y: u16,
+        dir: u8,
+        flags: u8,
+        gfx: u8,
+    ) {
+        const Y_LO: usize = 0xd00;
+        const X_LO: usize = 0xd10;
+        const Y_HI: usize = 0xd20;
+        const X_HI: usize = 0xd30;
+        ram.write_u8(X_LO + k, x as u8);
+        ram.write_u8(X_HI + k, (x >> 8) as u8);
+        ram.write_u8(Y_LO + k, y as u8);
+        ram.write_u8(Y_HI + k, (y >> 8) as u8);
+        ram.write_u8(0xf70 + k, 0);
+        ram.write_u16(
+            CUR_SPRITE_X,
+            u16::from(ram.read_u8(X_LO + k)) | u16::from(ram.read_u8(X_HI + k)) << 8,
+        );
+        ram.write_u16(
+            CUR_SPRITE_Y,
+            u16::from(ram.read_u8(Y_LO + k)) | u16::from(ram.read_u8(Y_HI + k)) << 8,
+        );
+        ram.write_u8(0xde0 + k, dir);
+        ram.write_u8(0xeb0 + k, dir);
+        ram.write_u8(0xdc0 + k, [11, 4, 0, 7][usize::from(dir)] + gfx);
+        ram.write_u8(0xe60 + k, 16);
+        ram.write_u8(0xb89 + k, 0);
+        ram.write_u8(0xf50 + k, flags | 0x30);
+        ram.write_u8(0xe20 + k, if flags == 9 { 0x41 } else { 0x43 });
+        ram.write_u8(0xe40 + k, 7);
+        let i = k * 8;
+        ram.write_u16(OAM_CUR_PTR, (0x800 + i * 4) as u16);
+        ram.write_u16(OAM_EXT_CUR_PTR, (0xa20 + i) as u16);
+    }
+    #[test]
+    fn simulated_soldier_sprite_views_match_pre_migration_raw_writes() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for k in [0usize, 1, 5, 15, 17, 40] {
+            for dir in 0..4u8 {
+                for flags in [0u8, 1, 8, 9, 10, 0x30, 0x81, 255] {
+                    for (x, y, gfx) in [(0u16, 0u16, 0u8), (0x1234, 0xfedc, 3), (0xffff, 1, 244)] {
+                        let mut image = Box::new([0u8; WRAM_SIZE]);
+                        for b in image[..0x2000].iter_mut() {
+                            *b = next() as u8;
+                        }
+                        let mut expected = image.clone();
+                        raw_simulate_soldier(
+                            &mut Ram::new(&mut expected),
+                            k,
+                            x,
+                            y,
+                            dir,
+                            flags,
+                            gfx,
+                        );
+                        let mut actual = image;
+                        let mut ram = Ram::new(&mut actual);
+                        let mut rt = Rt;
+                        let mut sram = [0; 0x2000];
+                        let (mut dma, mut ppu) = (Dma::new(), Ppu::new());
+                        let assets = MessagingAssets {
+                            dialogue_flags: 0,
+                            dictionary: &[],
+                            messages: &[],
+                            font_tiles: &[],
+                            font_widths: &[],
+                            light_overworld_tilemap: &[],
+                            dungeon_map_floor_layout: &[],
+                            dungeon_map_info: &[],
+                        };
+                        Attract {
+                            ram: &mut ram,
+                            sram: &mut sram,
+                            dma: &mut dma,
+                            ppu: &mut ppu,
+                            messaging_assets: &assets,
+                            runtime: &mut rt,
+                        }
+                        .sprite_simulate_soldier(k, x, y, dir, flags, gfx);
+                        assert!(
+                            actual[..] == expected[..],
+                            "k {k} dir {dir} flags {flags} x {x:#x} y {y:#x} gfx {gfx}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
