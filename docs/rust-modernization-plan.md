@@ -40,7 +40,7 @@ See [batch 1](modernization-verification.md), [batch 2](modernization-batch-2.md
 [batch 3](modernization-batch-3.md), [batch 4](modernization-batch-4.md)
 [batch 5](modernization-batch-5.md), [batch 6](modernization-batch-6.md)
 [batch 7](modernization-batch-7.md), [batch 8](modernization-batch-8.md)
-[batch 9](modernization-batch-9.md) and [batch 10](modernization-batch-10.md)
+[batch 9](modernization-batch-9.md), [batch 10](modernization-batch-10.md), [batch 11](modernization-batch-11.md) and [batch 12](modernization-batch-12.md)
 for exact commands, completed gates and recording-sweep status. Counts describe
 source accesses, including migrated existing tests, not distinct state fields.
 
